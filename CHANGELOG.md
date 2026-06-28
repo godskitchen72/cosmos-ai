@@ -1,18 +1,4 @@
 # Changelog
-
-<!--
-VERIFY BEFORE COMMITTING THIS FILE: this document's existence in the
-actual repository was never confirmed before this draft was produced.
-Run `cat CHANGELOG.md` or `git show HEAD:CHANGELOG.md` first:
-  - If the file does not exist or is empty: this content is safe to use
-    as-is.
-  - If the file already exists with real prior entries: delete this
-    comment block and APPEND the entry below to the end of the real
-    file instead of overwriting it. Per AI_STYLE_GUIDE.md §3 / this
-    protocol's own rule, CHANGELOG.md entries are append-only and never
-    modified or deleted retroactively.
--->
-
 ## 2026-06-27 — Biller Dashboard: typography fixes, charting, Denial Docs delete
 
 - Fixed production 500 crash on `/billing` (stale `claim_status` values; defensive `StatusCell` fallback + data migration)
@@ -26,3 +12,11 @@ Run `cat CHANGELOG.md` or `git show HEAD:CHANGELOG.md` first:
 - Added Status + Denial Status donut charts (Recharts, built without shadcn's `chart.tsx` wrapper due to an open upstream Recharts v3 compatibility issue — `shadcn-ui/ui#9892`)
 - Replaced the above two donuts with a single "Paid vs Outstanding by Carrier" stacked bar chart (Paid = sum of `received_amount`, Outstanding = `billed - received_amount` floored at $0); kept the existing plain "By Carrier" list as a separate, second card
 - **Documentation correction**: prior `HANDOVER.md`/`ARCHITECTURE.md`/`PRODUCT_SPEC.md` describing the Biller dashboard's "Received" column as an unbacked placeholder were stale — live code confirms a real, working `received_amount` column already existed; corrected in this session's documentation pass
+
+## 2026-06-27 (evening) — Orthopedic Surgeon & Pain Management referrals; Save/View pattern; PDF filename cleanup
+
+- New referral types **Orthopedic Surgeon** and **Pain Management**, full stack: `forms/ortho.py`/`forms/pain_mgmt.py` (field names verified 1:1 against the real PDFs via `pypdf.get_fields()`), `main.py`/`pdf_engine.py` wiring, MD chart buttons, FD profile cards (filled the 2 prior "Reserved" placeholder slots — none remain)
+- Verified end-to-end against real production data: direct API test (`curl`) plus human visual review of both generated PDFs for a real patient with nearly every checkbox exercised
+- **Save→View button pattern** adopted as the standing pattern for all MD-discretionary referral types except ICD-10 (explicit product decision) — replaces Generate→View; saving no longer auto-opens the PDF, and revisiting an already-saved referral now shows "View" immediately (checked server-side on page load) instead of resetting to "Save", to prevent an accidental overwrite. A confirm-gated "Regenerate" link is the deliberate escape hatch. Applied to DME, Ortho, Pain Mgmt, ANS, MRI, PT, Rx, VNG — **deploy status unconfirmed, see `HANDOVER.md`**
+- Renamed 7 referral PDF templates to short filenames (`ANS.pdf`, `DME.pdf`, `ICD10.pdf`, `MRI.pdf`, `PT.pdf`, `RX.pdf`, `VNG.pdf`) plus `PCE.pdf`, with matching `forms/*.py` updates
+- Resolved two real merge collisions mid-session, both from a separate GitHub-web upload landing on `origin/main` independently of this Termux session — one a true duplicate (byte-identical), one a git case-sensitivity false-collision (`ans.pdf` vs `ANS.pdf`); both confirmed via `md5sum` before merging, zero data loss

@@ -33,13 +33,13 @@ parallel, never explicitly confirmed by the product owner).
 Supabase project URL: `https://ttudxnzmybcwrtqlbtta.supabase.co` — never
 change without explicit instruction (`SYSTEM_PROMPT.md` §3).
 
-**Styling note**: Tailwind CSS is present in `package.json` but, until
-the Biller dashboard, was never actually used — every other screen is
-hand-rolled inline `style={{...}}` objects (confirmed by an audit:
-`className=` appears nowhere outside the untouched `create-next-app`
-boilerplate in `layout.tsx`). The Biller dashboard (§8) is the first
-real exception, deliberately scoped — see §8 for what that introduced
-and how it has grown since.
+**Styling note**: Tailwind CSS is present in `package.json` but was
+unused until the Biller dashboard. Two deliberate, scoped exceptions
+now exist — both approved explicitly after the tradeoff was presented:
+1. **Biller dashboard** (`/billing`, §8) — the first exception.
+2. **Admin page** (`/admin`, `app/admin/page.tsx`) — full shadcn/ui
+   rebuild; same CSS-variable bridge and Oxanium font as the Biller
+   dashboard. Every other screen remains hand-rolled inline `style={{...}}`.
 
 ---
 
@@ -101,7 +101,8 @@ per visit, and now also Denial Docs uploads/deletes — see §8), `cpt_codes`
 (fee schedule — the *only* source of fee data; there is no separate "fee
 schedule" concept anywhere in the codebase), `doctors` (PC/tax fields per
 §5 of `PRODUCT_SPEC.md`, `w9_url`, signature; `doctor_id` is its primary
-key).
+key; also `license_type` text DEFAULT 'MD' and `supervising_provider_id`
+uuid FK self-referencing — migration `009_add_doctor_license_type_and_supervising.sql`).
 
 **Doctor-to-visit linkage gap:** `patient_visits` does not reliably
 record which doctor performed the visit. A `doctor_name` free-text
@@ -124,8 +125,9 @@ Open Items).
 
 Live base URL: `https://cosmos-api-789w.onrender.com`
 
-**Referral-type documents** (MRI, Rx, DME, ANS, VNG, PT, ICD-10) share one
-generic dispatch path in `main.py`:
+**Referral-type documents** (MRI, Rx, DME, ANS, VNG, PT, ICD-10, Ortho,
+Pain Mgmt — 9 types as of this session) share one generic dispatch path
+in `main.py`:
 
 ```
 POST /generate-{type}
@@ -147,6 +149,14 @@ Adding a new referral type requires touching all of: the new
 <type>` route in `main.py`, an import + `__all__` entry in
 `pdf_engine.py`, and the actual PDF template placed at the `cosmos-api`
 repo root.
+
+**Pain Mgmt is the one exception to type-key/route/module-name
+consistency**: the route is `/generate-pain-mgmt` (hyphenated, explicit
+product decision) but the module is `forms/pain_mgmt.py` (underscore —
+Python module names can't contain hyphens). The `REFERRAL_FORM_CONFIG`
+key is `"pain-mgmt"` (matches the route, since a dict key is just a
+string, not an identifier). Every other type keeps the route/module/key
+identical.
 
 **Non-referral documents** (NF-2, NF-3, AOB, W-9, PCE) are routed
 individually in `main.py`, most importing directly from their
@@ -179,11 +189,16 @@ specifically imports `forms.w9` directly).
   Don't regenerate or re-author this one template via a different tool.
 - All PDFs stay unflattened (editable AcroForm) — no exceptions recorded.
 
-Referral PDF templates currently known to exist (filename versioning is
-informal — confirm the live filename via the repo before assuming):
-PCE v3, Rx v3, ANS v5, DME v2, MRI v8, ICD-10 v6, VNG v5 (replaced v2),
-PT (new), AOB, NF2 (ReportLab), NF3 (+ a standalone Page-2 overflow
-variant for visits with more than 3 CPT codes), W9.
+Referral PDF templates currently known to exist (filenames as of this
+session — confirm the live filename via the repo before assuming, since
+this has changed twice in one session already):
+`ANS.pdf`, `DME.pdf`, `ICD10.pdf`, `MRI.pdf`, `PT.pdf`, `RX.pdf`,
+`VNG.pdf`, `PCE.pdf` (all renamed this session from long original
+names — uppercase short form), plus `ortho.pdf`, `pain_mgmt.pdf` (new
+this session — **lowercase**, an unresolved naming-convention split
+flagged in `HANDOVER.md` Open Items). Also: `AOB.pdf`, `NF2.pdf`
+(ReportLab), `NF3.pdf` (+ a standalone Page-2 overflow variant for
+visits with more than 3 CPT codes), `W9_fillable.pdf`.
 
 ---
 
@@ -199,6 +214,9 @@ cosmos-api/
     base.py                 shared PDF helpers (no DB logic)
     nf2.py  nf3.py  aob.py  pce.py
     mri.py  rx.py  dme.py  ans.py  vng.py  pt.py  icd10.py
+    ortho.py  pain_mgmt.py   new this session; pain_mgmt.py's route is
+                              hyphenated (/generate-pain-mgmt) despite the
+                              underscore filename -- see SS4
     w9.py
   <PDF template files>.pdf  one per document type, repo root
   requirements.txt
@@ -283,18 +301,45 @@ cosmos-dashboard/
                               (routes to each referral type's own screen);
                               `handleSave()` does not write any doctor
                               field to the `patient_visits` insert
-        mri/  rx/  ans/  icd10/   referral screens
+        mri/
+          page.tsx              thin server wrapper -> MriReferral
+          MriReferral.tsx
+        rx/
+          page.tsx
+          RxReferral.tsx
+        ans/
+          page.tsx
+          AnsReferral.tsx
+        icd10/                  referral screen; component name not
+                              confirmed this session (excluded from the
+                              Save->View change, PRODUCT_SPEC.md SS3)
         dme/
-          page.tsx              thin server wrapper -> DmeReferral
+          page.tsx              thin server wrapper -> DmeReferral; as of
+                              this session also queries patient_forms for
+                              an existing saved referral on this visit_id
+                              before render, passing existingFilename down
           DmeReferral.tsx        canonical referral-screen pattern: Chip-based
-                              multi-select, single generate->view-PDF button
-                              with three visual states, sticky header/footer
+                              multi-select, single button. As of this
+                              session: Save/View pattern (button starts
+                              "Save", morphs to "View" on success without
+                              auto-opening the PDF; a separate "Regenerate"
+                              text link appears once saved) replacing the
+                              prior Generate->View pattern -- see SS7 and
+                              HANDOVER.md (deploy status unconfirmed)
         vng/
           page.tsx
           VngReferral.tsx        rebuilt for the v5 template
         pt/
           page.tsx
           PtReferral.tsx         modeled directly on DmeReferral.tsx
+        ortho/
+          page.tsx               new this session
+          OrthoReferral.tsx       new this session
+        pain-mgmt/                folder name hyphenated, matching the
+                              route (SS4); component file itself is
+                              PainMgmtReferral.tsx
+          page.tsx
+          PainMgmtReferral.tsx    new this session
     patients/
       [patientId]/
         page.tsx                server wrapper, same fetch pattern as every
@@ -302,7 +347,11 @@ cosmos-dashboard/
         PatientProfile.tsx       FD-facing patient profile: NF-2 mailing UI,
                               submit-to-billing, fee estimates, the
                               "Referrals & Orders" status grid (3-column,
-                              shows View/"Not yet ordered" per type)
+                              shows View/"Not yet ordered" per type --
+                              the 2 prior "Reserved" placeholder slots were
+                              replaced this session with real Ortho/Pain
+                              Mgmt cards; no reserved slots remain,
+                              PRODUCT_SPEC.md SS3)
   components.json              shadcn/ui config (§8) — `ui` alias points
                               at `app/components/ui`, matching this
                               project's existing convention, not shadcn's
@@ -323,9 +372,32 @@ cosmos-dashboard/
    legacy contract to preserve.
 2. `POST https://cosmos-api-789w.onrender.com/generate-<type>` with
    `{ patient_id, visit_id, referral_data }`.
-3. On success, the button transitions from "Generate" to "View" and the
-   returned signed URL opens immediately in a new tab; a second tap just
-   re-opens the same URL rather than regenerating.
+3. **As of this session, Save→View is the standing pattern** (replacing
+   the prior Generate→View pattern) **for every type except ICD-10**,
+   which auto-fires on visit save and was deliberately excluded
+   (`PRODUCT_SPEC.md` §3). On success, the button morphs from "Save" to
+   "View" **without** auto-opening the PDF — the MD taps the resulting
+   "View" state on their own terms. Tapping "View" fetches a fresh
+   signed URL client-side
+   (`supabase.storage.from('patient-forms').createSignedUrl(filename,
+   1800)`, the same pattern `PatientProfile.tsx`'s `handleView` already
+   used) rather than reusing the URL returned at generation time, since
+   those expire. A separate "Regenerate [Type] Referral" text link
+   appears once saved (mirroring the FD profile's existing NF-3/PCE
+   Regenerate-link pattern), gated behind a `confirm()` dialog, since
+   otherwise there is no way to redo a referral from this screen at all
+   once point 3a below makes "View" the default state on every revisit.
+   **Deploy status of this change is unconfirmed — see `HANDOVER.md`,
+   "Unconfirmed Delivery."**
+3a. **Check-on-load**: each referral type's `page.tsx` server wrapper
+   now also queries `patient_forms` for an existing row matching this
+   `visit_id` + the type's tag, before rendering, and passes the
+   resulting filename (or `null`) down as an `existingFilename` prop.
+   This means revisiting an already-saved referral shows "View"
+   immediately, rather than resetting to "Save" and risking an
+   accidental overwrite of a real saved referral with a blank one —
+   recommended explicitly over "always reset to Save" given the
+   backend's delete-then-insert behavior on every save (point 2 above).
 4. The FD-facing `PatientProfile.tsx` grid independently queries
    `patient_forms` (filtered by `form_type` + `visit_id`) to show
    View/"Not yet ordered" per type — it does not call the generation
