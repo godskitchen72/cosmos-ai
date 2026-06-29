@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (June 29, 2026, session 5)
+# Cosmos Medical Technologies — HANDOVER (June 29, 2026, session 6)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -20,102 +20,114 @@ full deploy chain. Live app confirmed healthy at session close.
 
 ## Completed This Session
 
-### Scheduling Phase 4 — live
+### Admin Users Tab — live
 
-MD login location pre-filters calendar on open.
+Full user management from within Admin dashboard. No more Supabase
+dashboard or manual SQL required for day-to-day user administration.
 
-- Phase 4 `useEffect` added to `app/calendar/page.tsx`: after
-  `doctorLocations` loads, if `lockedDoctorId` + `bookForm.location_id`
-  are both set, calls `jumpToDoctorAvailability` to jump to first available
-  day for that doctor+location combo. Dependency array:
-  `[doctorLocations, lockedDoctorId, bookForm.location_id]`.
-- `app/page.tsx` (login): `navigate()` now accepts `locName` param and
-  stores `cosmos_location_name` in `sessionStorage` alongside
-  `cosmos_location_id`. Both the auto-skip path (0/1 location) and the
-  manual Continue path pass the location name.
-- `app/md/MDClient.tsx`: reads `cosmos_location_name` from sessionStorage
-  on mount; displays `📍 {locationName}` in green under "MD Dashboard"
-  heading.
-- `app/calendar/page.tsx`: reads `cosmos_location_name` from sessionStorage;
-  displays `📍 {locationName}` in green under "Showing your schedule only".
+- **API route:** `app/api/admin/users/route.ts` — GET/POST/PATCH/DELETE
+  using Supabase Admin client (`SUPABASE_SERVICE_KEY`).
+- **`user_profiles.active`** column added (boolean, NOT NULL DEFAULT true)
+  via `ALTER TABLE` migration. Controls Deactivate/Reactivate toggle.
+- **`user_profiles` CHECK constraint** updated to include `superadmin`:
+  `CHECK (role IN ('frontdesk','md','billing','admin','superadmin'))`.
+- **PIN padding:** `padPin()` helper in `lib/supabase.ts` pads PINs to 6
+  chars (Supabase Auth minimum). Applied on `signIn()`, POST (create),
+  and PATCH (reset PIN). Existing test users reset via direct SQL:
+  `UPDATE auth.users SET encrypted_password = crypt('999999', gen_salt('bf')) WHERE email IN (...)`.
+- **Auth token forwarded:** all `UsersSection` fetch calls include
+  `Authorization: Bearer <token>` header via `getToken()` helper.
 
-### Union-of-locations availability — live
+### Superadmin Role — live
 
-Calendar availability now reflects all assigned locations for a doctor,
-not just the selected one.
+New `superadmin` role gives practice owner access to all four dashboards
+from a single login.
 
-- `getDoctorLocs(doctorId)` — returns all `doctor_locations` rows for a doctor.
-- `getAvailDaysForDoctor(doctorId)` — union of all assigned location
-  `days_of_week`. Falls back to `doctors.available_days` only when zero
-  location assignments exist.
-- `getAvailDays(doctorId, locationId)` — when a specific location is
-  selected (booking form context), returns that location's days. When no
-  location selected (grid/chips), returns union.
-- `getCapacity(doctorId, locationId)` — specific location capacity when
-  selected; max across all assigned locations otherwise.
-- `isDayAvailable`: guards against `doctorLocations.length === 0` (data
-  not yet loaded) before applying availability filter.
-- Result: Tue/Thu greyed out for Dr. Gottesman (Main Office Mon/Wed +
-  Queens Fri = union Mon/Wed/Fri; Tue/Thu have no location assignment).
+- **Login screen** (`app/page.tsx`) fully rewritten in shadcn/ui +
+  Oxanium font (replaces all inline styles). Three stages:
+  `login` → `location` (MD multi-location picker) → `dashboard`
+  (superadmin picker).
+- **Superadmin dashboard picker:** 2×2 grid of dashboard tiles
+  (Front Desk, MD, Billing, Admin). Gold crown badge. Sign out link.
+- **`ROLE_META`** updated to include `superadmin` entry.
+- **Role guard on API route:** non-superadmin callers cannot:
+  - Create a superadmin account
+  - Edit any user to assign the superadmin role
+  - Modify or delete an existing superadmin account
+  Enforced server-side via `getCallerRole()` which reads the Bearer token.
 
-### Admin — blocked days in location assignment form — live
+### Superadmin Provisioning Procedure
 
-- **Location Assignment day chips**: days assigned to OTHER locations for
-  the same doctor are rendered in amber with 🔒 and `cursor-not-allowed`.
-  Tooltip shows which location owns the day.
-- **Default Schedule day chips**: days assigned to ANY location are
-  rendered in amber with 🔒. Message: "🔒 Days assigned to a location
-  override the default schedule."
-- Location dropdown bug fixed: was filtering out already-assigned locations
-  from `SelectItems`, causing selected value to disappear (shadcn Select
-  can't display a value with no matching SelectItem). Fix: show all
-  locations in dropdown; day blocking prevents double-booking.
+The first superadmin per client must be bootstrapped via Supabase SQL
+(developer access required). Subsequent superadmins can be created
+in-app by an existing superadmin.
+
+**Bootstrap procedure:**
+1. Create the user via Admin → Users tab with any role.
+2. Promote via Supabase SQL editor:
+   ```sql
+   UPDATE user_profiles SET role = 'superadmin'
+   WHERE id = (SELECT id FROM auth.users WHERE email = 'owner@practice.com');
+   ```
+3. Hand off credentials. The owner can create additional superadmins
+   from within the app going forward.
+
+### Active Users KPI Card — live
+
+Overview tab KPI card now shows real count of active users from
+`user_profiles WHERE active = true`. Previously showed `—`.
+
+- State: `activeUserCount` added to `OverviewSection`.
+- Fetched in the existing `Promise.all` alongside other KPI counts.
+
+### UI Fixes — live
+
+- **Quick Access Users button** — `'users'` added to the `admin-tab`
+  event handler allowlist (was missing, button did nothing).
+- **Practice Info card** — font sizes reduced (practice name 18px, all
+  other fields 13px), padding tightened (`py-2.5`, `gap-1`).
 
 ---
 
 ## Open Items, Priority Order
 
-1. **Admin Users tab** — create/manage Cosmos users (email, role, linked
-   doctor) from within the Admin dashboard. Currently requires Supabase
-   dashboard + manual SQL insert. This is the next session's primary task.
+1. **Appointment → Visit conversion** — "Checked In" status should enable
+   pre-populated visit creation. Currently manual.
 
 2. **NF-3 PC-payee mapping** — verify in a real generated PDF. Never
    confirmed across any session.
 
-3. **Appointment → Visit conversion** — "Checked In" status should enable
-   pre-populated visit creation. Currently manual.
-
-4. **NF-3 Pay-To: supervisor PC logic** — `forms/nf3.py` should fall
+3. **NF-3 Pay-To: supervisor PC logic** — `forms/nf3.py` should fall
    through to supervisor's PC when `supervising_provider_id` is set.
    Deliberately deferred multiple sessions.
 
-5. **Practice Info → NF-3 wiring** — `practice_settings` table exists and
+4. **Practice Info → NF-3 wiring** — `practice_settings` table exists and
    is NF-3-ready. Backend `forms/nf3.py` doesn't read it yet.
 
-6. **`forms/base.py` `except Exception: pass`** — prohibited
+5. **`forms/base.py` `except Exception: pass`** — prohibited
    (`SYSTEM_PROMPT.md` §1/§8). Flagged 5+ sessions, never fixed.
 
-7. **`w9_filler.py` in `cosmos-api` root** — legacy duplicate of
+6. **`w9_filler.py` in `cosmos-api` root** — legacy duplicate of
    `forms/w9.py`. Flagged 4 sessions, never removed.
 
-8. **RLS hardening** — `patient_forms` RLS disabled entirely;
+7. **RLS hardening** — `patient_forms` RLS disabled entirely;
    `storage.objects` has one fully-open policy on `patient-forms` bucket.
 
-9. **`patient_visits` doctor linkage gap** — `doctor_id` not reliably
+8. **`patient_visits` doctor linkage gap** — `doctor_id` not reliably
    written at save time.
 
-10. **PDF filename casing** — `ortho.pdf`/`pain_mgmt.pdf` lowercase vs.
-    uppercase convention for the other 7.
+9. **PDF filename casing** — `ortho.pdf`/`pain_mgmt.pdf` lowercase vs.
+   uppercase convention for the other 7.
 
-11. **MRI Extremity Studies + insurance fields** — backend ready, pure
+10. **MRI Extremity Studies + insurance fields** — backend ready, pure
     frontend work, never started.
 
-12. **`cpt_codes.provider_type` backend wiring** — column exists, unused
+11. **`cpt_codes.provider_type` backend wiring** — column exists, unused
     on both frontend and backend.
 
-13. **Regenerate W-9s for existing doctors** — no bulk path. Low urgency.
+12. **Regenerate W-9s for existing doctors** — no bulk path. Low urgency.
 
-14. **Desktop sidebar nav** — mockup confirmed target. Mobile-first
+13. **Desktop sidebar nav** — mockup confirmed target. Mobile-first
     remains immediate priority.
 
 ---
@@ -138,12 +150,13 @@ use `createServerComponentClient` until confirmed exportable via:
 
 | File | Confidence |
 |---|---|
-| `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (this session — Phase 4, union availability, location badge) |
-| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (this session — cosmos_location_name stored in sessionStorage) |
-| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (this session — location badge added) |
-| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (this session — blocked day chips, dropdown fix) |
+| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (this session — full shadcn rewrite, superadmin picker) |
+| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (this session — Users tab, active KPI, quick access fix, practice info spacing) |
+| `cosmos-dashboard/app/api/admin/users/route.ts` | ★ Verified-final (this session — new file, full CRUD + superadmin guard) |
+| `cosmos-dashboard/lib/supabase.ts` | ★ Verified-final (this session — padPin helper added) |
+| `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (prior session — Phase 4, union availability, location badge) |
+| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (prior session — location badge added) |
 | `cosmos-dashboard/middleware.ts` | ★ Verified-final (prior session — cookie-based route guard) |
-| `cosmos-dashboard/lib/supabase.ts` | ★ Verified-final (prior session — auth helpers) |
 | `cosmos-dashboard/app/md/page.tsx` | ★ Verified-final (prior session — simplified, no server auth read) |
 | `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (prior session — signOut added) |
 | `cosmos-dashboard/app/billing/BillerDashboard.tsx` | ★ Verified-final (prior session — signOut added) |
@@ -160,18 +173,22 @@ use `createServerComponentClient` until confirmed exportable via:
 
 ## Lessons Learned This Session
 
-- **shadcn Select + filtered SelectItems** — if `SelectContent` filters
-  out the currently-selected item, the trigger displays blank. Always
-  include all valid options in `SelectItems`; use disabled state or
-  separate UI to prevent invalid selections rather than filtering the list.
-- **sessionStorage for cross-screen state** — storing `cosmos_location_name`
-  alongside `cosmos_location_id` at login time avoids extra DB calls on
-  every screen. Pattern: store display name + ID together at the source
-  (login), read on any downstream screen.
-- **Union availability pattern** — when a doctor has multiple location
-  assignments, the calendar grid should reflect the union of all assigned
-  days, not just the selected booking location. Use `getAvailDaysForDoctor`
-  for grid/chips context; use `getActiveDoctorLoc` for booking form context.
-- **`isDayAvailable` must guard on data load** — checking
-  `doctorLocations.length === 0` before applying availability prevents
-  all days appearing available during the initial render before data loads.
+- **Supabase Auth min password length** — default is 6 chars. PINs shorter
+  than 6 are silently rejected by `updateUserById`. Fix: `padPin()` pads
+  to 6 with trailing zeros. Applied at both `signIn()` and all admin PIN
+  operations. Existing users must have PINs reset after this change.
+- **`user_profiles` CHECK constraint** — adding a new role value requires
+  `DROP CONSTRAINT` + `ADD CONSTRAINT`. Supabase doesn't support
+  `ALTER CONSTRAINT`. Omitting this causes silent `user_profiles_role_check`
+  violations on insert.
+- **Service-role API guard pattern** — to enforce caller-role restrictions
+  in a Next.js Route Handler using the service-role client, read the
+  `Authorization: Bearer` header, call `supabase.auth.getUser(token)` with
+  it, then look up `user_profiles.role`. Frontend must forward the session
+  token via `supabase.auth.getSession()` on every mutating call.
+- **Superadmin bootstrap** — first superadmin per deployment must be set
+  via direct SQL. Subsequent superadmins can be created in-app by an
+  existing superadmin. Document this in client onboarding checklist.
+- **`/tmp` not writable in Termux** — use `~/` (home directory) for
+  temporary Python patch scripts. Path for Termux home is
+  `/data/data/com.termux/files/home/`.
