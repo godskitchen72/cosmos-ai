@@ -1,5 +1,61 @@
 # Changelog
 
+## 2026-06-29 — Scheduling Phase 3A, timezone fix, appointments RLS
+
+### Scheduling Phase 3A — location-driven schedule (live)
+
+Full implementation of Doctor → Location → Available Days → Time Slots flow.
+No migration required — `doctor_locations` already had `days_of_week`,
+`start_time`, `end_time`, `slot_minutes`, `capacity` from migration 011.
+
+**`app/calendar/page.tsx` — full rebuild:**
+
+- `DoctorLocation` interface; `doctor_locations` fetched in `load()`
+- `getActiveDoctorLoc()`, `getAvailDays()`, `getCapacity()`,
+  `getLocationsForDoctor()` helpers — all with `doctors` table fallback
+- Location picker moved above Time Slot (Doctor → Location → Patient →
+  Time Slot order)
+- Each location card shows schedule inline: days · hours · capacity
+- Location selection forces calendar jump to next valid day (`force=true`)
+- `jumpToDoctorAvailability` gained optional `force` param
+- Quick-pick chips and grid capacity synced via `filterDocId`
+- Slot generation reads `start_time`, `slot_minutes`, `capacity` from
+  active `doctor_locations` row
+- Locked doctor (`?doctor_id=` param) writes into `bookForm.doctor_id`
+  on mount
+- Grid cell onClick: form stays open when changing date, only closes on
+  deselect (tapping same date again)
+- `handleBook`: insert before state reset; `await load()` replaces
+  `window.location.reload()`
+- `load()` fetches ±2 week window to survive weekOffset drift
+
+### Timezone fix — `localDateStr()` helper
+
+All `toISOString()` date-building calls replaced with `localDateStr(d)`
+which reads local year/month/day. Fixes UTC/EDT offset causing dates to
+display one day off (e.g. Sunday showing as Monday).
+
+Affected functions: `getWeekDates`, `findNextAvailableDate`,
+`findNextNAvailableDates`, patient-param `useEffect`.
+
+### RLS — authenticated policies added to `appointments`
+
+`appointments` table had RLS enabled with `anon`-only policies; logged-in
+users (role = `authenticated`) got zero rows silently. Fixed:
+
+```sql
+CREATE POLICY "authenticated read appointments" ON appointments
+  FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated insert appointments" ON appointments
+  FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "authenticated update appointments" ON appointments
+  FOR UPDATE TO authenticated USING (true);
+CREATE POLICY "authenticated delete appointments" ON appointments
+  FOR DELETE TO authenticated USING (true);
+```
+
+---
+
 ## 2026-06-28 — Auth foundation, Phase 3 location picker, RLS authenticated fix
 
 ### Authentication — full implementation (replaces stop-gap role selector)
@@ -41,9 +97,6 @@ prior `anon`-only policies caused silent empty reads. All policies on
 - Location picker (button-chip cards) added to booking form below Notes
 - `sessionStorage` pre-select for MD login-time location
 - "No location / unassigned" fallback option
-- Phase 3 Option A (location-driven schedule) approved for next session:
-  `doctor_locations` needs `available_days` + `max_patients_per_day` columns;
-  calendar flow becomes Location → Schedule → Availability → Slots
 
 ### `@supabase/auth-helpers-nextjs` installed (2 packages)
 

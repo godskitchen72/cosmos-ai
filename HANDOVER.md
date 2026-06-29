@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (June 28, 2026, session 3)
+# Cosmos Medical Technologies — HANDOVER (June 29, 2026, session 4)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -20,163 +20,129 @@ full deploy chain. Live app confirmed healthy at session close.
 
 ## Completed This Session
 
-### Authentication foundation — live
+### Scheduling Phase 3 Option A — live
 
-Full Supabase Auth implementation replacing the stop-gap role selector:
+Location-driven schedule fully implemented. The `doctor_locations` table
+already had `days_of_week`, `start_time`, `end_time`, `slot_minutes`,
+`capacity` from migration 011 — no new migration was needed (the HANDOVER
+proposed adding duplicate columns; live repo superseded this).
 
-- **Migration 012**: `user_profiles` table (`id` FK to `auth.users`,
-  `role` CHECK constraint, `doctor_id` nullable FK to `doctors`,
-  `full_name`, `pin_hint`). RLS: SELECT for own row only
-  (`auth.uid() = id`).
-- **4 test users created** in Supabase Auth (PIN `9999` for all):
-  - `fd@cosmos.local` → frontdesk
-  - `admin@cosmos.local` → admin
-  - `billing@cosmos.local` → billing
-  - `md@cosmos.local` → md (linked to Dr. Yury Gottesman,
-    `doctor_id = ccfeb4b0-e61e-48f0-b4fa-bd15c155f6d0`)
-- **`lib/supabase.ts`** extended with `signIn()`, `signOut()`,
-  `getSession()`, `getUserProfile()` auth helpers.
-- **`app/page.tsx`** replaced: login screen (email + PIN), post-login
-  profile fetch, location picker for MD with multiple locations (auto-
-  skip if 0 or 1 location assigned), session-based role routing.
-- **`middleware.ts`** (new): cookie-based session guard on all routes;
-  unauthenticated requests redirect to `/`. Public paths: `/`, `/_next`,
-  `/favicon`, `/cosmos_`, `/dev`.
-- **Sign Out** added to all four dashboards (`DashboardClient.tsx`,
-  `MDClient.tsx`, `BillerDashboard.tsx`, `admin/page.tsx`) — calls
-  `signOut()` then redirects to `/`.
-- **`app/md/page.tsx`** simplified: reads `doctor_id` from `?doctor_id=`
-  URL param (set by login screen on navigate). `createServerComponentClient`
-  removed — caused TS2724 error (not exported by installed version of
-  `@supabase/auth-helpers-nextjs`). URL param is the reliable path;
-  session-server-read deferred until auth-helpers API is stable.
-- **`app/md/MDClient.tsx`** cleaned: "⚠ Test Only — Simulate MD Login"
-  dropdown removed entirely.
+**Changes to `app/calendar/page.tsx`:**
 
-### RLS: authenticated role added to all tables
+- `DoctorLocation` interface added; `doctor_locations` fetched in `load()`
+  alongside existing queries.
+- `getActiveDoctorLoc(doctorId, locationId)` — returns matching
+  `doctor_locations` row or null.
+- `getAvailDays(doctorId, locationId)` — returns `days_of_week` from
+  `doctor_locations` row, falls back to `doctors.available_days`.
+- `getCapacity(doctorId, locationId)` — returns `capacity` from
+  `doctor_locations` row, falls back to `doctors.max_patients_per_day`.
+- `getLocationsForDoctor(doctorId)` — filters location picker to only
+  locations assigned to the selected doctor.
+- Location picker moved **above** Time Slot in booking form (Doctor →
+  Location → Patient → Time Slot → Type → Notes).
+- Each location card shows its schedule inline: days · start–end · capacity.
+- Selecting a location calls `jumpToDoctorAvailability(..., force=true)` —
+  always jumps to the next valid day for that location regardless of
+  current selection.
+- `jumpToDoctorAvailability` gained `force` param (default false).
+- Quick-pick chips and grid capacity both driven by `filterDocId` +
+  `bookForm.location_id` — kept in sync.
+- Slot generation reads `activeDl.start_time`, `activeDl.slot_minutes`,
+  `activeDl.capacity` when a location is selected.
+- `localDateStr(d)` helper introduced — all date math uses local
+  year/month/day instead of `toISOString()` (fixes UTC/EDT offset bug
+  that caused dates to show one day off).
+- `load()` fetches ±2 week window (`weekOffset-2` to `weekOffset+2`) so
+  appointments remain visible after location-driven week jumps.
+- Locked doctor (`?doctor_id=` param) now writes into `bookForm.doctor_id`
+  on mount so the insert guard passes.
+- Grid cell onClick: only closes booking form when deselecting the same
+  date (tapping it again) — form stays open when navigating to a new date.
+- `handleBook`: insert is before state reset; `await load()` after insert
+  (not `window.location.reload()`).
 
-Supabase Auth changes the request role from `anon` to `authenticated`
-for logged-in users. All existing RLS policies were `anon`-only, causing
-silent empty reads for authenticated sessions. Fixed by adding
-`authenticated` to all policies:
+### RLS — authenticated policies added to `appointments` table
 
-Tables patched: `office_locations`, `practice_settings`, `doctor_locations`,
-`cpt_codes`, `icd10_codes`.
+Root cause of appointments not appearing after booking: `appointments` had
+RLS enabled with `anon`-only policies; authenticated users got zero rows.
+Fixed by adding 4 policies in Supabase SQL Editor:
 
-Pattern used:
 ```sql
-DROP POLICY IF EXISTS anon_select_<table> ON <table>;
-CREATE POLICY anon_select_<table> ON <table>
-  FOR SELECT TO anon, authenticated USING (true);
--- (repeat for INSERT, UPDATE, DELETE)
+CREATE POLICY "authenticated read appointments" ON appointments
+  FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated insert appointments" ON appointments
+  FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "authenticated update appointments" ON appointments
+  FOR UPDATE TO authenticated USING (true);
+CREATE POLICY "authenticated delete appointments" ON appointments
+  FOR DELETE TO authenticated USING (true);
 ```
-
-### Scheduling Phase 3 (Option B) — live
-
-Calendar booking form now includes an Office Location picker:
-
-- `office_locations` fetched in `load()` alongside doctors/patients.
-- `location_id` added to `bookForm` state (and reset after booking).
-- Location picker renders as tappable button-chip cards below Notes field
-  (only appears when `locations.length > 0` — invisible until locations
-  exist).
-- "No location / unassigned" fallback option always present.
-- `sessionStorage.getItem('cosmos_location_id')` pre-selects the MD's
-  login-time location on calendar open.
-- `appointments` insert includes `location_id` (nullable).
-
-**Phase 3 Option A (location-driven schedule) approved but NOT YET BUILT.**
-Product decision confirmed this session: the correct flow is
-Location → Schedule → Availability → Slots. This requires:
-1. `doctor_locations` table gains `available_days` + `max_patients_per_day`
-   columns (per-location schedule, overriding `doctors` fallback).
-2. Calendar flow changes to: FD selects doctor → location picker appears
-   (filtered to that doctor's `doctor_locations`) → capacity/available
-   days read from `doctor_locations` → slots generate.
-3. Admin doctor Schedule tab already has Location Assignments UI — needs
-   those two new columns exposed for editing.
-
-### 3 office locations confirmed in database
-
-- Main Office — 123 Medical Plaza, Brooklyn, NY 11201, (718) 555-0100
-- Bronx location — 45 Knox Ave, Bronx
-- Queens Location — 76 Queens Blvd, Rego Park
 
 ---
 
 ## Open Items, Priority Order
 
-1. **Scheduling Phase 3 Option A** — location-driven schedule. Requires:
-   - Migration: add `available_days text[]` + `max_patients_per_day int`
-     to `doctor_locations`
-   - Admin UI: expose both columns in the Location Assignment edit form
-     (Schedule tab → Location Assignments sub-section)
-   - Calendar: FD selects doctor → location picker → calendar reads
-     `doctor_locations.available_days` + `max_patients_per_day` instead
-     of `doctors` fallback
-   - This is the approved next session's primary task.
+1. **Scheduling Phase 4** — MD login location pre-filters calendar. The
+   login screen shows the location picker for MDs with multiple locations.
+   Phase 4: selected location from login pre-selects the booking form's
+   location chip AND drives the quick-pick chips and grid availability on
+   calendar open (not just pre-fills `sessionStorage`). Depends on Phase
+   3A ✓.
 
 2. **NF-3 PC-payee mapping** — verify in a real generated PDF. Never
-   confirmed across all sessions.
+   confirmed across any session.
 
 3. **Step 10 — Admin Users tab** — create/manage Cosmos users (email,
    role, linked doctor) from within the Admin dashboard. Currently users
    are created via Supabase dashboard + manual SQL insert.
 
-4. **Scheduling Phase 4** — MD login location picker fully wired. The
-   login screen already shows the picker for MDs with multiple locations.
-   Once Phase 3A is done (location-specific schedules), Phase 4 becomes:
-   the selected location from login pre-filters the calendar's location
-   chip selection, not just pre-selects the booking form field.
-
-5. **Appointment → Visit conversion** — "Checked In" status should enable
+4. **Appointment → Visit conversion** — "Checked In" status should enable
    pre-populated visit creation. Currently manual.
 
-6. **NF-3 Pay-To: supervisor PC logic** — `forms/nf3.py` should fall
+5. **NF-3 Pay-To: supervisor PC logic** — `forms/nf3.py` should fall
    through to supervisor's PC when `supervising_provider_id` is set.
    Deliberately deferred multiple sessions.
 
-7. **Practice Info → NF-3 wiring** — `practice_settings` table exists and
+6. **Practice Info → NF-3 wiring** — `practice_settings` table exists and
    is NF-3-ready. Backend `forms/nf3.py` doesn't read it yet.
 
-8. **`forms/base.py` `except Exception: pass`** — prohibited
+7. **`forms/base.py` `except Exception: pass`** — prohibited
    (`SYSTEM_PROMPT.md` §1/§8). Flagged 4+ sessions, never fixed.
 
-9. **`w9_filler.py` in `cosmos-api` root** — legacy duplicate of
+8. **`w9_filler.py` in `cosmos-api` root** — legacy duplicate of
    `forms/w9.py`. Flagged 3 sessions, never removed.
 
-10. **RLS hardening** — `patient_forms` RLS disabled entirely;
-    `storage.objects` has one fully-open policy on `patient-forms` bucket.
+9. **RLS hardening** — `patient_forms` RLS disabled entirely;
+   `storage.objects` has one fully-open policy on `patient-forms` bucket.
 
-11. **`patient_visits` doctor linkage gap** — `doctor_id` not reliably
+10. **`patient_visits` doctor linkage gap** — `doctor_id` not reliably
     written at save time.
 
-12. **PDF filename casing** — `ortho.pdf`/`pain_mgmt.pdf` lowercase vs.
+11. **PDF filename casing** — `ortho.pdf`/`pain_mgmt.pdf` lowercase vs.
     uppercase convention for the other 7.
 
-13. **MRI Extremity Studies + insurance fields** — backend ready, pure
+12. **MRI Extremity Studies + insurance fields** — backend ready, pure
     frontend work, never started.
 
-14. **`cpt_codes.provider_type` backend wiring** — column exists, unused
+13. **`cpt_codes.provider_type` backend wiring** — column exists, unused
     on both frontend and backend.
 
-15. **Regenerate W-9s for existing doctors** — no bulk path. Low urgency.
+14. **Regenerate W-9s for existing doctors** — no bulk path. Low urgency.
 
-16. **Desktop sidebar nav** — mockup confirmed target. Mobile-first
+15. **Desktop sidebar nav** — mockup confirmed target. Mobile-first
     remains immediate priority.
 
 ---
 
-## Known Auth Architecture Gap
+## Known Architecture Gaps
 
-`@supabase/auth-helpers-nextjs` installed version does not export
-`createServerComponentClient` (TS2724 — did you mean `createServerClient`?).
-Server-side session reads in server components are currently deferred.
-The `?doctor_id=` URL param from the login screen is the reliable
-doctor-scoping path until this is resolved. Do not attempt to use
-`createServerComponentClient` in any server component until the package
-is confirmed to export it (check with `grep -r "createServerClient"
-node_modules/@supabase/auth-helpers-nextjs/dist/`).
+**Auth server-component gap:** `@supabase/auth-helpers-nextjs` installed
+version does not export `createServerComponentClient` (TS2724). Server-side
+session reads in server components are deferred. The `?doctor_id=` URL param
+from the login screen is the reliable doctor-scoping path. Do not attempt to
+use `createServerComponentClient` until confirmed exportable via:
+`grep -r "createServerClient" node_modules/@supabase/auth-helpers-nextjs/dist/`
 
 ---
 
@@ -187,18 +153,18 @@ node_modules/@supabase/auth-helpers-nextjs/dist/`).
 
 | File | Confidence |
 |---|---|
-| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (this session — full login screen replacement) |
-| `cosmos-dashboard/middleware.ts` | ★ Verified-final (this session — new file, cookie-based route guard) |
-| `cosmos-dashboard/lib/supabase.ts` | ★ Verified-final (this session — auth helpers added) |
-| `cosmos-dashboard/app/md/page.tsx` | ★ Verified-final (this session — simplified, no server auth read) |
-| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (this session — test dropdown removed, signOut added) |
-| `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (this session — signOut added) |
-| `cosmos-dashboard/app/billing/BillerDashboard.tsx` | ★ Verified-final (this session — signOut added) |
-| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (this session — signOut added; prior session full rebuild) |
-| `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (this session — Phase 3 Option B patch applied) |
-| `cosmos-dashboard/app/dev/page.tsx` | Obtained-current (prior session — no changes this session) |
-| `cosmos-dashboard/app/layout.tsx` | Obtained-current (this session — default scaffold, no changes needed) |
-| `cosmos-dashboard/app/billing/page.tsx` | Obtained-current (this session — server wrapper, no changes needed) |
+| `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (this session — Phase 3A full rebuild + multiple patches) |
+| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (prior session — full login screen) |
+| `cosmos-dashboard/middleware.ts` | ★ Verified-final (prior session — cookie-based route guard) |
+| `cosmos-dashboard/lib/supabase.ts` | ★ Verified-final (prior session — auth helpers) |
+| `cosmos-dashboard/app/md/page.tsx` | ★ Verified-final (prior session — simplified, no server auth read) |
+| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (prior session — test dropdown removed) |
+| `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (prior session — signOut added) |
+| `cosmos-dashboard/app/billing/BillerDashboard.tsx` | ★ Verified-final (prior session — signOut added) |
+| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (prior session — signOut added; full rebuild) |
+| `cosmos-dashboard/app/dev/page.tsx` | Obtained-current (prior session — no changes) |
+| `cosmos-dashboard/app/layout.tsx` | Obtained-current (prior session — default scaffold) |
+| `cosmos-dashboard/app/billing/page.tsx` | Obtained-current (prior session — server wrapper) |
 | `cosmos-dashboard/app/lib/fonts.ts` | Obtained-current (prior session) |
 | `cosmos-api/forms/ortho.py`, `forms/pain_mgmt.py` | ★ Verified-final (prior session) |
 | `cosmos-api/main.py`, `pdf_engine.py` | ★ Verified-final (prior session) |
@@ -209,24 +175,33 @@ node_modules/@supabase/auth-helpers-nextjs/dist/`).
 
 ## Lessons Learned This Session
 
-- **`@supabase/auth-helpers-nextjs` API mismatch** — the installed version
-  exports `createServerClient` not `createServerComponentClient`. Before
-  using any named export from this package in a server component, verify
-  with `grep -r "export" node_modules/@supabase/auth-helpers-nextjs/dist/`
-  that the export actually exists.
-- **Supabase Auth changes request role from `anon` to `authenticated`** —
-  existing RLS policies scoped to `anon` only will silently return empty
-  results for logged-in users. After implementing auth, audit all RLS
-  policies and add `authenticated` to every `TO` clause. Run the RLS
-  audit query immediately after login is live.
-- **Service role key in Termux** — writing a long JWT to a shell variable
-  inline is unreliable (paste corruption, placeholder not replaced). Use
-  `echo -n 'key' > ~/file.txt && SK=$(cat ~/file.txt)` pattern, or use
-  the Supabase dashboard UI directly for one-off user creation.
-- **`cat > file << 'ENDOFFILE'`** is the reliable large-file write method
-  in Termux — confirmed working for files up to ~170 lines. Faster and
-  more reliable than downloading from Claude artifacts for files this size.
-- **File retrieval standard confirmed** — always provide
-  `git show HEAD:<path> > ~/storage/downloads/<filename>` with every file
-  request. Never use grep as a substitute for reading the actual file.
-  Added to `AI_STYLE_GUIDE.md` §3.
+- **Chrome duplicate filename mitigation** — before downloading any file
+  from Claude, always `rm -f ~/storage/downloads/<filename>*` first to
+  prevent Chrome appending `-1`, `-2` suffixes causing silent stale-copy
+  deploys. This was the single biggest time drain this session (affected
+  every file transfer attempt).
+- **`doctor_locations` already had schedule columns** — `days_of_week`,
+  `capacity`, `start_time`, `end_time`, `slot_minutes` from migration 011
+  were fully wired in Admin UI. HANDOVER proposed adding duplicate columns
+  under different names. Live repo is always the source of truth — grep
+  the file before planning migrations.
+- **RLS `authenticated` policies must be added to every table** — not just
+  the tables actively touched in a session. `appointments` was missed in
+  the prior session's RLS audit, causing the booking display bug. After
+  any schema or auth change, run the full audit:
+  `SELECT tablename, rowsecurity FROM pg_tables WHERE schemaname='public';`
+  and `SELECT tablename, policyname, roles FROM pg_policies;`
+- **`toISOString()` is always UTC** — any date string built from
+  `new Date().toISOString()` will be off by the local timezone offset
+  (EDT = UTC-4). Use local year/month/day components directly. The
+  `localDateStr(d)` helper is now the standard for all date math in the
+  calendar.
+- **React state closure in async functions** — `load()` defined inside
+  the component captures `weekOffset` at render time. When called after
+  an async insert, the captured value may be stale. Widening the fetch
+  window (±2 weeks) is the practical mitigation until `load` is refactored
+  to accept an explicit date range param.
+- **Node one-liner patching breaks on complex string escaping** — backtick
+  and quote combinations in inline `-e` scripts cause `SyntaxError`.
+  Always use `python3 - << 'PYEOF' ... PYEOF` for multi-line string
+  replacements in Termux.
