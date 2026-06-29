@@ -1,5 +1,58 @@
 # Changelog
 
+## 2026-06-28 — Auth foundation, Phase 3 location picker, RLS authenticated fix
+
+### Authentication — full implementation (replaces stop-gap role selector)
+
+- `user_profiles` table (migration 012): links `auth.users` → role +
+  `doctor_id` + `full_name` + `pin_hint`. RLS: own-row SELECT only.
+- 4 test users in Supabase Auth (PIN `9999`): `fd@cosmos.local` (frontdesk),
+  `admin@cosmos.local` (admin), `billing@cosmos.local` (billing),
+  `md@cosmos.local` (md → Dr. Yury Gottesman)
+- `lib/supabase.ts`: `signIn()`, `signOut()`, `getSession()`,
+  `getUserProfile()` helpers added alongside existing anon client
+- `app/page.tsx`: full replacement — email + PIN login form, post-login
+  profile fetch, location picker for MD with multiple locations (auto-skip
+  when 0 or 1 location), session-based role routing with `sessionStorage`
+  for `cosmos_doctor_id` + `cosmos_location_id`
+- `middleware.ts` (new): cookie-based route protection, redirects
+  unauthenticated requests to `/`; public paths: `/`, `/_next`, `/favicon`,
+  `/cosmos_`, `/dev`
+- Sign Out button added to all 4 dashboards: `DashboardClient.tsx`,
+  `MDClient.tsx`, `BillerDashboard.tsx`, `admin/page.tsx` — all call
+  `signOut()` before redirect
+- `app/md/page.tsx`: simplified — removed `createServerComponentClient`
+  (not exported by installed `@supabase/auth-helpers-nextjs` version);
+  `?doctor_id=` URL param from login screen is the reliable scoping path
+- `app/md/MDClient.tsx`: "⚠ Test Only — Simulate MD Login" dropdown
+  removed; `signOut` import added
+
+### RLS — authenticated role added to all tables
+
+Supabase Auth changes request role to `authenticated` for logged-in users;
+prior `anon`-only policies caused silent empty reads. All policies on
+`office_locations`, `practice_settings`, `doctor_locations`, `cpt_codes`,
+`icd10_codes` updated to `TO anon, authenticated`.
+
+### Scheduling Phase 3 Option B — live
+
+- `office_locations` fetched in calendar `load()` alongside doctors/patients
+- `location_id` added to `bookForm` state + `appointments` insert
+- Location picker (button-chip cards) added to booking form below Notes
+- `sessionStorage` pre-select for MD login-time location
+- "No location / unassigned" fallback option
+- Phase 3 Option A (location-driven schedule) approved for next session:
+  `doctor_locations` needs `available_days` + `max_patients_per_day` columns;
+  calendar flow becomes Location → Schedule → Availability → Slots
+
+### `@supabase/auth-helpers-nextjs` installed (2 packages)
+
+Required for middleware cookie-based session read. Version installed does
+not export `createServerComponentClient` — use `createServerClient` if
+server-component session reads are needed in future.
+
+---
+
 ## 2026-06-28 — Admin dashboard expansion: Overview, CPT/ICD-10 tables, Locations, Scheduling Phase 1+2
 
 ### Admin — Overview tab (new)
@@ -58,22 +111,5 @@
 ### Scheduling — Phase 1+2
 - Schema: `doctor_locations`, `appointments.location_id` (Phase 1 complete)
 - Admin UI: Doctor Schedule tab now has Location Assignments section (Phase 2 complete)
-- Phase 3 (calendar location selector) and Phase 4 (MD login location picker): next session
-
----
-
-## 2026-06-27 (evening) — Orthopedic Surgeon & Pain Management referrals; Save/View pattern; PDF filename cleanup
-
-- New referral types **Orthopedic Surgeon** and **Pain Management**, full stack
-- **Save→View button pattern** adopted as standing pattern for all MD-discretionary
-  referral types except ICD-10 — applied to DME, Ortho, Pain Mgmt, ANS, MRI, PT,
-  Rx, VNG. Deploy confirmed this session (was unconfirmed across 2 prior sessions)
-- Renamed 7 referral PDF templates to short filenames (`ANS.pdf`, `DME.pdf`, etc.)
-
-## 2026-06-27 — Biller Dashboard: typography fixes, charting, Denial Docs delete
-
-- Fixed production 500 crash on `/billing`
-- Renamed "Payment Status" → "Denial Status"; "Submitted" → "Bill Received"
-- Added stacked bar chart "Paid vs Outstanding by Carrier" (raw Recharts)
-- Hard delete for Denial Docs
-- Shared `app/lib/fonts.ts` Oxanium module created
+- Phase 3 (calendar location selector) and Phase 4 (MD login location picker):
+  deferred to next session

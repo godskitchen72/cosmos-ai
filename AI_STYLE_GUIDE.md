@@ -155,13 +155,18 @@ Observed and binding for `SYSTEM_PROMPT.md`, `ARCHITECTURE.md`,
   claim that the Biller dashboard's "Received" column was an unbacked
   placeholder was caught as stale and wrong against direct live-code
   review, and corrected accordingly.
-- **For getting Claude a file to review or patch, direct file transfer
-  is the standing preferred method over a screenshot the moment more
-  than about one screen of code is involved**: `git show HEAD:<path> >
-  ~/storage/downloads/<name>`, then attach the file. Faster and exact
-  (no OCR risk) compared to incremental `grep`/`sed -n` screenshot
-  rounds — confirmed the hard way across a full session before becoming
-  the default (`SYSTEM_PROMPT.md` §3).
+- **File retrieval — standing standard**: whenever a source file is
+  needed for review or patching, always provide the canonical retrieval
+  command alongside the request. Never use `grep` output or screenshots
+  as a substitute for reading the actual file. The standard command is:
+  ```bash
+  cd ~/cosmos-dashboard   # or ~/cosmos-api as appropriate
+  git show HEAD:<path/to/file> > ~/storage/downloads/<filename>
+  ```
+  Then attach the downloaded file. This is faster and exact (no OCR
+  risk, no truncation) compared to incremental `grep`/`sed -n` rounds.
+  Confirmed the hard way across multiple sessions before becoming the
+  default. Every file request from Claude must include this command.
 - SQL migrations are numbered sequentially and never renumbered
   retroactively (`001_...`, `002_...`, `ARCHITECTURE.md` §3) — the same
   append-only, never-renumber principle applies to `CHANGELOG.md`
@@ -191,6 +196,9 @@ Full methodology lives in `SYSTEM_PROMPT.md` §3 and §5 — summary only:
 - Keep every pasted command block small; prefer a downloadable artifact
   + `cp` + `md5sum` verification over inline paste for anything over
   ~2–3KB (Termux can silently corrupt large pastes with no error).
+- For files under ~170 lines, `cat > file << 'ENDOFFILE' ... ENDOFFILE`
+  is a reliable full-file write method in Termux — confirmed faster and
+  more reliable than downloading artifacts for files this size.
 - Multi-step patches: one step per message, explicitly numbered ("Step
   X of Y"), with the literal printed confirmation required before the
   next step is sent.
