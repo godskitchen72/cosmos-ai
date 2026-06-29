@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (June 29, 2026, session 4)
+# Cosmos Medical Technologies — HANDOVER (June 29, 2026, session 5)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -20,117 +20,102 @@ full deploy chain. Live app confirmed healthy at session close.
 
 ## Completed This Session
 
-### Scheduling Phase 3 Option A — live
+### Scheduling Phase 4 — live
 
-Location-driven schedule fully implemented. The `doctor_locations` table
-already had `days_of_week`, `start_time`, `end_time`, `slot_minutes`,
-`capacity` from migration 011 — no new migration was needed (the HANDOVER
-proposed adding duplicate columns; live repo superseded this).
+MD login location pre-filters calendar on open.
 
-**Changes to `app/calendar/page.tsx`:**
+- Phase 4 `useEffect` added to `app/calendar/page.tsx`: after
+  `doctorLocations` loads, if `lockedDoctorId` + `bookForm.location_id`
+  are both set, calls `jumpToDoctorAvailability` to jump to first available
+  day for that doctor+location combo. Dependency array:
+  `[doctorLocations, lockedDoctorId, bookForm.location_id]`.
+- `app/page.tsx` (login): `navigate()` now accepts `locName` param and
+  stores `cosmos_location_name` in `sessionStorage` alongside
+  `cosmos_location_id`. Both the auto-skip path (0/1 location) and the
+  manual Continue path pass the location name.
+- `app/md/MDClient.tsx`: reads `cosmos_location_name` from sessionStorage
+  on mount; displays `📍 {locationName}` in green under "MD Dashboard"
+  heading.
+- `app/calendar/page.tsx`: reads `cosmos_location_name` from sessionStorage;
+  displays `📍 {locationName}` in green under "Showing your schedule only".
 
-- `DoctorLocation` interface added; `doctor_locations` fetched in `load()`
-  alongside existing queries.
-- `getActiveDoctorLoc(doctorId, locationId)` — returns matching
-  `doctor_locations` row or null.
-- `getAvailDays(doctorId, locationId)` — returns `days_of_week` from
-  `doctor_locations` row, falls back to `doctors.available_days`.
-- `getCapacity(doctorId, locationId)` — returns `capacity` from
-  `doctor_locations` row, falls back to `doctors.max_patients_per_day`.
-- `getLocationsForDoctor(doctorId)` — filters location picker to only
-  locations assigned to the selected doctor.
-- Location picker moved **above** Time Slot in booking form (Doctor →
-  Location → Patient → Time Slot → Type → Notes).
-- Each location card shows its schedule inline: days · start–end · capacity.
-- Selecting a location calls `jumpToDoctorAvailability(..., force=true)` —
-  always jumps to the next valid day for that location regardless of
-  current selection.
-- `jumpToDoctorAvailability` gained `force` param (default false).
-- Quick-pick chips and grid capacity both driven by `filterDocId` +
-  `bookForm.location_id` — kept in sync.
-- Slot generation reads `activeDl.start_time`, `activeDl.slot_minutes`,
-  `activeDl.capacity` when a location is selected.
-- `localDateStr(d)` helper introduced — all date math uses local
-  year/month/day instead of `toISOString()` (fixes UTC/EDT offset bug
-  that caused dates to show one day off).
-- `load()` fetches ±2 week window (`weekOffset-2` to `weekOffset+2`) so
-  appointments remain visible after location-driven week jumps.
-- Locked doctor (`?doctor_id=` param) now writes into `bookForm.doctor_id`
-  on mount so the insert guard passes.
-- Grid cell onClick: only closes booking form when deselecting the same
-  date (tapping it again) — form stays open when navigating to a new date.
-- `handleBook`: insert is before state reset; `await load()` after insert
-  (not `window.location.reload()`).
+### Union-of-locations availability — live
 
-### RLS — authenticated policies added to `appointments` table
+Calendar availability now reflects all assigned locations for a doctor,
+not just the selected one.
 
-Root cause of appointments not appearing after booking: `appointments` had
-RLS enabled with `anon`-only policies; authenticated users got zero rows.
-Fixed by adding 4 policies in Supabase SQL Editor:
+- `getDoctorLocs(doctorId)` — returns all `doctor_locations` rows for a doctor.
+- `getAvailDaysForDoctor(doctorId)` — union of all assigned location
+  `days_of_week`. Falls back to `doctors.available_days` only when zero
+  location assignments exist.
+- `getAvailDays(doctorId, locationId)` — when a specific location is
+  selected (booking form context), returns that location's days. When no
+  location selected (grid/chips), returns union.
+- `getCapacity(doctorId, locationId)` — specific location capacity when
+  selected; max across all assigned locations otherwise.
+- `isDayAvailable`: guards against `doctorLocations.length === 0` (data
+  not yet loaded) before applying availability filter.
+- Result: Tue/Thu greyed out for Dr. Gottesman (Main Office Mon/Wed +
+  Queens Fri = union Mon/Wed/Fri; Tue/Thu have no location assignment).
 
-```sql
-CREATE POLICY "authenticated read appointments" ON appointments
-  FOR SELECT TO authenticated USING (true);
-CREATE POLICY "authenticated insert appointments" ON appointments
-  FOR INSERT TO authenticated WITH CHECK (true);
-CREATE POLICY "authenticated update appointments" ON appointments
-  FOR UPDATE TO authenticated USING (true);
-CREATE POLICY "authenticated delete appointments" ON appointments
-  FOR DELETE TO authenticated USING (true);
-```
+### Admin — blocked days in location assignment form — live
+
+- **Location Assignment day chips**: days assigned to OTHER locations for
+  the same doctor are rendered in amber with 🔒 and `cursor-not-allowed`.
+  Tooltip shows which location owns the day.
+- **Default Schedule day chips**: days assigned to ANY location are
+  rendered in amber with 🔒. Message: "🔒 Days assigned to a location
+  override the default schedule."
+- Location dropdown bug fixed: was filtering out already-assigned locations
+  from `SelectItems`, causing selected value to disappear (shadcn Select
+  can't display a value with no matching SelectItem). Fix: show all
+  locations in dropdown; day blocking prevents double-booking.
 
 ---
 
 ## Open Items, Priority Order
 
-1. **Scheduling Phase 4** — MD login location pre-filters calendar. The
-   login screen shows the location picker for MDs with multiple locations.
-   Phase 4: selected location from login pre-selects the booking form's
-   location chip AND drives the quick-pick chips and grid availability on
-   calendar open (not just pre-fills `sessionStorage`). Depends on Phase
-   3A ✓.
+1. **Admin Users tab** — create/manage Cosmos users (email, role, linked
+   doctor) from within the Admin dashboard. Currently requires Supabase
+   dashboard + manual SQL insert. This is the next session's primary task.
 
 2. **NF-3 PC-payee mapping** — verify in a real generated PDF. Never
    confirmed across any session.
 
-3. **Step 10 — Admin Users tab** — create/manage Cosmos users (email,
-   role, linked doctor) from within the Admin dashboard. Currently users
-   are created via Supabase dashboard + manual SQL insert.
-
-4. **Appointment → Visit conversion** — "Checked In" status should enable
+3. **Appointment → Visit conversion** — "Checked In" status should enable
    pre-populated visit creation. Currently manual.
 
-5. **NF-3 Pay-To: supervisor PC logic** — `forms/nf3.py` should fall
+4. **NF-3 Pay-To: supervisor PC logic** — `forms/nf3.py` should fall
    through to supervisor's PC when `supervising_provider_id` is set.
    Deliberately deferred multiple sessions.
 
-6. **Practice Info → NF-3 wiring** — `practice_settings` table exists and
+5. **Practice Info → NF-3 wiring** — `practice_settings` table exists and
    is NF-3-ready. Backend `forms/nf3.py` doesn't read it yet.
 
-7. **`forms/base.py` `except Exception: pass`** — prohibited
-   (`SYSTEM_PROMPT.md` §1/§8). Flagged 4+ sessions, never fixed.
+6. **`forms/base.py` `except Exception: pass`** — prohibited
+   (`SYSTEM_PROMPT.md` §1/§8). Flagged 5+ sessions, never fixed.
 
-8. **`w9_filler.py` in `cosmos-api` root** — legacy duplicate of
-   `forms/w9.py`. Flagged 3 sessions, never removed.
+7. **`w9_filler.py` in `cosmos-api` root** — legacy duplicate of
+   `forms/w9.py`. Flagged 4 sessions, never removed.
 
-9. **RLS hardening** — `patient_forms` RLS disabled entirely;
+8. **RLS hardening** — `patient_forms` RLS disabled entirely;
    `storage.objects` has one fully-open policy on `patient-forms` bucket.
 
-10. **`patient_visits` doctor linkage gap** — `doctor_id` not reliably
-    written at save time.
+9. **`patient_visits` doctor linkage gap** — `doctor_id` not reliably
+   written at save time.
 
-11. **PDF filename casing** — `ortho.pdf`/`pain_mgmt.pdf` lowercase vs.
+10. **PDF filename casing** — `ortho.pdf`/`pain_mgmt.pdf` lowercase vs.
     uppercase convention for the other 7.
 
-12. **MRI Extremity Studies + insurance fields** — backend ready, pure
+11. **MRI Extremity Studies + insurance fields** — backend ready, pure
     frontend work, never started.
 
-13. **`cpt_codes.provider_type` backend wiring** — column exists, unused
+12. **`cpt_codes.provider_type` backend wiring** — column exists, unused
     on both frontend and backend.
 
-14. **Regenerate W-9s for existing doctors** — no bulk path. Low urgency.
+13. **Regenerate W-9s for existing doctors** — no bulk path. Low urgency.
 
-15. **Desktop sidebar nav** — mockup confirmed target. Mobile-first
+14. **Desktop sidebar nav** — mockup confirmed target. Mobile-first
     remains immediate priority.
 
 ---
@@ -153,15 +138,15 @@ use `createServerComponentClient` until confirmed exportable via:
 
 | File | Confidence |
 |---|---|
-| `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (this session — Phase 3A full rebuild + multiple patches) |
-| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (prior session — full login screen) |
+| `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (this session — Phase 4, union availability, location badge) |
+| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (this session — cosmos_location_name stored in sessionStorage) |
+| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (this session — location badge added) |
+| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (this session — blocked day chips, dropdown fix) |
 | `cosmos-dashboard/middleware.ts` | ★ Verified-final (prior session — cookie-based route guard) |
 | `cosmos-dashboard/lib/supabase.ts` | ★ Verified-final (prior session — auth helpers) |
 | `cosmos-dashboard/app/md/page.tsx` | ★ Verified-final (prior session — simplified, no server auth read) |
-| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (prior session — test dropdown removed) |
 | `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (prior session — signOut added) |
 | `cosmos-dashboard/app/billing/BillerDashboard.tsx` | ★ Verified-final (prior session — signOut added) |
-| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (prior session — signOut added; full rebuild) |
 | `cosmos-dashboard/app/dev/page.tsx` | Obtained-current (prior session — no changes) |
 | `cosmos-dashboard/app/layout.tsx` | Obtained-current (prior session — default scaffold) |
 | `cosmos-dashboard/app/billing/page.tsx` | Obtained-current (prior session — server wrapper) |
@@ -175,33 +160,18 @@ use `createServerComponentClient` until confirmed exportable via:
 
 ## Lessons Learned This Session
 
-- **Chrome duplicate filename mitigation** — before downloading any file
-  from Claude, always `rm -f ~/storage/downloads/<filename>*` first to
-  prevent Chrome appending `-1`, `-2` suffixes causing silent stale-copy
-  deploys. This was the single biggest time drain this session (affected
-  every file transfer attempt).
-- **`doctor_locations` already had schedule columns** — `days_of_week`,
-  `capacity`, `start_time`, `end_time`, `slot_minutes` from migration 011
-  were fully wired in Admin UI. HANDOVER proposed adding duplicate columns
-  under different names. Live repo is always the source of truth — grep
-  the file before planning migrations.
-- **RLS `authenticated` policies must be added to every table** — not just
-  the tables actively touched in a session. `appointments` was missed in
-  the prior session's RLS audit, causing the booking display bug. After
-  any schema or auth change, run the full audit:
-  `SELECT tablename, rowsecurity FROM pg_tables WHERE schemaname='public';`
-  and `SELECT tablename, policyname, roles FROM pg_policies;`
-- **`toISOString()` is always UTC** — any date string built from
-  `new Date().toISOString()` will be off by the local timezone offset
-  (EDT = UTC-4). Use local year/month/day components directly. The
-  `localDateStr(d)` helper is now the standard for all date math in the
-  calendar.
-- **React state closure in async functions** — `load()` defined inside
-  the component captures `weekOffset` at render time. When called after
-  an async insert, the captured value may be stale. Widening the fetch
-  window (±2 weeks) is the practical mitigation until `load` is refactored
-  to accept an explicit date range param.
-- **Node one-liner patching breaks on complex string escaping** — backtick
-  and quote combinations in inline `-e` scripts cause `SyntaxError`.
-  Always use `python3 - << 'PYEOF' ... PYEOF` for multi-line string
-  replacements in Termux.
+- **shadcn Select + filtered SelectItems** — if `SelectContent` filters
+  out the currently-selected item, the trigger displays blank. Always
+  include all valid options in `SelectItems`; use disabled state or
+  separate UI to prevent invalid selections rather than filtering the list.
+- **sessionStorage for cross-screen state** — storing `cosmos_location_name`
+  alongside `cosmos_location_id` at login time avoids extra DB calls on
+  every screen. Pattern: store display name + ID together at the source
+  (login), read on any downstream screen.
+- **Union availability pattern** — when a doctor has multiple location
+  assignments, the calendar grid should reflect the union of all assigned
+  days, not just the selected booking location. Use `getAvailDaysForDoctor`
+  for grid/chips context; use `getActiveDoctorLoc` for booking form context.
+- **`isDayAvailable` must guard on data load** — checking
+  `doctorLocations.length === 0` before applying availability prevents
+  all days appearing available during the initial render before data loads.
