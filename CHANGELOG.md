@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-06-29 — Doctor location assignment Edit button, 12h time display
+
+### Location Assignments — Edit capability (new)
+
+- `app/admin/page.tsx` (`DoctorsSection`): added `editingLocId` state and
+  `handleEditLocation(dl)` helper. Reuses the existing Add Location form
+  and `handleAddLocation`'s upsert (`onConflict: 'doctor_id,location_id'`)
+  — no new backend path needed.
+- Each Location Assignment card now shows **Edit** alongside **Remove**.
+  Edit populates the form with the assignment's existing values and
+  opens it in edit mode.
+- Location dropdown is locked (read-only display) while editing — only
+  the schedule (days/hours/capacity/slot length) can change, not which
+  location the assignment points to.
+- Save button reads "Save Changes" in edit mode vs. "Assign Location" in
+  add mode. Cancel resets `editingLocId` and the form back to blank.
+
+### Location hours — 12-hour display format
+
+- Location Assignment card time display (`{start_time} – {end_time}`)
+  changed from 24-hour (`09:00 – 17:00`) to 12-hour with AM/PM
+  (`9:00 AM – 5:00 PM`) via `toLocaleTimeString`. Display-only change —
+  underlying `start_time`/`end_time` columns remain unchanged (still
+  24-hour `time` type in Postgres).
+
+---
+
 ## 2026-06-29 — Admin Users, Superadmin role, Visit conversion, RLS audit
 
 ### Admin Users Tab (new)

@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (June 29, 2026, session 6)
+# Cosmos Medical Technologies — HANDOVER (June 29, 2026, session 7)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -19,6 +19,21 @@ full deploy chain. Live app confirmed healthy at session close.
 ---
 
 ## Completed This Session
+
+### Doctor Location Assignment — Edit button — live
+
+Admin → Providers → Schedule → Location Assignments cards now have an
+**Edit** button alongside Remove. Edit reuses the existing Add Location
+form (`addingLoc`/`locForm`) and `handleAddLocation`'s upsert — no new
+backend path. New `editingLocId` state tracks edit-mode; the location
+dropdown locks (read-only) while editing so only the schedule fields
+(days/hours/capacity/slot length) can change. Save button reads "Save
+Changes" in edit mode. Resolves Open Item #1 (was: "must delete and
+re-add to change hours").
+
+Also fixed in the same pass: location card hours display changed from
+24-hour to 12-hour with AM/PM (`toLocaleTimeString`) — display-only,
+underlying columns unchanged.
 
 ### Admin Users Tab — live
 
@@ -125,41 +140,37 @@ need strict time slot scheduling. Not called by any UI.
 
 ## Open Items, Priority Order
 
-1. **Edit button on assigned doctor locations** — Admin → Providers →
-   Location Assignments has no Edit. Must delete and re-add to change
-   hours. Next priority.
-
-2. **NF-3 PC-payee mapping** — verify in a real generated PDF. Never
+1. **NF-3 PC-payee mapping** — verify in a real generated PDF. Never
    confirmed across any session.
 
-3. **NF-3 Pay-To: supervisor PC logic** — `forms/nf3.py` should fall
+2. **NF-3 Pay-To: supervisor PC logic** — `forms/nf3.py` should fall
    through to supervisor's PC when `supervising_provider_id` is set.
    Deliberately deferred multiple sessions.
 
-4. **Practice Info → NF-3 wiring** — `practice_settings` table exists and
+3. **Practice Info → NF-3 wiring** — `practice_settings` table exists and
    is NF-3-ready. Backend `forms/nf3.py` doesn't read it yet.
 
-5. **`forms/base.py` `except Exception: pass`** — prohibited
+4. **`forms/base.py` `except Exception: pass`** — prohibited
    (`SYSTEM_PROMPT.md` §1/§8). Flagged 5+ sessions, never fixed.
 
-6. **`w9_filler.py` in `cosmos-api` root** — legacy duplicate of
+5. **`w9_filler.py` in `cosmos-api` root** — legacy duplicate of
    `forms/w9.py`. Flagged 4 sessions, never removed.
 
-7. **`patient_visits.doctor_id` column** — does not exist. `handleStartVisit`
+6. **`patient_visits.doctor_id` column** — does not exist. `handleStartVisit`
    was patched to omit it. If doctor linkage on visits is needed, add
    migration first.
 
-8. **PDF filename casing** — `ortho.pdf`/`pain_mgmt.pdf` lowercase vs.
+7. **PDF filename casing** — `ortho.pdf`/`pain_mgmt.pdf` lowercase vs.
    uppercase convention for the other 7.
 
-9. **MRI Extremity Studies + insurance fields** — backend ready, pure
+8. **MRI Extremity Studies + insurance fields** — backend ready, pure
    frontend work, never started.
 
-10. **`cpt_codes.provider_type` backend wiring** — column exists, unused.
+9. **`cpt_codes.provider_type` backend wiring** — column exists, unused.
 
-11. **Regenerate W-9s for existing doctors** — no bulk path. Low urgency.
+10. **Regenerate W-9s for existing doctors** — no bulk path. Low urgency.
 
-12. **Desktop sidebar nav** — mockup confirmed target. Mobile-first
+11. **Desktop sidebar nav** — mockup confirmed target. Mobile-first
     remains immediate priority.
 
 ---
@@ -185,7 +196,7 @@ from the login screen is the reliable doctor-scoping path.
 | File | Confidence |
 |---|---|
 | `cosmos-dashboard/app/page.tsx` | ★ Verified-final (this session — shadcn rewrite, superadmin picker) |
-| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (this session — Users tab, active KPI, quick access fix) |
+| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (this session — Edit button for location assignments, 12h time display) |
 | `cosmos-dashboard/app/api/admin/users/route.ts` | ★ Verified-final (this session — full CRUD + superadmin guard) |
 | `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (this session — role buttons, free-form time, double-booking guard) |
 | `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (this session — dual-mode save, visitDirty, CPT picker fix) |
@@ -205,6 +216,19 @@ from the login screen is the reliable doctor-scoping path.
 
 ## Lessons Learned This Session
 
+- **Termux home path is not `/root`** — a patch script hardcoded
+  `/root/cosmos-dashboard` and failed with `FileNotFoundError`. Termux
+  home is `/data/data/com.termux/files/home/` (`~` or `$HOME`). Patch
+  scripts must use `$HOME`/`~`, never assume a standard Linux `/root`
+  path, even when written/tested conceptually against a normal Linux
+  environment.
+- **Edit-in-place via existing upsert, no new backend path** — when a
+  table already has a `upsert(..., { onConflict: '<unique_cols>' })`
+  write path (here: `doctor_locations` on `doctor_id,location_id`), an
+  "Edit" feature can reuse the existing Add form and handler entirely —
+  populate the form state from the row being edited, track an
+  `editing<X>Id` to switch the form's title/button label, no separate
+  UPDATE-specific code or endpoint needed.
 - **Supabase Auth min password length** — default is 6 chars. PINs shorter
   than 6 are silently rejected. Fix: `padPin()` pads to 6 with trailing
   zeros. All test users now use `999999`.
