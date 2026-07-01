@@ -1,5 +1,69 @@
 # Changelog
 
+## 2026-06-30 — Mailing address, tab merge, PA/NP, grouped provider cards, dev tools fixes
+
+### Migration 014 — mailing address replaces PC/personal address
+
+Dropped from `doctors`: `street`, `city`, `state`, `zip`, `pc_street`,
+`pc_city`, `pc_state`, `pc_zip`. Added: `mailing_street`, `mailing_city`,
+`mailing_state` (DEFAULT `'NY'`), `mailing_zip`. Mailing address is required
+for all providers regardless of tax classification — it is where insurance
+companies send payments, denials, and correspondence.
+
+### `forms/w9.py` — reads `mailing_*` columns
+
+Dropped old fallback chain (`pc_street → street`). W-9 address lines now
+read `mailing_street`, `mailing_city`, `mailing_state`, `mailing_zip` directly.
+
+### Provider form — General + Credentials tab merge
+
+`General` tab removed. Fields merged into `Credentials` tab:
+First/Last Name, License Type, Specialty, Supervising Provider, Email,
+Phone, Fax, NPI, License #, Signature. Provider form now has three tabs:
+**Credentials** · **Billing** · **Schedule**.
+
+### Billing tab — Mailing Address replaces Registered PC Address
+
+`Registered PC Address` block removed from Billing tab. New **Mailing Address**
+block (Street/City/State/Zip) added — always visible regardless of tax
+classification. PC Corp Name remains, still conditionally shown for non-individual
+tax classifications. Validation: all four mailing address fields are required.
+
+### PA and NP license types
+
+`LICENSE_TYPE_OPTIONS` extended: `NP — Nurse Practitioner`,
+`PA — Physician Assistant`. Validation: `license_type === 'NP'` requires
+`supervising_provider_id` (NPs must work under a supervising MD). PAs can
+have their own PC with no supervisor.
+
+### Provider cards — grouped hierarchy + visual tiers
+
+Doctor list now groups by billing hierarchy: independent/supervising MDs
+first (full cyan border), supervised providers indented under their
+supervisor (dim border, `ml-4`). Card content: name + inline license
+abbreviation, specialty, NPI, corp name (purple), supervisor line (green),
+signature status. Short labels for license types: PSY, ACU, POD. No empty
+line gaps between card fields (`gap-[3px]` + `m-0`).
+
+### Dev test-data generator — real doctors/carriers/attorneys
+
+`app/dev/page.tsx` `generate()` fetches real records from `doctors`,
+`insurance_carriers`, and `lawyers` before generating patients. Falls
+back to hardcoded fictional data only if a table returns empty rows.
+No more "Yuri Goddesman" or fictional carriers/law firms in generated
+test data.
+
+### Wipe-patients endpoint — appointments cascade
+
+`app/api/wipe-patients/route.ts`: `appointments` table now deleted before
+`patients` in the cascade chain. Previous gap left orphaned appointment
+rows pointing at deleted patients after a data wipe, causing broken
+patient-name lookups on the Today Schedule.
+
+---
+
+
+
 ## 2026-06-29 — Doctor location assignment Edit button, 12h time display
 
 ### Location Assignments — Edit capability (new)

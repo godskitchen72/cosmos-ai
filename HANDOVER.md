@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (June 29, 2026, session 7)
+# Cosmos Medical Technologies — HANDOVER (June 30, 2026, session 8)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -13,148 +13,104 @@ self-contained.
 
 ## Current Status
 
-All `cosmos-dashboard` commits confirmed deployed via `tsc --noEmit` +
-full deploy chain. Live app confirmed healthy at session close.
+All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed via
+`tsc --noEmit` + full deploy chain. Live app confirmed healthy at session
+close.
 
 ---
 
 ## Completed This Session
 
-### Doctor Location Assignment — Edit button — live
+### PC/Personal Address → Mailing Address (migration 014)
 
-Admin → Providers → Schedule → Location Assignments cards now have an
-**Edit** button alongside Remove. Edit reuses the existing Add Location
-form (`addingLoc`/`locForm`) and `handleAddLocation`'s upsert — no new
-backend path. New `editingLocId` state tracks edit-mode; the location
-dropdown locks (read-only) while editing so only the schedule fields
-(days/hours/capacity/slot length) can change. Save button reads "Save
-Changes" in edit mode. Resolves Open Item #1 (was: "must delete and
-re-add to change hours").
+Dropped unused `street`, `city`, `state`, `zip`, `pc_street`, `pc_city`,
+`pc_state`, `pc_zip` from `doctors` table. Added `mailing_street`,
+`mailing_city`, `mailing_state` (DEFAULT `'NY'`), `mailing_zip` — the
+single address used for all insurance correspondence (payments, denials,
+and remittance). Mailing address is required for all providers regardless
+of tax classification. Backend `forms/w9.py` updated to read `mailing_*`
+columns directly (dropped the old `pc_street → street` fallback chain).
 
-Also fixed in the same pass: location card hours display changed from
-24-hour to 12-hour with AM/PM (`toLocaleTimeString`) — display-only,
-underlying columns unchanged.
+### Provider Form — General + Credentials tab merge
 
-### Admin Users Tab — live
+`General` tab removed. Its fields (First/Last Name, License Type,
+Specialty, Supervising Provider, Email, Phone, Fax) merged into
+`Credentials` tab. Provider form now has three tabs: **Credentials**,
+**Billing**, **Schedule**. Mailing Address added to Billing tab, replacing
+the Registered PC Address block. PC Corp Name still conditionally shown
+when `tax_classification !== 'individual'`.
 
-Full user management from within Admin dashboard. No more Supabase
-dashboard or manual SQL required for day-to-day user administration.
+### PA and NP license types added
 
-- **API route:** `app/api/admin/users/route.ts` — GET/POST/PATCH/DELETE
-  using Supabase Admin client (`SUPABASE_SERVICE_KEY`).
-- **`user_profiles.active`** column added (boolean, NOT NULL DEFAULT true)
-  via `ALTER TABLE` migration.
-- **`user_profiles` CHECK constraint** updated to include `superadmin`:
-  `CHECK (role IN ('frontdesk','md','billing','admin','superadmin'))`.
-- **PIN padding:** `padPin()` helper in `lib/supabase.ts` pads PINs to 6
-  chars (Supabase Auth minimum). Applied on `signIn()`, POST (create),
-  and PATCH (reset PIN). Existing test users reset via direct SQL.
-  All test users now use PIN `999999` (6 digits).
-- **Auth token forwarded:** all `UsersSection` fetch calls include
-  `Authorization: Bearer <token>` header via `getToken()` helper.
+`LICENSE_TYPE_OPTIONS` extended with `NP — Nurse Practitioner` and
+`PA — Physician Assistant`. Validation rule: `license_type === 'NP'`
+requires a `supervising_provider_id` (NPs must have a supervising MD).
+PAs can have their own PC, no supervisor required.
 
-### Superadmin Role — live
+### Provider cards — grouped hierarchy + visual tiers
 
-New `superadmin` role gives practice owner access to all four dashboards
-from a single login.
+Doctor cards now grouped: independent/supervising MDs first (full cyan
+border `border-[#00cfff]`), supervised providers indented under their
+supervisor (dim border `border-[#ffffff18]`, `ml-4`). Cards show:
+- Name + license type abbreviation inline (PSY, ACU, POD short labels)
+- Specialty, NPI, Corp name (purple), Supervisor (green), Signature status
+- No empty line gaps (`gap-[3px]`, `m-0` on all `<p>` elements)
 
-- **Login screen** (`app/page.tsx`) fully rewritten in shadcn/ui +
-  Oxanium font (replaces all inline styles). Three stages:
-  `login` → `location` (MD multi-location picker) → `dashboard`
-  (superadmin picker).
-- **Superadmin dashboard picker:** 2×2 grid of dashboard tiles
-  (Front Desk, MD, Billing, Admin). Gold crown badge. Sign out link.
-- **Role guard on API route:** non-superadmin callers cannot create,
-  assign, modify, or delete superadmin accounts. Enforced server-side
-  via `getCallerRole()` reading the Bearer token.
+### Dev test-data generator — real doctors/carriers/attorneys
 
-### Superadmin Provisioning Procedure
+`app/dev/page.tsx` `generate()` now fetches real `doctors`, `insurance_carriers`,
+and `lawyers` from Supabase before generating patients. Fallback to
+hardcoded fictional data only if a table returns empty rows (with a
+visible warning in the results log). Column mapping: carriers use
+`carrier_name` + composed address from `street`/`city`/`state`/`zip`;
+lawyers use `first_name`/`last_name` + `firm_name` + `phone`.
 
-First superadmin per client must be bootstrapped via Supabase SQL:
-```sql
-UPDATE user_profiles SET role = 'superadmin'
-WHERE id = (SELECT id FROM auth.users WHERE email = 'owner@practice.com');
-```
-Subsequent superadmins can be created in-app by an existing superadmin.
+### Wipe-patients endpoint — now clears appointments
 
-### Active Users KPI Card — live
+`app/api/wipe-patients/route.ts`: `appointments` table delete added to
+the cascade chain before `patients` is deleted. Previous gap caused
+stale orphaned appointment rows after a patient data wipe.
 
-Overview KPI card now shows real count from `user_profiles WHERE active = true`.
+### Doctor location assignment Edit button (from session 7, live)
 
-### Admin UI Fixes — live
+Admin → Providers → Schedule → Location Assignments cards have an **Edit**
+button. Edit reuses the existing Add Location form and upsert — no new
+backend path. Location dropdown is locked while editing.
 
-- Quick Access Users button wired to `admin-tab` event handler
-- Practice Info card font sizes and spacing tightened
+Also fixed in same pass: location card hours display changed from 24-hour
+to 12-hour with AM/PM (`toLocaleTimeString`).
 
-### RLS Full Audit — live
+### Provider card layout fixes (from session 7, live)
 
-Full audit of all public tables. Added `authenticated` role policies to:
-`cpt_codes`, `doctor_locations`, `doctors`, `office_locations`,
-`practice_settings`, `user_profiles`, `patient_pain_chart`,
-`patient_procedures`, `patients`, `patient_visits`, `visit_line_items`.
-
-**Pattern confirmed:** `allow_all_<table>` policy `FOR ALL TO anon,
-authenticated USING (true) WITH CHECK (true)` is the standard fix.
-RLS silent-failure (returns zero rows, no error) is caused by missing
-`authenticated` role coverage even when `anon` policies exist.
-
-### Appointment → Visit Conversion — live
-
-Full FD → MD workflow implemented:
-
-**FD role (calendar):** `View Chart` · `Confirm →` · `Check In →` ·
-`No-Show` · `Cancel` · `Delete`
-
-**MD role (calendar):** `Start Visit` (Checked In only) · `No-Show`
-(Confirmed/Checked In only) · `Cancel` (Confirmed/Checked In only) ·
-`Awaiting confirmation` text for Scheduled
-
-**`handleStartVisit`:** Creates `patient_visits` row → marks appointment
-`Checked In` → navigates to `/md/${patientId}?visit_id=${newId}`.
-
-**`handleSave` dual-mode:** If `savedVisitId` exists (pre-created via
-Start Visit) → UPDATE. If not → INSERT. Both paths call
-`generateIcd10Pdf` + `finalizeBilling` + auto-complete appointment.
-
-**`visitDirty` flag:** Detects whether a pre-created visit has clinical
-data. Starts `true` for empty pre-created visits (shows SAVE MD VISIT),
-`false` for visits with existing `pce_data` or `cpt_codes` (shows
-✅ Visit Saved). CPT/ICD-10 pickers show when `visitDirty`, read-only
-chips when `!visitDirty`.
-
-### Booking Form Improvements — live
-
-- **Free-form time entry** replaces slot system (NY No-Fault workflow —
-  walk-in/queue model, not strict time slots)
-- **Double-booking guard:** blocks same doctor + date + time
-- **Dark doctor selector:** locked MD shows as text, FD gets dropdown
-- **Hours hint:** shows location service hours below time input
-- **MD calendar buttons:** Scheduled → "Awaiting confirmation" text only
-
-### `generateSlots` — retained but unused
-
-Function kept in codebase for potential future use by practices that
-need strict time slot scheduling. Not called by any UI.
+- License type `MD` shown inline after name (not as a separate badge)
+- PSY / ACU / POD short label abbreviations in card
+- Empty-line gaps removed with `gap-[3px]` + `m-0` on all `<p>` elements
 
 ---
 
 ## Open Items, Priority Order
 
-1. **NF-3 PC-payee mapping** — verify in a real generated PDF. Never
-   confirmed across any session.
+1. **NF-3 Pay-To: use mailing address** — `forms/nf3.py` currently reads
+   `patient_data.get("doctor_address")` / `patient_data.get("doctor_pc_address")`
+   — both denormalized free-text fields on `patients`, not the real
+   `doctors.mailing_*` columns. NF-3 Pay-To address needs to be wired to
+   the new `mailing_*` columns. Also: supervisor PC fallback logic
+   (`supervising_provider_id` → supervisor's mailing address) still not
+   implemented. Deferred multiple sessions.
 
-2. **NF-3 Pay-To: supervisor PC logic** — `forms/nf3.py` should fall
-   through to supervisor's PC when `supervising_provider_id` is set.
-   Deliberately deferred multiple sessions.
+2. **NF-3 PC-payee mapping — live PDF verification** — code logic checked
+   out in session 8 (`payee_name = doctor_pc_corp_name or provider`), but
+   a real generated PDF visual check was never completed. Blocked until
+   #1 is implemented (address fields are wrong until then).
 
 3. **Practice Info → NF-3 wiring** — `practice_settings` table exists and
    is NF-3-ready. Backend `forms/nf3.py` doesn't read it yet.
 
 4. **`forms/base.py` `except Exception: pass`** — prohibited
-   (`SYSTEM_PROMPT.md` §1/§8). Flagged 5+ sessions, never fixed.
+   (`SYSTEM_PROMPT.md` §1/§8). Flagged 6+ sessions, never fixed.
 
 5. **`w9_filler.py` in `cosmos-api` root** — legacy duplicate of
-   `forms/w9.py`. Flagged 4 sessions, never removed.
+   `forms/w9.py`. Flagged 5 sessions, never removed.
 
 6. **`patient_visits.doctor_id` column** — does not exist. `handleStartVisit`
    was patched to omit it. If doctor linkage on visits is needed, add
@@ -170,8 +126,15 @@ need strict time slot scheduling. Not called by any UI.
 
 10. **Regenerate W-9s for existing doctors** — no bulk path. Low urgency.
 
-11. **Desktop sidebar nav** — mockup confirmed target. Mobile-first
-    remains immediate priority.
+11. **Desktop sidebar nav** — mockup confirmed target. System is intended
+    for desktop use (confirmed session 8). Mobile-first was the original
+    priority but desktop layout is the real end goal.
+
+12. **Existing doctor records missing mailing address** — Dr. Gottesman,
+    Dr. Orthobot, Dr. Pearlman, Dr. Kramer all predate migration 014 and
+    have blank `mailing_*` fields. W-9 generation for these doctors will
+    produce PDFs with a blank address until they're edited in Admin →
+    Providers → Billing → Mailing Address.
 
 ---
 
@@ -186,6 +149,12 @@ from the login screen is the reliable doctor-scoping path.
 `handleStartVisit` omits it. Visit-to-doctor linkage currently relies on
 `patients.doctor_id` (one-doctor-per-patient assumption).
 
+**NF-3 address denormalization:** `forms/nf3.py` reads `doctor_address` and
+`doctor_pc_address` from `patient_data` (free-text fields on `patients`),
+not from the real `doctors.mailing_*` columns. This is a compliance-relevant
+gap — the NF-3 Pay-To address may be blank or stale for any patient whose
+record predates migration 014. See Open Item #1.
+
 ---
 
 ## File Confidence Levels (cumulative)
@@ -195,20 +164,24 @@ from the login screen is the reliable doctor-scoping path.
 
 | File | Confidence |
 |---|---|
-| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (this session — shadcn rewrite, superadmin picker) |
-| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (this session — Edit button for location assignments, 12h time display) |
-| `cosmos-dashboard/app/api/admin/users/route.ts` | ★ Verified-final (this session — full CRUD + superadmin guard) |
-| `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (this session — role buttons, free-form time, double-booking guard) |
-| `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (this session — dual-mode save, visitDirty, CPT picker fix) |
-| `cosmos-dashboard/lib/supabase.ts` | ★ Verified-final (this session — padPin helper) |
+| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (this session — tab merge, mailing address, PA/NP, grouped cards, card layout fixes) |
+| `cosmos-dashboard/app/api/wipe-patients/route.ts` | ★ Verified-final (this session — appointments cascade added) |
+| `cosmos-dashboard/app/dev/page.tsx` | ★ Verified-final (this session — real doctors/carriers/attorneys) |
+| `cosmos-api/forms/w9.py` | ★ Verified-final (this session — reads mailing_* columns) |
+| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (session 7 — shadcn rewrite, superadmin picker) |
+| `cosmos-dashboard/app/api/admin/users/route.ts` | ★ Verified-final (session 7 — full CRUD + superadmin guard) |
+| `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (session 7 — role buttons, free-form time, double-booking guard) |
+| `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (session 7 — dual-mode save, visitDirty, CPT picker fix) |
+| `cosmos-dashboard/lib/supabase.ts` | ★ Verified-final (session 7 — padPin helper) |
 | `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (prior session) |
 | `cosmos-dashboard/middleware.ts` | ★ Verified-final (prior session) |
 | `cosmos-dashboard/app/md/page.tsx` | ★ Verified-final (prior session) |
 | `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (prior session) |
 | `cosmos-dashboard/app/billing/BillerDashboard.tsx` | ★ Verified-final (prior session) |
 | `cosmos-dashboard/app/lib/fonts.ts` | Obtained-current (prior session) |
+| `cosmos-api/forms/nf3.py` | Obtained-current (this session — read in full, address logic confirmed but NOT using mailing_* yet) |
+| `cosmos-api/main.py` | ★ Verified-final (prior session) |
 | `cosmos-api/forms/ortho.py`, `forms/pain_mgmt.py` | ★ Verified-final (prior session) |
-| `cosmos-api/main.py`, `pdf_engine.py` | ★ Verified-final (prior session) |
 | `cosmos-api/forms/ans.py`, `dme.py`, `icd10.py`, `mri.py`, `pce.py`, `pt.py`, `rx.py`, `vng.py` | Only TEMPLATE line confirmed |
 | `cosmos-api/forms/aob.py`, `nf2.py` | Never obtained |
 
@@ -216,42 +189,33 @@ from the login screen is the reliable doctor-scoping path.
 
 ## Lessons Learned This Session
 
-- **Termux home path is not `/root`** — a patch script hardcoded
-  `/root/cosmos-dashboard` and failed with `FileNotFoundError`. Termux
-  home is `/data/data/com.termux/files/home/` (`~` or `$HOME`). Patch
-  scripts must use `$HOME`/`~`, never assume a standard Linux `/root`
-  path, even when written/tested conceptually against a normal Linux
-  environment.
-- **Edit-in-place via existing upsert, no new backend path** — when a
-  table already has a `upsert(..., { onConflict: '<unique_cols>' })`
-  write path (here: `doctor_locations` on `doctor_id,location_id`), an
-  "Edit" feature can reuse the existing Add form and handler entirely —
-  populate the form state from the row being edited, track an
-  `editing<X>Id` to switch the form's title/button label, no separate
-  UPDATE-specific code or endpoint needed.
-- **Supabase Auth min password length** — default is 6 chars. PINs shorter
-  than 6 are silently rejected. Fix: `padPin()` pads to 6 with trailing
-  zeros. All test users now use `999999`.
-- **`user_profiles` CHECK constraint** — adding a new role requires
-  `DROP CONSTRAINT` + `ADD CONSTRAINT`. No `ALTER CONSTRAINT` in Postgres.
-- **Service-role API guard pattern** — read `Authorization: Bearer` header,
-  call `supabase.auth.getUser(token)`, look up `user_profiles.role`.
-  Frontend must forward session token on every mutating call.
-- **Superadmin bootstrap** — first superadmin per deployment requires
-  direct SQL. Document in client onboarding checklist.
-- **`/tmp` not writable in Termux** — use `~/` for patch scripts. Termux
-  home: `/data/data/com.termux/files/home/`.
-- **RLS silent failure** — `anon`-only policies block `authenticated` users
-  silently (zero rows, no error). Always add both roles. Standard fix:
-  `FOR ALL TO anon, authenticated USING (true) WITH CHECK (true)`.
-- **`patient_visits.doctor_id`** — column does not exist. Do not reference
-  it in any insert/update without adding a migration first.
-- **NY No-Fault slot system** — fixed time slots are wrong for NY No-Fault
-  walk-in/queue model. Replaced with free-form time entry. Capacity =
-  daily patient limit, not slot count.
-- **`visitDirty` pattern** — when a visit row is pre-created (Start Visit),
-  `savedVisitId` is set but clinical data is empty. Use `visitDirty` to
-  distinguish "needs saving" from "already saved". Initialize from visit
-  data, not from whether `savedVisitId` exists.
-- **CPT/ICD-10 picker gating** — gate on `(!visitDirty && savedVisitId)`,
-  not just `savedVisitId`. Otherwise pickers disappear on pre-created visits.
+- **When patching a file that has already been partially patched in the
+  same session, always re-fetch the live file before writing new anchors.**
+  Multiple anchor failures this session were caused by writing patch
+  anchors against the original uploaded file rather than the current
+  on-disk state after earlier patches had run. Standing rule: whenever
+  two or more patch scripts touch the same file in one session, the
+  second script must anchor against a fresh `git show HEAD:...` or `cat`
+  of the file as it exists after the first script ran.
+- **Prefer full-file rebuild over stacking patches on heavily-modified
+  files.** `admin/page.tsx` was patched 5+ times this session, causing
+  several anchor failures. For files that require 3+ patches in a
+  session, the correct approach is to fetch the current file, apply all
+  changes at once in Claude's sandbox, and deliver the complete corrected
+  file for a single `cp` — which is what eventually worked.
+- **`<p>` elements have browser-default margins** — `gap-0` on a flex
+  container does not collapse `<p>` spacing. Must use `m-0`/`my-0` on
+  the `<p>` elements themselves, or use `leading-tight` + explicit gap
+  (e.g. `gap-[3px]`) to achieve visually tight card layouts.
+- **License type display vs. stored value** — the displayed label in
+  `LICENSE_TYPE_OPTIONS` only affects the dropdown, not what's stored in
+  the database or rendered in card views. Cards render `item.license_type`
+  directly; short labels (PSY, ACU etc.) must be mapped in the card
+  render itself via an inline lookup object.
+- **Desktop is the real target** — confirmed in session 8. The system is
+  intended for desktop use by front desk staff. Mobile-first was the
+  development-environment constraint, not the product direction. Desktop
+  layout work (sidebar nav, wider containers, multi-column layouts) should
+  be treated as a high-priority product goal, not a future nice-to-have.
+- **Termux home path is not `/root`** — re-confirmed this session.
+  All patch scripts must use `$HOME`/`~`, never `/root`.

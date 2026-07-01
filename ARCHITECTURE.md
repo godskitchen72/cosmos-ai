@@ -91,6 +91,9 @@ live database unless noted otherwise in `HANDOVER.md`):
 - `009_add_doctor_license_type_and_supervising.sql`
 - `010_add_practice_settings_and_office_locations.sql`
 - `011_add_doctor_locations_and_appointment_location.sql`
+- `012_add_user_profiles.sql` — `user_profiles` table, auth foundation
+- `013_add_doctor_default_hours.sql` — `default_start_time`/`default_end_time` on `doctors`
+- `014_doctor_mailing_address.sql` — dropped `street`/`city`/`state`/`zip`/`pc_street`/`pc_city`/`pc_state`/`pc_zip`; added `mailing_street`/`mailing_city`/`mailing_state`/`mailing_zip`
 
 Key tables referenced throughout the codebase: `patients`,
 `patient_visits` (visit-scoped data, including `cpt_codes`/`icd10_codes`,
@@ -103,9 +106,14 @@ per visit, and now also Denial Docs uploads/deletes — see §8), `cpt_codes`
 schedule" concept anywhere in the codebase; unique constraint on `cpt_code`
 added migration 011), `doctors` (PC/tax fields per §5 of `PRODUCT_SPEC.md`,
 `w9_url`, signature; `doctor_id` is its primary key; also `license_type`
-text DEFAULT 'MD', `supervising_provider_id` uuid FK self-referencing,
-`available_days` text[], `max_patients_per_day` int DEFAULT 25 —
-migration `009_add_doctor_license_type_and_supervising.sql`).
+text DEFAULT 'MD' (options: MD, NP, PA, DC, PT, Acupuncturist, Psychologist,
+Podiatrist, Other), `supervising_provider_id` uuid FK self-referencing
+(required when `license_type = 'NP'`), `available_days` text[],
+`max_patients_per_day` int DEFAULT 25 — migration 009.
+`default_start_time`/`default_end_time` time DEFAULT '09:00'/'17:00' — migration 013.
+`mailing_street`/`mailing_city`/`mailing_state`/`mailing_zip` text (mailing
+address for insurance correspondence; replaces the dropped `street`/`city`/
+`state`/`zip`/`pc_street`/`pc_city`/`pc_state`/`pc_zip` columns) — migration 014.
 
 **New tables added this session:**
 - `practice_settings` (migration 010) — single-row (id=1, CHECK constraint),
