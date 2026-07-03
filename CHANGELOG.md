@@ -1,5 +1,99 @@
 # Changelog
 
+## 2026-07-03 — Session 10: FK audit, base.py fix, Admin polish, carrier import, provider display
+
+### `forms/base.py` — all `except Exception: pass` removed
+
+- `requests` import failure: now logs `WARNING: requests not available: {e}`
+- `fitz` import failure: now logs `WARNING: fitz (PyMuPDF) not available: {e}`
+- `render_visible_text_in_rect`: `except Exception: pass` → logs error
+- `format_date` inner loop and outer catch: both now log parse errors
+
+### `w9_filler.py` deleted from `cosmos-api` root
+
+120-line legacy duplicate of `forms/w9.py`. Nothing imported it.
+
+### PDF template filenames normalized to uppercase
+
+`ortho.pdf` → `ORTHO.pdf`, `pain_mgmt.pdf` → `PAIN_MGMT.pdf`.
+Updated `forms/ortho.py` line 44 and `forms/pain_mgmt.py` line 42.
+
+### `insurance_carriers` — new columns + RLS fix
+
+```sql
+ALTER TABLE insurance_carriers
+  ADD COLUMN IF NOT EXISTS claims_department text,
+  ADD COLUMN IF NOT EXISTS street2 text,
+  ADD COLUMN IF NOT EXISTS claims_email text;
+
+CREATE POLICY "authenticated all insurance_carriers"
+ON public.insurance_carriers FOR ALL TO authenticated
+USING (true) WITH CHECK (true);
+```
+
+### `app/admin/page.tsx` — inline save error feedback
+
+All Admin save handlers now surface backend errors as red inline messages
+below the Save button. Previously all were silent on failure. Sections
+updated: Carriers, Lawyers, CPT Codes, ICD-10, Practice Info, Office
+Locations, Doctor Location Assignments.
+
+### `app/admin/page.tsx` — carrier CSV batch import
+
+CSV import added to Carriers section (same pattern as CPT/ICD-10):
+upload → preview → confirm, skips duplicates by `carrier_name`. Parses
+flexible column headers. Accepts `.csv` files. Three new fields added to
+Add/Edit form and cards: Claims Department, Street Address Line 2, Claims
+Email. Carrier name now cyan on cards, `m-0` on all text.
+
+### `app/admin/page.tsx` — Edit Provider / Edit Carrier green name headers
+
+Provider edit form: `Edit Provider: Dr. {first} {last}` with name in green.
+Carrier edit form: `Edit Carrier: {carrier_name}` with name in green.
+
+### `app/md/MDClient.tsx` — logged-in doctor name in header
+
+Header now shows `👤 Dr. {name}` (cyan) above `📍 {location}` (green).
+`Dr.` prefix only for MD/DO license types.
+
+### `app/dashboard/DashboardClient.tsx` — assigned provider on patient cards
+
+Patient cards show: `PT336816 · Progressive · Dr. Yury Gottesman (MD)`.
+Implemented via PostgREST join `doctors(first_name, last_name, license_type)`
+in client `loadAll`. Handles PostgREST array join shape. `Dr.` prefix only
+for `['MD', 'DO']`. Red `⚠ No provider` when `doctor_id` is null.
+
+### FK constraint audit — Stage 1 complete
+
+Added missing FK constraints:
+
+```sql
+-- appointments
+ALTER TABLE appointments
+  ADD CONSTRAINT appointments_patient_id_fkey
+  FOREIGN KEY (patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE;
+
+-- patient_visits
+ALTER TABLE patient_visits
+  ADD CONSTRAINT patient_visits_patient_id_fkey
+  FOREIGN KEY (patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE;
+
+-- visit_line_items
+ALTER TABLE visit_line_items
+  ADD CONSTRAINT visit_line_items_visit_id_fkey
+  FOREIGN KEY (visit_id) REFERENCES patient_visits(id) ON DELETE CASCADE;
+
+ALTER TABLE visit_line_items
+  ADD CONSTRAINT visit_line_items_patient_id_fkey
+  FOREIGN KEY (patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE;
+```
+
+All other FK relationships (`patients.doctor_id`, `appointments.doctor_id`,
+`appointments.location_id`, `patient_visits.location_id`,
+`doctor_locations.*`, `user_profiles.doctor_id`) were already in place.
+
+
+
 ## 2026-07-03 — NF-3 full wiring, office location Main Office, PA/NP roles, Admin polish
 
 ### Migration 015 — `office_locations.is_main_office`

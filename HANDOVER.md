@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 3, 2026, Session 9)
+# Cosmos Medical Technologies — HANDOVER (July 3, 2026, Session 10)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -21,163 +21,182 @@ close.
 
 ## Completed This Session
 
-### Admin UI — card spacing / visual polish
+### `forms/base.py` — removed all `except Exception: pass` (P1 closed)
 
-Practice Info card, Office Location cards, and User cards: removed empty-line
-gaps — `gap-0` on flex containers + `m-0` on all `<p>` elements. Matches
-the tight provider card layout established in Session 8. Supervisor billing
-card inside the provider form also tightened.
+All silent exception swallowing eliminated from `forms/base.py`. Seven
+sessions flagged, fixed this session:
+- `requests` import failure: now logs `WARNING: requests not available`
+- `fitz` import failure: now logs `WARNING: fitz (PyMuPDF) not available`
+- `render_visible_text_in_rect`: now logs error instead of passing silently
+- `format_date` inner/outer except: both now log parse errors
 
-### Admin — office location Edit button + Main Office flag
+### `w9_filler.py` removed (P2 closed)
 
-Office location cards now have an **Edit** button in manage mode (populates
-form, shows "Edit Location" title, "Save Changes" button). Added `is_main_office`
-boolean to `office_locations` table (migration 015). Main office sorted first,
-rendered with cyan border `border-[#00cfff]`; all other locations use purple
-`border-[#a855f7]`. Add/Edit form includes a custom toggle (cyan checkbox)
-for marking main office — only one location can be main at a time (mutual
-exclusivity enforced on save).
+Legacy 120-line duplicate of `forms/w9.py` deleted from `cosmos-api` root.
+Nothing imported it. Six sessions flagged, fixed this session.
 
-### Admin — supervised provider border color
+### PDF filename casing normalized
 
-Provider cards for supervised providers (PA, NP, DC, PT, PSY, etc.) changed
-from dim white `border-[#ffffff18]` to purple `border-[#a855f7]`, consistent
-with their corp name color.
+`ortho.pdf` → `ORTHO.pdf`, `pain_mgmt.pdf` → `PAIN_MGMT.pdf`. Updated
+`forms/ortho.py` line 44 and `forms/pain_mgmt.py` line 42 to match.
+All 15 PDF templates now use uppercase filenames consistently.
 
-### Admin — SelectTrigger dark-on-dark fix
+### Practice Info → NF-3 wiring (P4 closed — won't do)
 
-All `SelectTrigger` elements in the Admin panel now have `style={{color:'#f0f4f8'}}`
-explicitly set — fixes the "selected value invisible" bug caused by the
-preflight gap (`AI_STYLE_GUIDE.md` §1, `ARCHITECTURE.md` §10).
+`practice_settings` feeds Admin Overview only. NF-3 billing is
+correctly sourced per-doctor via `doctors` table. No wiring needed.
 
-### Admin — PA and NP user roles
+### Admin — Edit Provider header shows provider name in green
 
-`user_profiles_role_check` constraint updated to include `pa` and `np`.
-Role dropdown now shows: Front Desk / MD / PA / NP / Billing / Admin /
-Superadmin with human-readable labels via `ROLE_LABELS`. Role badge colors:
-PA = blue `#3b82f6`, NP = purple `#8b5cf6`, Superadmin = red `#e74c3c`.
-"Linked Doctor" field now shown for PA and NP roles (previously MD-only) —
-required for location picker to work on login. `doctor_id` is not cleared
-when switching between md/pa/np roles.
+`CardTitle` on the provider edit form now renders:
+`Edit Provider: <span style={{color:'#19a866'}}>Dr. {first} {last}</span>`
+instead of generic "Edit Provider". New Carrier form got the same treatment:
+`Edit Carrier: <span style={{color:'#19a866'}}>{carrier_name}</span>`.
 
-### Login — PA and NP location picker
+### Admin — backend save errors surfaced inline (all sections)
 
-`app/page.tsx` `ROLE_META` extended with `pa` and `np` entries (both route
-to `/md`). `navigate()` and `handlePostLogin()` updated: location picker
-shown for `['md', 'pa', 'np']` instead of `md` only. PA/NP users get the
-same session location flow as MDs — `cosmos_location_id` stored in
-`sessionStorage`.
+Previously silent Supabase failures now show a red inline error message
+below the Save button on every Admin save handler:
+- Carriers, Lawyers, CPT Codes, ICD-10 — `saveError` state
+- Practice Info — `practiceError` state
+- Office Locations (Overview) — `locOvError` state
+- Doctor Location Assignments — `locError` state
+- Lawyers `alert()` replaced with inline error for consistency
+- Providers section already had full try/catch — unchanged
 
-### NF-3 — full Pay-To / signature / place-of-service wiring
-
-Major compliance work this session:
-
-**`database.py`** — refactored to `_build_doctor_fields()` shared helper:
-- Reads `mailing_street/city/state/zip` (migration 014 columns) for Pay-To address
-- Supervisor fallback: if `supervising_provider_id` is set, fetches supervisor
-  row and uses their `mailing_*` + `pc_corp_name` for Pay-To, plus exports:
-  `supervisor_npi`, `supervisor_tax_id`, `supervisor_specialty`,
-  `supervisor_signature_url`, `supervisor_name`
-- `doctor_license_type` exported for NF-3 Section 16 title field
-- `get_doctor_by_id` delegates to shared helper (no duplicate logic)
-
-**`forms/nf3.py`**:
-- Page 1 `provider.name_address` → PC corp name + mailing address ✅
-- Page 2 Section 15 place of service → `place_of_service_address` from
-  office location (street / city, state zip — two-line format)
-- Page 2 Section 16 treating provider title → `doctor_license_type` (PA/NP/MD)
-- Page 2 Section 16 license/cert no. → treating provider's own NPI
-- Page 3 `assignment.provider_assignee_print_name` → PC corp name (payee_name)
-- Page 3 `assignment.provider_assignee_signature` → supervisor signature
-- Page 3 `provider.signature` (bottom) → supervisor signature
-- Page 3 `provider.irs_tin` → supervisor name (Gottesman's name in billing name field)
-- Page 3 `provider.wcb_rating_code` → supervisor NPI
-- Page 3 `provider.specialty_if_none` → supervisor specialty
-- `billing_npi`, `billing_tax_id`, `billing_specialty` derived from supervisor
-  when PC corp exists, else treating provider's own values
-- `_p2_vals()` signature extended with `billing_npi` parameter (fixes NameError)
-- Signature injection split: `assignee_sig_bytes` (supervisor) for both
-  `provider_assignee_signature` and `provider.signature`; `treating_sig_bytes`
-  retained in vars but not injected (both sig fields now use supervisor)
-
-**`main.py`**:
-- After visit row merge, fetches `office_locations` using `visit.location_id`
-  and adds `place_of_service_address` (two-line: `street\ncity, state zip`)
-
-**`cosmos-dashboard/app/calendar/page.tsx`**:
-- `handleStartVisit` now writes `location_id: apt.location_id || sessionStorage.getItem('cosmos_location_id') || null`
-- `Appointment` interface extended with `location_id?: string`
-
-**`cosmos-dashboard/app/md/[patientId]/PatientChart.tsx`**:
-- Manual visit INSERT now includes `location_id: sessionStorage.getItem('cosmos_location_id') || null`
-
-**Migration 016** — `patient_visits.location_id uuid REFERENCES office_locations(id)` added.
-
-**Backfill SQL** run to populate `location_id` on existing NULL visits:
+**Side effect:** The error surfacing exposed a missing RLS policy on
+`insurance_carriers` — `authenticated` role had no INSERT/UPDATE/DELETE
+policies. Fixed via Supabase dashboard:
 ```sql
-UPDATE patient_visits pv
-SET location_id = a.location_id
-FROM appointments a
-WHERE a.patient_id = pv.patient_id
-  AND a.location_id IS NOT NULL
-  AND pv.location_id IS NULL;
+CREATE POLICY "authenticated all insurance_carriers"
+ON public.insurance_carriers FOR ALL TO authenticated
+USING (true) WITH CHECK (true);
 ```
 
-### Admin — supervised provider validation fix
+### Admin — Insurance Carriers expanded
 
-Mailing address, tax classification fields are now optional for supervised
-providers (PA, NP, DC, PT, PSY — anyone with `supervising_provider_id`).
-These providers inherit billing info from their supervisor. Independent
-providers still require all mailing address fields.
+Three new columns added to `insurance_carriers` table:
+- `claims_department text`
+- `street2 text`
+- `claims_email text`
 
-On validation failure, form now auto-switches to the tab containing the
-first error (Billing tab if billing fields fail, Credentials tab otherwise).
+Admin Carriers form updated with new fields. Carrier cards: name now cyan,
+`m-0` on all text elements, shows `claims_department` and `claims_email`
+when present. CSV batch import added (same pattern as CPT/ICD-10): upload
+→ preview → confirm, skips duplicates by name. Top 20 NY No-Fault carriers
+imported.
 
-### Admin — NF-3 treating provider title
+### MD Dashboard — logged-in doctor name in header
 
-Section 16 title field now uses `doctor_license_type` — shows "PA", "NP",
-"MD" correctly per provider. Previously hardcoded to "MD".
+`MDClient.tsx` header now shows:
+`👤 Dr. Yury Gottesman` (cyan) above `📍 Queens Location` (green).
+Doctor name resolved from `doctorNameMap[doctorId]` — already available
+from the `doctors` prop. Only MD/DO get "Dr." prefix.
+
+### FD Dashboard — assigned provider on patient cards
+
+Patient cards now show assigned provider inline:
+`PT336816 · Progressive · Dr. Yury Gottesman (MD)`
+Provider name in cyan; `⚠ No provider` in red when `doctor_id` is null.
+Implemented via PostgREST join `doctors(first_name, last_name, license_type)`
+in client-side `loadAll`. PostgREST returns joined rows as array — mapping
+handles both array and object forms: `Array.isArray(p.doctors) ? p.doctors[0] : p.doctors`.
+`Dr.` prefix only for `['MD', 'DO']` license types.
+
+### FK constraint audit — Stage 1 complete
+
+Full audit of all FK relationships. Added missing constraints:
+
+| Constraint | Added this session |
+|---|---|
+| `patients.doctor_id → doctors` | Already existed |
+| `appointments.patient_id → patients` ON DELETE CASCADE | ✅ Added |
+| `appointments.doctor_id → doctors` | Already existed |
+| `appointments.location_id → office_locations` | Already existed |
+| `patient_visits.patient_id → patients` ON DELETE CASCADE | ✅ Added |
+| `patient_visits.location_id → office_locations` | Already existed |
+| `visit_line_items.visit_id → patient_visits` ON DELETE CASCADE | ✅ Added |
+| `visit_line_items.patient_id → patients` ON DELETE CASCADE | ✅ Added |
+| `doctor_locations.doctor_id → doctors` | Already existed |
+| `doctor_locations.location_id → office_locations` | Already existed |
+| `user_profiles.doctor_id → doctors` | Already existed |
+
+All FK constraints are now in place across the schema.
 
 ---
 
 ## Open Items, Priority Order
 
-1. **`forms/base.py` `except Exception: pass`** — prohibited
-   (`SYSTEM_PROMPT.md` §1/§8). Flagged 7+ sessions, never fixed.
+1. **NF-3 visual verification — independent provider (no corp)** — P3.
+   Susan Martinez is assigned to Gottesman (confirmed in DB). Generate NF-3
+   for her and verify Page 1 Pay-To, Page 2 Section 16, Page 3 bottom row
+   all populate from Gottesman's own data (not a supervisor fallback).
 
-2. **`w9_filler.py` in `cosmos-api` root** — legacy duplicate of
-   `forms/w9.py`. Flagged 6 sessions, never removed.
+2. **Dev generator fix** — `app/dev/page.tsx` may be creating patients with
+   `doctor_id = null`. Confirmed two patients (Susan Martinez, Sandra Gonzalez)
+   had null `doctor_id` despite the Session 8 fix. Root cause unconfirmed —
+   may be pre-Session 8 data or a generator bug. Audit the generator and
+   RLS on `patients` INSERT before next data wipe.
 
-3. **Practice Info → NF-3 wiring** — `practice_settings` table exists and
-   is NF-3-ready. Backend `forms/nf3.py` doesn't read it yet. Lower
-   priority now that Pay-To/mailing address wiring is complete.
-
-4. **NF-3 visual verification — independent provider (no corp)** — full
-   NF-3 wiring verified for supervised providers (Dr. Orthobot under
-   Gottesman). Need a regression check: generate NF-3 for a patient whose
-   doctor is an independent MD (no `supervising_provider_id`) — confirm
-   all bottom-row fields still populate correctly from their own data.
-
-5. **PDF filename casing** — `ortho.pdf`/`pain_mgmt.pdf` lowercase vs.
-   uppercase convention for the other 7.
-
-6. **MRI Extremity Studies + insurance fields** — backend ready, pure
+3. **MRI Extremity Studies + insurance fields** — backend ready, pure
    frontend work, never started.
 
-7. **`cpt_codes.provider_type` backend wiring** — column exists, unused.
+4. **`cpt_codes.provider_type` backend wiring** — column exists, unused.
 
-8. **Desktop sidebar nav** — confirmed target. System intended for desktop
-   use. Mobile-first was the dev-environment constraint. Desktop layout
-   (sidebar, wider containers, multi-column) is a high-priority product
-   goal.
+5. **Desktop sidebar nav** — confirmed product direction. No design or
+   implementation work started.
 
-9. **Existing doctor records missing mailing address** — Dr. Gottesman,
-   Dr. Orthobot, Dr. Pearlman, Dr. Kramer predate migration 014 and have
-   blank `mailing_*` fields. Must be edited in Admin → Providers → Billing.
+6. **DME provider certification fields blank** — `forms/dme.py` has never
+   been obtained or audited.
 
-10. **DME provider certification fields blank** — Provider Name, License,
-    NPI, Signature missing from DME referral PDF. Pre-existing gap, not
-    introduced this session. `forms/dme.py` has never been obtained/audited.
+7. **Full RLS audit** — enterprise hardening Stage 1 item. Every table,
+   every command (SELECT/INSERT/UPDATE/DELETE), both `anon` and `authenticated`.
+   FK audit complete; RLS audit is next.
+
+---
+
+## Enterprise Hardening Checklist (running)
+
+Introduced this session. Updated incrementally each session.
+
+### Stage 1 — Data Integrity
+- [x] FK constraints — all tables audited and complete (this session)
+- [ ] Full RLS audit — every table, every command, both roles
+- [ ] `NOT NULL` constraints on required columns
+
+### Stage 2 — Security
+- [ ] API JWT authentication on all `cosmos-api` endpoints
+- [ ] Session timeout / auto sign-out after inactivity
+- [ ] Failed PIN attempt lockout
+- [ ] MFA for admin and billing roles
+- [ ] HIPAA BAA with Supabase
+- [ ] Audit log table (who changed what, when)
+
+### Stage 3 — Infrastructure
+- [ ] Staging environment (Vercel preview + Render staging)
+- [ ] GitHub Actions CI (auto `tsc --noEmit` + `py_compile` on push)
+- [ ] Database indexes on all FK and common filter columns
+- [ ] Supabase point-in-time recovery confirmed enabled
+- [ ] Error monitoring (Sentry or equivalent)
+
+### Stage 4 — Code Quality
+- [ ] Replace all `print()` in `cosmos-api` with structured Python `logging`
+- [ ] Eliminate remaining `any` types — TypeScript strict mode
+- [ ] React error boundaries on all dashboard surfaces
+- [ ] Loading states on all data fetches
+- [ ] Dev generator fix (patients always get `doctor_id`)
+
+### Stage 5 — Product & UX
+- [ ] Desktop sidebar nav
+- [ ] Holistic UX audit
+- [ ] Accessibility (ARIA, keyboard nav)
+- [ ] Multi-tenancy for commercial SaaS
+
+### Stage 6 — Compliance
+- [ ] HIPAA compliance review
+- [ ] BAA with Supabase, Render, Vercel
+- [ ] Data retention and deletion policy
+- [ ] Patient data export capability
 
 ---
 
@@ -191,13 +210,18 @@ from the login screen is the reliable doctor-scoping path.
 **`patient_visits.doctor_id` missing:** Column does not exist in schema.
 Visit-to-doctor linkage currently relies on `patients.doctor_id`
 (one-doctor-per-patient assumption). `patient_visits.location_id` was added
-this session (migration 016).
+in migration 016.
 
 **PA/NP users require `doctor_id` in user_profiles:** The location picker
 on login requires `doctor_id` to be set on the user's profile row. PA/NP
-users created before this session's fix to show the "Linked Doctor" field
-for those roles may have `doctor_id = null` — must be edited in Admin →
-Users to link them to their provider record.
+users created before Session 9's fix may have `doctor_id = null` — must be
+edited in Admin → Users.
+
+**PostgREST join shape:** Supabase PostgREST returns FK-joined rows as an
+array even for many-to-one relationships (e.g. `patients.doctor_id →
+doctors` returns `doctors` as `[{...}]` not `{...}`). All client-side
+join consumers must handle both shapes:
+`const d = Array.isArray(p.doctors) ? p.doctors[0] : p.doctors`.
 
 ---
 
@@ -208,25 +232,28 @@ Users to link them to their provider record.
 
 | File | Confidence |
 |---|---|
-| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (this session — location edit/main-office, card spacing, PA/NP roles, SelectTrigger color, supervised validation, linked doctor for PA/NP) |
-| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (this session — PA/NP ROLE_META, location picker for pa/np) |
-| `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (this session — location_id on Start Visit, Appointment interface) |
-| `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (this session — session location_id on manual visit INSERT) |
-| `cosmos-api/forms/nf3.py` | ★ Verified-final (this session — full Pay-To/sig/place-of-service wiring, billing_npi param fix, license_type title, treating NPI in Section 16) |
-| `cosmos-api/database.py` | ★ Verified-final (this session — _build_doctor_fields, mailing_* columns, supervisor fields, doctor_license_type) |
-| `cosmos-api/main.py` | ★ Verified-final (this session — office location lookup for place_of_service_address, two-line format) |
-| `cosmos-dashboard/app/api/wipe-patients/route.ts` | ★ Verified-final (session 8 — appointments cascade) |
-| `cosmos-dashboard/app/dev/page.tsx` | ★ Verified-final (session 8 — real doctors/carriers/attorneys) |
-| `cosmos-api/forms/w9.py` | ★ Verified-final (session 8 — reads mailing_* columns) |
-| `cosmos-dashboard/app/api/admin/users/route.ts` | ★ Verified-final (session 7 — full CRUD + superadmin guard) |
-| `cosmos-dashboard/lib/supabase.ts` | ★ Verified-final (session 7 — padPin helper) |
-| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (prior session) |
+| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (this session — carrier CSV import/new fields, inline save errors, Edit Carrier/Provider green name headers) |
+| `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (this session — assigned provider on patient cards, PostgREST array join fix, license type + Dr. prefix logic) |
+| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (this session — logged-in doctor name in header) |
+| `cosmos-dashboard/app/dashboard/page.tsx` | ★ Verified-final (this session — reverted to select(*) after join broke server props) |
+| `cosmos-api/forms/base.py` | ★ Verified-final (this session — all except Exception: pass removed) |
+| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (session 9 — location edit/main-office, card spacing, PA/NP roles, SelectTrigger color, supervised validation, linked doctor for PA/NP) |
+| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (session 9 — PA/NP ROLE_META, location picker for pa/np) |
+| `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (session 9 — location_id on Start Visit, Appointment interface) |
+| `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (session 9 — session location_id on manual visit INSERT) |
+| `cosmos-api/forms/nf3.py` | ★ Verified-final (session 9 — full Pay-To/sig/place-of-service wiring) |
+| `cosmos-api/database.py` | ★ Verified-final (session 9 — _build_doctor_fields, mailing_* columns, supervisor fields) |
+| `cosmos-api/main.py` | ★ Verified-final (session 9 — office location lookup for place_of_service_address) |
+| `cosmos-api/forms/ortho.py`, `forms/pain_mgmt.py` | ★ Verified-final (this session — ORTHO.pdf/PAIN_MGMT.pdf filename fix) |
+| `cosmos-dashboard/app/api/wipe-patients/route.ts` | ★ Verified-final (session 8) |
+| `cosmos-dashboard/app/dev/page.tsx` | ★ Verified-final (session 8 — real doctors/carriers/attorneys; doctor_id null bug unresolved) |
+| `cosmos-api/forms/w9.py` | ★ Verified-final (session 8) |
+| `cosmos-dashboard/app/api/admin/users/route.ts` | ★ Verified-final (session 7) |
+| `cosmos-dashboard/lib/supabase.ts` | ★ Verified-final (session 7) |
 | `cosmos-dashboard/middleware.ts` | ★ Verified-final (prior session) |
 | `cosmos-dashboard/app/md/page.tsx` | ★ Verified-final (prior session) |
-| `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (prior session) |
 | `cosmos-dashboard/app/billing/BillerDashboard.tsx` | ★ Verified-final (prior session) |
 | `cosmos-dashboard/app/lib/fonts.ts` | Obtained-current (prior session) |
-| `cosmos-api/forms/ortho.py`, `forms/pain_mgmt.py` | ★ Verified-final (prior session) |
 | `cosmos-api/forms/ans.py`, `dme.py`, `icd10.py`, `mri.py`, `pce.py`, `pt.py`, `rx.py`, `vng.py` | Only TEMPLATE line confirmed |
 | `cosmos-api/forms/aob.py`, `nf2.py` | Never obtained |
 
@@ -234,29 +261,21 @@ Users to link them to their provider record.
 
 ## Lessons Learned This Session
 
-- **Termux `sed` with nested quotes is fragile.** When a `sed` command
-  contains single and double quotes, the escaping in Termux's shell often
-  fails silently (no error, no change). For any sed replacement touching
-  complex strings, prefer a Python patch script or the Claude container
-  patch approach over inline Termux sed.
-- **Chrome duplicate-download suffix is session-persistent.** If a file
-  with a given name has ever been downloaded in the current Chrome session,
-  subsequent downloads of the same filename append `-1`, `-2`, etc. —
-  even after the original is used. Always run `ls -lt ~/storage/downloads/<name>*`
-  before `cp` and use the newest file by timestamp, not bare filename.
-- **`fitz` (PyMuPDF) is not available in Termux Python.** Commands that
-  import `fitz` directly in Termux (e.g. to enumerate PDF field names)
-  will fail with `ModuleNotFoundError`. PDF field inspection must be done
-  on the Render/production environment or via `pypdf` in a separate step.
-- **NF-3 signature fields:** Both `provider_assignee_signature` and
-  `provider.signature` (bottom row) use the supervisor/billing MD's
-  signature. Treating provider's signature is not injected into the NF-3
-  at all — the NF-3 is a billing document, not a clinical one.
-- **PA/NP location picker requires `doctor_id` in `user_profiles`** —
-  the location fetch uses the user's linked `doctor_id` to find their
-  assigned locations. Linking in the providers table is not sufficient;
-  the user account itself needs `doctor_id` set.
-- **Supervised provider mailing address validation** — requiring mailing
-  address for supervised providers (PA, NP) blocks valid saves. Supervised
-  providers inherit billing info from their supervisor; their own mailing
-  address fields should be optional.
+- **PostgREST FK join returns array, not object.** Even for a many-to-one
+  relationship (e.g. `patients.doctor_id → doctors`), PostgREST returns the
+  joined table as `[{...}]` not `{...}`. Always handle both:
+  `const d = Array.isArray(p.doctors) ? p.doctors[0] : p.doctors`.
+- **Server-side `select('*')` and client-side join must stay in sync.**
+  Adding a join to the server component's `select()` changes the data shape
+  passed as `initialPatients` props — breaking client-side filters that
+  expect flat patient objects. Keep server fetch as `select('*')` and let
+  `loadAll` client-side re-fetch handle joins.
+- **`insurance_carriers` was missing `authenticated` RLS policies.** The
+  inline error surfacing (new this session) immediately caught this — the
+  error "new row violates row-level security policy" appeared on Save instead
+  of silently failing. Inline error feedback is now a first-class debugging
+  tool for RLS gaps.
+- **FK constraints were largely already in place.** The `patients_doctor_id_fkey`
+  and most `appointments` FKs existed. The gaps were on `visit_line_items`
+  (completely unlinked) and `appointments.patient_id`. The incremental audit
+  approach (verify before adding) prevented duplicate constraint errors.

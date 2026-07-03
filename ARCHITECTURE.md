@@ -66,7 +66,8 @@ missing command (UPDATE/DELETE/etc.) will silently match zero rows — no
 error, `{ error: null }`. Confirmed causes of real bugs in the past
 (`visit_line_items` missing DELETE policy, `patient_visits` missing
 UPDATE policy — both fixed; `cpt_codes` missing all 4 anon policies —
-fixed this session, root cause of CPT tab showing empty). A related but
+fixed session 9; `insurance_carriers` missing all `authenticated` role
+policies — fixed session 10, surfaced by new inline error feedback). A related but
 distinct pattern: a table can have RLS **disabled entirely** (`patient_forms`
 — confirmed via `pg_class.relrowsecurity = false`), which means nothing
 is restricted at all rather than partially restricted; and a table can
@@ -132,11 +133,26 @@ replaces the dropped `street`/`city`/`state`/`zip`/`pc_street`/
   Used by `main.py` to fetch the office location address for NF-3
   Section 15 Place of Service.
 
-**`user_profiles` table changes this session:**
+**`user_profiles` table changes (session 9):**
 - `user_profiles_role_check` constraint updated to include `pa` and `np`:
   `CHECK (role IN ('frontdesk', 'md', 'pa', 'np', 'billing', 'admin', 'superadmin'))`
 - `doctor_id` column (pre-existing) is now also linked for PA/NP users —
   required for the login location picker to work for those roles.
+
+**`insurance_carriers` table changes (session 10):**
+- Added `claims_department text`, `street2 text`, `claims_email text` columns.
+- Added `authenticated` role RLS policy (was missing — `anon`-only coverage).
+
+**FK constraints added (session 10):** All FK relationships are now complete.
+See `HANDOVER.md` Session 10 completion list. Key additions:
+- `appointments.patient_id → patients` ON DELETE CASCADE
+- `patient_visits.patient_id → patients` ON DELETE CASCADE
+- `visit_line_items.visit_id → patient_visits` ON DELETE CASCADE
+- `visit_line_items.patient_id → patients` ON DELETE CASCADE
+
+**PostgREST join shape note:** FK-joined tables are returned as arrays even
+for many-to-one relationships. Consumers must handle both array and object:
+`const d = Array.isArray(p.doctors) ? p.doctors[0] : p.doctors`.
 
 **Doctor-to-visit linkage gap:** `patient_visits` does not reliably
 record which doctor performed the visit. A `doctor_name` free-text
