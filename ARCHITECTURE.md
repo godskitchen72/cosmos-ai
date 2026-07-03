@@ -143,6 +143,11 @@ replaces the dropped `street`/`city`/`state`/`zip`/`pc_street`/
 - Added `claims_department text`, `street2 text`, `claims_email text` columns.
 - Added `authenticated` role RLS policy (was missing — `anon`-only coverage).
 
+**`patients` table changes (session 10):**
+- `signature_url` column dropped — data migrated to `patient_signature_url`.
+  All consumers updated: `PatientProfile.tsx`, `PatientForm.tsx`, `forms/nf3.py`.
+  The canonical patient signature column is now `patient_signature_url` only.
+
 **FK constraints added (session 10):** All FK relationships are now complete.
 See `HANDOVER.md` Session 10 completion list. Key additions:
 - `appointments.patient_id → patients` ON DELETE CASCADE

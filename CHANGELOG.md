@@ -1,5 +1,91 @@
 # Changelog
 
+## 2026-07-03 — Session 10 (continued): NF-3 regression, signature fix, dev generator, FK audit
+
+### `forms/nf3.py` — Section 16 title uses `doctor_license_type`
+
+`_p2_vals()` was hardcoding `"treating_provider.1.title": "MD"`.
+Fixed to accept `license_type` parameter and use it for the title field.
+`p2_args` dict now passes `license_type=_clean(patient_data.get('doctor_license_type', 'MD'))`.
+
+### `forms/nf3.py` — patient signature reads `patient_signature_url`
+
+```python
+# Before
+patient_sig_url = (patient_data.get("signature_url") or "").strip()
+# After
+patient_sig_url = (patient_data.get("patient_signature_url") or "").strip()
+```
+
+### `database.py` — independent provider supervisor field fix
+
+Supervisor fields previously defaulted to empty strings when no
+`supervising_provider_id` set — causing blank NF-3 Page 3 bottom row
+for independent MDs. Now default to doctor's own fields:
+- `supervisor_npi` → doctor's own NPI
+- `supervisor_specialty` → doctor's own specialty
+- `supervisor_signature_url` → doctor's own signature
+- `supervisor_name` → doctor's own full name
+
+Also removed duplicate `doctor_license_type` key in return dict.
+
+### `patients` table — `signature_url` column dropped
+
+Data migrated to `patient_signature_url` for all affected rows,
+then legacy column dropped:
+
+```sql
+UPDATE patients SET patient_signature_url = signature_url
+WHERE signature_url IS NOT NULL
+AND (patient_signature_url IS NULL OR patient_signature_url = '');
+ALTER TABLE patients DROP COLUMN signature_url;
+```
+
+All consumers updated: `PatientProfile.tsx`, `PatientForm.tsx`, `forms/nf3.py`.
+
+### `app/dev/page.tsx` — doctor_id assigned to generated patients
+
+Generator now fetches `doctor_id` from `doctors` table and writes it
+on patient INSERT. Previously only wrote `doctor_name` (free text),
+leaving `doctor_id = null` on all generated patients.
+
+Existing null-doctor_id patients fixed:
+```sql
+UPDATE patients SET doctor_id = (
+  SELECT doctor_id FROM doctors ORDER BY random() LIMIT 1
+) WHERE doctor_id IS NULL;
+```
+
+### FK constraints added (Stage 1 complete)
+
+```sql
+ALTER TABLE appointments
+  ADD CONSTRAINT appointments_patient_id_fkey
+  FOREIGN KEY (patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE;
+
+ALTER TABLE patient_visits
+  ADD CONSTRAINT patient_visits_patient_id_fkey
+  FOREIGN KEY (patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE;
+
+ALTER TABLE visit_line_items
+  ADD CONSTRAINT visit_line_items_visit_id_fkey
+  FOREIGN KEY (visit_id) REFERENCES patient_visits(id) ON DELETE CASCADE;
+
+ALTER TABLE visit_line_items
+  ADD CONSTRAINT visit_line_items_patient_id_fkey
+  FOREIGN KEY (patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE;
+```
+
+All other FK relationships were already in place.
+
+### NF-3 full regression — all 3 scenarios passed ✅
+
+- Scenario 1: Independent MD (Gottesman) — all fields correct
+- Scenario 2: Supervised PA (Brad PAian) — supervisor billing correct
+- Scenario 3: Independent MD (Jim Carrey, own PC corp) — isolated correctly
+
+
+
 ## 2026-07-03 — Session 10: FK audit, base.py fix, Admin polish, carrier import, provider display
 
 ### `forms/base.py` — all `except Exception: pass` removed
