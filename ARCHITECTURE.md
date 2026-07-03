@@ -94,42 +94,49 @@ live database unless noted otherwise in `HANDOVER.md`):
 - `012_add_user_profiles.sql` — `user_profiles` table, auth foundation
 - `013_add_doctor_default_hours.sql` — `default_start_time`/`default_end_time` on `doctors`
 - `014_doctor_mailing_address.sql` — dropped `street`/`city`/`state`/`zip`/`pc_street`/`pc_city`/`pc_state`/`pc_zip`; added `mailing_street`/`mailing_city`/`mailing_state`/`mailing_zip`
+- `015_office_locations_is_main_office.sql` — added `is_main_office boolean NOT NULL DEFAULT false` to `office_locations`
+- `016_patient_visits_location_id.sql` — added `location_id uuid REFERENCES office_locations(id)` to `patient_visits`
 
 Key tables referenced throughout the codebase: `patients`,
 `patient_visits` (visit-scoped data, including `cpt_codes`/`icd10_codes`,
-`received_amount`, `claim_status`, `payment_status` — see §8 for how the
-last three are used on the Biller dashboard), `visit_line_items`
-(billing), `patient_forms` (generated-document tracking — `form_type`,
-`visit_id`, `filename`, used to find/replace a patient's generated PDFs
-per visit, and now also Denial Docs uploads/deletes — see §8), `cpt_codes`
-(fee schedule — the *only* source of fee data; there is no separate "fee
-schedule" concept anywhere in the codebase; unique constraint on `cpt_code`
-added migration 011), `doctors` (PC/tax fields per §5 of `PRODUCT_SPEC.md`,
-`w9_url`, signature; `doctor_id` is its primary key; also `license_type`
-text DEFAULT 'MD' (options: MD, NP, PA, DC, PT, Acupuncturist, Psychologist,
+`received_amount`, `claim_status`, `payment_status`, `location_id` FK →
+`office_locations` — see §8 for how the billing fields are used on the
+Biller dashboard), `visit_line_items` (billing), `patient_forms`
+(generated-document tracking — `form_type`, `visit_id`, `filename`, used
+to find/replace a patient's generated PDFs per visit, and now also Denial
+Docs uploads/deletes — see §8), `cpt_codes` (fee schedule — the *only*
+source of fee data; there is no separate "fee schedule" concept anywhere
+in the codebase; unique constraint on `cpt_code` added migration 011),
+`doctors` (PC/tax fields per §5 of `PRODUCT_SPEC.md`, `w9_url`,
+signature; `doctor_id` is its primary key; also `license_type` text
+DEFAULT 'MD' (options: MD, NP, PA, DC, PT, Acupuncturist, Psychologist,
 Podiatrist, Other), `supervising_provider_id` uuid FK self-referencing
 (required when `license_type = 'NP'`), `available_days` text[],
 `max_patients_per_day` int DEFAULT 25 — migration 009.
-`default_start_time`/`default_end_time` time DEFAULT '09:00'/'17:00' — migration 013.
-`mailing_street`/`mailing_city`/`mailing_state`/`mailing_zip` text (mailing
-address for insurance correspondence; replaces the dropped `street`/`city`/
-`state`/`zip`/`pc_street`/`pc_city`/`pc_state`/`pc_zip` columns) — migration 014.
+`default_start_time`/`default_end_time` time DEFAULT '09:00'/'17:00' —
+migration 013. `mailing_street`/`mailing_city`/`mailing_state`/
+`mailing_zip` text (mailing address for insurance correspondence;
+replaces the dropped `street`/`city`/`state`/`zip`/`pc_street`/
+`pc_city`/`pc_state`/`pc_zip` columns) — migration 014.
 
-**New tables added this session:**
-- `practice_settings` (migration 010) — single-row (id=1, CHECK constraint),
-  pre-seeded; fields: `practice_name`, `corp_name`, `tax_id`,
-  `tax_classification`, `street`, `city`, `state`, `zip`, `phone`, `fax`.
-  NF-3 ready. Full anon RLS (4 policies).
-- `office_locations` (migration 010) — `id`, `name`, `street`, `city`,
-  `state`, `zip`, `phone`. Full anon RLS (4 policies).
-- `doctor_locations` (migration 011) — `id`, `doctor_id` FK, `location_id`
-  FK, `days_of_week` text[], `start_time`, `end_time`, `slot_minutes`
-  DEFAULT 20, `capacity` DEFAULT 25, UNIQUE(doctor_id, location_id).
-  Full anon RLS (4 policies). Per-location schedule source of truth;
-  `doctors.available_days`/`max_patients_per_day` remain as fallback.
-- `appointments.location_id` (migration 011) — uuid FK → office_locations,
-  nullable (existing appointments unaffected).
-- `icd10_codes` — unique constraint on `code` added migration 011.
+**Tables with schema changes this session:**
+- `office_locations` — added `is_main_office boolean NOT NULL DEFAULT false`
+  (migration 015). Main office sorts first in all queries
+  (`order('is_main_office', ascending: false).order('name')`). Only one
+  location can be `is_main_office = true` — enforced on save by clearing
+  all other rows before setting the new one.
+- `patient_visits` — added `location_id uuid REFERENCES office_locations(id)`
+  (migration 016). Written by `handleStartVisit` in `calendar/page.tsx`
+  (uses `apt.location_id` then falls back to `sessionStorage.getItem('cosmos_location_id')`)
+  and by `PatientChart.tsx` manual visit INSERT (uses `sessionStorage.getItem('cosmos_location_id')`).
+  Used by `main.py` to fetch the office location address for NF-3
+  Section 15 Place of Service.
+
+**`user_profiles` table changes this session:**
+- `user_profiles_role_check` constraint updated to include `pa` and `np`:
+  `CHECK (role IN ('frontdesk', 'md', 'pa', 'np', 'billing', 'admin', 'superadmin'))`
+- `doctor_id` column (pre-existing) is now also linked for PA/NP users —
+  required for the login location picker to work for those roles.
 
 **Doctor-to-visit linkage gap:** `patient_visits` does not reliably
 record which doctor performed the visit. A `doctor_name` free-text
@@ -138,287 +145,141 @@ column exists, but the real production save path (`PatientChart.tsx` →
 populated is `app/dev/page.tsx`'s synthetic test-data generator. Don't
 trust `patient_visits.doctor_name` for anything real. The reliable link
 is `patients.doctor_id`, captured through an actual dropdown on
-`PatientForm.tsx` (new-patient/edit) and genuinely written on intake —
-use that for any "which doctor" lookup (e.g. the Biller dashboard's W9
-join, §8). This still assumes one doctor per patient; if the practice
-ever has multiple treating doctors per patient, this assumption breaks
-and `patient_visits` would need its own real `doctor_id` column,
-populated at save time — not built, not currently needed (`HANDOVER.md`
-Open Items).
+the patient registration form. `patient_visits.location_id` (migration
+016) now reliably records where the visit occurred.
 
 ---
 
-## 4. API Routing & PDF Dispatch Chain
+## 4. Backend API (`cosmos-api`)
 
-Live base URL: `https://cosmos-api-789w.onrender.com`
+FastAPI on Render. File ownership:
+- `main.py` — route definitions + shared dispatcher
+- `database.py` — builds request-specific data dicts for PDF generators.
+  **Refactored this session** to a `_build_doctor_fields(d, client)` shared
+  helper used by both `get_doctor_for_patient()` and `get_doctor_by_id()`.
+  Now exports: `doctor_mailing_address`, `doctor_mailing_street/city/state/zip`,
+  `doctor_license_type`, `supervisor_npi`, `supervisor_tax_id`,
+  `supervisor_specialty`, `supervisor_signature_url`, `supervisor_name`.
+  Supervisor fields are populated only when `supervising_provider_id` is set;
+  empty strings otherwise.
+- `forms/*.py` — one module per document/referral type; PDF field-fill logic only
+- `forms/base.py` — shared PDF helpers only (signature injection, field filling);
+  no database logic
+- `pdf_engine.py` — pure router; re-exports each `forms/*.py` module's
+  generator function for `main.py` to call by name
 
-**Referral-type documents** (MRI, Rx, DME, ANS, VNG, PT, ICD-10, Ortho,
-Pain Mgmt — 9 types as of this session) share one generic dispatch path
-in `main.py`:
+Referral-type documents share one generic dispatch path: a
+`REFERRAL_FORM_CONFIG` entry maps a type to its generator function name +
+tag + labels. Adding a new referral type means touching `forms/<type>.py`,
+the config entry + route in `main.py`, and the import/`__all__` entry in
+`pdf_engine.py` — all three, every time.
 
-```
-POST /generate-{type}
-  → ReferralRequest { patient_id, visit_id, referral_data }
-  → _generate_referral_pdf(req, type)
-      - looks up REFERRAL_FORM_CONFIG[type] for pdf_fn name + tag + labels
-      - fetches patient row, merges visit row, merges doctor data into
-        one patient_data dict (referral_data nested inside it)
-      - calls getattr(pdf_engine, cfg["pdf_fn"])(patient_data)
-      - pdf_engine.py re-exports each forms/*.py module's generate_*_pdf()
-      - deletes any existing patient_forms row for (patient_id, form_type=tag,
-        visit_id), inserts a new row with status "generated"
-      - uploads the PDF to the "patient-forms" Supabase Storage bucket
-      - returns { success, filename, url (signed), message }
-```
-
-Adding a new referral type requires touching all of: the new
-`forms/<type>.py` module, a `REFERRAL_FORM_CONFIG` entry + `/generate-
-<type>` route in `main.py`, an import + `__all__` entry in
-`pdf_engine.py`, and the actual PDF template placed at the `cosmos-api`
-repo root.
-
-**Pain Mgmt is the one exception to type-key/route/module-name
-consistency**: the route is `/generate-pain-mgmt` (hyphenated, explicit
-product decision) but the module is `forms/pain_mgmt.py` (underscore —
-Python module names can't contain hyphens). The `REFERRAL_FORM_CONFIG`
-key is `"pain-mgmt"` (matches the route, since a dict key is just a
-string, not an identifier). Every other type keeps the route/module/key
-identical.
-
-**Non-referral documents** (NF-2, NF-3, AOB, W-9, PCE) are routed
-individually in `main.py`, most importing directly from their
-`forms/*.py` module (not all go through `pdf_engine.py` — `/generate-w9`
-specifically imports `forms.w9` directly).
+Non-referral documents (NF-2, NF-3, AOB, W-9, PCE) are routed individually;
+not all import through `pdf_engine.py` (`/generate-w9` imports `forms.w9`
+directly) — confirm the actual import path per document rather than assuming
+the referral pattern applies.
 
 ---
 
-## 5. PDF Engine
+## 5. NF-3 Field Mapping (current state, post-Session 9)
 
-- `forms/base.py` — shared helpers only: `s()` (safe-stringify), `format_date()`,
-  `fill_pdf_fields(doc, field_map)` (iterates real widgets on the doc,
-  sets value if the widget's name is a key in `field_map` — silently
-  skips any `field_map` key with no matching widget, which is forgiving
-  but not a substitute for verifying the real field list),
-  `fetch_signature_bytes()`, `inject_signature_image()` (deletes the
-  widget and draws the image directly onto the page, since `fitz` text
-  fields can't hold an image). **Known issue**: pre-existing
-  `except Exception: pass` in `render_visible_text_in_rect` — prohibited
-  by `SYSTEM_PROMPT.md` §1/§8, flagged 3+ sessions, not yet fixed.
-- `forms/*.py` — one module per document type, each exposing a single
-  `generate_<type>_pdf(patient_data) -> (pdf_bytes, error)` function.
-  Field-name verification convention: every field confirmed against the
-  real PDF's `pypdf.get_fields()` output before any filler code is
-  written (`SYSTEM_PROMPT.md` §8).
-- `pdf_engine.py` — pure router, ~15 lines: imports each `forms/*.py`
-  module's generator and re-exports it via `__all__` for `main.py` to
-  call by name.
-- **`NF2.pdf` must always remain ReportLab-produced**, not PyMuPDF-edited
-  — this was a deliberate rebuild specifically to preserve `fitz` widget
-  enumeration needed for signature injection elsewhere in the pipeline.
-  Don't regenerate or re-author this one template via a different tool.
-- All PDFs stay unflattened (editable AcroForm) — no exceptions recorded.
+Key field assignments as of this session's wiring work:
 
-Referral PDF templates currently known to exist (filenames as of this
-session — confirm the live filename via the repo before assuming):
-`ANS.pdf`, `DME.pdf`, `ICD10.pdf`, `MRI.pdf`, `PT.pdf`, `RX.pdf`,
-`VNG.pdf`, `PCE.pdf` (all uppercase short form), plus `ortho.pdf`,
-`pain_mgmt.pdf` (**lowercase** — unresolved naming-convention split
-flagged in `HANDOVER.md` Open Items). Also: `AOB.pdf`, `NF2.pdf`
-(ReportLab), `NF3.pdf` (+ a standalone Page-2 overflow variant for
-visits with more than 3 CPT codes), `W9_fillable.pdf`.
+| Field | Value |
+|---|---|
+| `provider.name_address` | PC corp name + `\n` + mailing address (Pay-To) |
+| `services.N.place_of_service_zip` | Office location address (two-line: `street\ncity, state zip`) |
+| `treating_provider.1.name` | Treating provider full name |
+| `treating_provider.1.title` | `doctor_license_type` (MD/PA/NP/etc.) |
+| `treating_provider.1.license_or_certification_number` | Treating provider NPI |
+| `assignment.provider_assignee_print_name` | PC corp name (payee_name) |
+| `assignment.provider_assignee_signature` | Supervisor/billing MD signature (image injection) |
+| `provider.signature` (bottom row) | Supervisor/billing MD signature (image injection) |
+| `provider.irs_tin` | Supervisor name (Gottesman's printed name) |
+| `provider.wcb_rating_code` | Supervisor NPI |
+| `provider.specialty_if_none` | Supervisor specialty |
+| `provider.owners_and_credentials` | Empty (Section 17 — left blank by product decision) |
+
+**Supervisor fallback logic:** When treating provider has `supervising_provider_id`,
+all billing fields (corp name, mailing address, NPI, tax ID, specialty, signature)
+use the supervisor's data. When no supervisor (`has_corp = False`), treating
+provider's own data is used for all fields.
 
 ---
 
-## 6. Directory Structure
+## 6. Frontend Data Fetch Pattern
 
-```
-cosmos-api/
-  main.py                  routes + REFERRAL_FORM_CONFIG + shared dispatcher
-  pdf_engine.py             pure router -> forms/*.py
-  database.py               builds doctor_*/patient_data dicts for PDF generators
-  models.py                 CPT/ICD-10 catalogs, pain tools, MD status logic
-  forms/
-    base.py                 shared PDF helpers (no DB logic)
-    nf2.py  nf3.py  aob.py  pce.py
-    mri.py  rx.py  dme.py  ans.py  vng.py  pt.py  icd10.py
-    ortho.py  pain_mgmt.py   pain_mgmt.py's route is hyphenated
-                              (/generate-pain-mgmt) despite the
-                              underscore filename — see §4
-    w9.py
-  <PDF template files>.pdf  one per document type, repo root
-  requirements.txt
-  render.yaml
-  .gitignore                NOTE: do not add a blanket *.pdf rule — every
-                             PDF here is a tracked template, not generated
-                             output
-
-cosmos-dashboard/
-  app/
-    page.tsx                  role-select landing screen (Front Desk / MD /
-                              Billing / Admin); "Remember my role" device
-                              storage; each role's path/soon flag lives
-                              here — flip soon:false once a role's
-                              dashboard is actually built
-    globals.css               theme tokens (:root CSS vars) + the
-                              shadcn/Tailwind v4 bridge (§8) appended
-                              additively at the end; also carries the
-                              global text-size-adjust: 100% rule (§8)
-    lib/
-      fonts.ts                shared Oxanium font object (weights 300–800)
-                              — imported by BillerDashboard.tsx AND by
-                              select.tsx/dropdown-menu.tsx (Radix Portal
-                              content can't inherit from parent DOM)
-    components/
-      DropdownSelect.tsx     generic dark-themed dropdown (use for any
-                              select-like control, never a native <select>)
-      StateSelect.tsx         same pattern, US states specifically
-      PatientForm.tsx         new-patient/edit form; the actual place
-                              patients.doctor_id gets captured
-      ui/                     shadcn primitives — Card, Table, Badge,
-                              Button, Select, Dropdown Menu, Input, Tabs
-    admin/page.tsx            Admin dashboard — 6 tabs: Overview, Carriers,
-                              Providers, Lawyers, CPT Codes, ICD-10.
-                              Full CRUD for all tables. Overview has KPI
-                              cards, Quick Access, Practice Info, Office
-                              Locations manage UI, Recent Providers.
-                              Schedule tab has Location Assignments section
-                              (doctor_locations junction table).
-    calendar/page.tsx         FD scheduling calendar (week/month views,
-                              doctor-locking via ?doctor_id=, full
-                              appointment lifecycle). Location-aware
-                              scheduling (Phase 3) not yet built.
-    dashboard/
-      DashboardClient.tsx     FD dashboard (queues: Psych Referral, NF-2
-                              mailing, Needs Appointment, etc.)
-    billing/
-      page.tsx                 server wrapper
-      BillerDashboard.tsx      Biller role queue (§8)
-    dev/page.tsx               synthetic test-data generator; the only
-                              place patient_visits.doctor_name ever gets
-                              written — not representative of any real
-                              save path
-    md/
-      MDClient.tsx             doctor-scoped via ?doctor_id=
-      page.tsx                 passes doctorId down to MDClient
-      [patientId]/
-        page.tsx               does not accept or forward doctor_id
-        PatientChart.tsx       MD-facing chart; PCE wizard; referral grid;
-                              handleSave() does not write any doctor field
-        mri/page.tsx + MriReferral.tsx
-        rx/page.tsx + RxReferral.tsx
-        ans/page.tsx + AnsReferral.tsx
-        icd10/                 excluded from Save→View pattern
-        dme/page.tsx + DmeReferral.tsx
-        vng/page.tsx + VngReferral.tsx
-        pt/page.tsx + PtReferral.tsx
-        ortho/page.tsx + OrthoReferral.tsx
-        pain-mgmt/page.tsx + PainMgmtReferral.tsx
-    patients/
-      [patientId]/
-        page.tsx
-        PatientProfile.tsx     FD-facing profile: NF-2 mailing UI,
-                              submit-to-billing, fee estimates, Referrals
-                              & Orders grid (9 types, no reserved slots)
-  lib/
-    supabase.ts               browser-side client (anon key) — top-level
-                              lib/, NOT app/lib/
-    supabaseServer.ts          server-side client (service key) — top-level
-                              lib/, NOT app/lib/
-    utils.ts                  shadcn cn() helper
-  components.json              shadcn/ui config — ui alias points at
-                              app/components/ui
-  public/
-    cosmos_icon_mark.jpg       product-owner-supplied icon mark
-```
+Standard: a server-component `page.tsx` wrapper does the initial Supabase
+query with `revalidate: 0`, then passes the result as props to a client
+component that owns all interactivity. Don't fetch inside the client
+component unless there's a specific reason to deviate.
 
 ---
 
-## 7. Frontend ↔ Backend Integration Flow (referral generation)
+## 7. Document Generation Pattern (Save→View)
 
-1. A referral screen (e.g. `PtReferral.tsx`) collects clinical input into
-   a `referral_data` object whose keys match the live PDF's own AcroForm
-   field names directly (no translation layer) for any field with no
-   legacy contract to preserve.
-2. `POST https://cosmos-api-789w.onrender.com/generate-<type>` with
-   `{ patient_id, visit_id, referral_data }`.
-3. **Save→View is the standing pattern** (replacing the prior
-   Generate→View pattern) **for every type except ICD-10**, which
-   auto-fires on visit save and was deliberately excluded
-   (`PRODUCT_SPEC.md` §3). On success, the button morphs from "Save" to
-   "View" **without** auto-opening the PDF. Tapping "View" fetches a
-   fresh signed URL client-side
-   (`supabase.storage.from('patient-forms').createSignedUrl(filename, 1800)`).
-   A "Regenerate" text link appears once saved, gated behind `confirm()`.
-3a. **Check-on-load**: each referral type's `page.tsx` server wrapper
-   queries `patient_forms` for an existing row matching this `visit_id`
-   + the type's tag before rendering, and passes `existingFilename` (or
-   `null`) down as a prop. Revisiting an already-saved referral shows
-   "View" immediately, preventing accidental overwrite.
-4. The FD-facing `PatientProfile.tsx` grid independently queries
-   `patient_forms` (filtered by `form_type` + `visit_id`) to show
-   View/"Not yet ordered" per type — it does not call the generation
-   endpoints itself.
-5. Header/administrative fields (patient name, DOB, insurance, claim
-   number, ICD-10 codes, provider name/license/NPI/signature) are never
-   collected in the referral screen's own UI — they're always pulled
-   server-side from the patient/visit/doctor records inside
-   `_generate_referral_pdf`'s data merge. Only genuinely clinical content
-   (goals, modalities, symptoms, findings) is entered on the screen
-   itself.
+All MD-discretionary referral types follow the Save→View pattern:
+- Button starts as "Save [type]", generates and stores the PDF on tap.
+- Button flips to "View" on success; tapping "View" opens the existing
+  signed URL rather than regenerating.
+- Revisiting an already-saved referral shows "View" immediately (prevents
+  accidental overwrite).
+- "Regenerate" link available as a confirm-gated escape hatch.
+- ICD-10 Diagnosis PDF is the sole auto-fire exception (fires on visit save,
+  no tap required).
 
 ---
 
-## 8. Scheduling Architecture
+## 8. Admin Panel (`app/admin/page.tsx`)
 
-**Existing** (`app/calendar/page.tsx`):
-- Week view + month view, doctor selector, `lockedDoctorId` URL param
-- Quick-pick chips: next N available dates for selected doctor
-- Availability: `doctors.available_days` (text array)
-- Capacity: `doctors.max_patients_per_day` (integer)
-- Full appointment lifecycle: Scheduled → Confirmed → Checked In →
-  Completed | Cancelled | No-Show
-- FD "Needs Appointment" queue with `Book →` deep link
+Six-tab system: Overview / Carriers / Providers / Lawyers / CPT Codes /
+ICD-10. Uses shadcn/ui + Oxanium — second approved exception to the
+hand-rolled inline-styles convention (`SYSTEM_PROMPT.md` §9).
 
-**Capacity fallback logic** (Phase 3 will implement this):
-- If doctor has `doctor_locations` rows → use per-location `capacity`
-  and `days_of_week` for the selected location
-- If not → fall back to `doctors.available_days` and
-  `doctors.max_patients_per_day` (current behavior — unchanged)
+**Overview tab** shows: Practice Info card (name, corp, address, TIN,
+phone/fax), KPI cards (providers, documents, patients, visits, locations,
+users), Office Locations section (manage toggle, Edit/Del per card, Add
+Location form with Main Office toggle), Dev Tools card.
 
-**Phase 3 (not yet built)** — location-aware calendar:
-- Location selector when doctor selected (filtered to `doctor_locations`)
-- Booking form adds Location field → `appointments.location_id` written
-- `generateSlots()` uses `doctor_locations.start_time`, `end_time`,
-  `slot_minutes` when location selected
+**Providers tab** shows: grouped hierarchy (supervising/independent MDs
+with cyan border, supervised providers with purple border `#a855f7`,
+indented `ml-4`). Three-tab provider form: Credentials / Billing / Schedule.
+Billing tab: mailing address (required for independent providers, optional
+for supervised), PC corp name, tax classification. Supervised providers
+show a read-only "Billing under Supervisor's PC" card instead of the
+mailing address form.
 
-**Phase 4 (not yet built)** — MD login location picker:
-- After role select → "Which office today?" modal
-- Selection stored in `sessionStorage`, passed as URL param to `/calendar`
+**Users tab** shows: user cards (name, email, role badge with color,
+active/inactive state). Role dropdown: Front Desk / MD / PA / NP / Billing
+/ Admin / Superadmin. "Linked Doctor" field shown for MD, PA, NP roles.
+PA/NP users must have `doctor_id` linked for the login location picker
+to function.
+
+**SelectTrigger color fix** — all `SelectTrigger` elements in Admin have
+`style={{color:'#f0f4f8'}}` explicitly set. Shadcn's `SelectValue` renders
+its selected value in the trigger's own color context, which is not
+reliably inherited on this project (preflight gap, `ARCHITECTURE.md` §10).
 
 ---
 
-## 9. Admin Dashboard (`/admin`)
+## 9. Login Flow (`app/page.tsx`)
 
-Single `'use client'` page component with 6 scrollable tabs:
-Overview · Carriers · Providers · Lawyers · CPT Codes · ICD-10
+Three stages: `login` → `location` (md/pa/np) → `dashboard` (superadmin picker).
 
-Tab navigation uses `window.CustomEvent('admin-tab', { detail: tabId })`
-dispatched from Quick Access buttons, caught by a `useEffect` listener
-in the root `AdminPage` component. Allowed tab IDs: `'overview'`,
-`'carriers'`, `'doctors'`, `'lawyers'`, `'cpt'`, `'icd10'`.
+`ROLE_META` entries:
+- `frontdesk` → `/dashboard`
+- `md` → `/md`
+- `pa` → `/md`
+- `np` → `/md`
+- `billing` → `/billing`
+- `admin` → `/admin`
+- `superadmin` → `/admin` (then 2×2 dashboard picker)
 
-shadcn/ui exception #2 (see §1 Styling note).
-
-Key sections:
-- **Overview**: Quick Access (top), KPI cards (2×3 grid), Office
-  Locations manage UI (add/delete → `office_locations`), Practice Info
-  (inline edit → `practice_settings`), Recent Providers
-- **Providers (DoctorsSection)**: 4-tab edit form (General / Credentials
-  / Billing / Schedule). Schedule tab: Default Schedule + Location
-  Assignments (→ `doctor_locations` upsert on doctor+location unique key)
-- **CPT Codes**: CRUD + filter by provider_type + CSV import (co-imports
-  ICD-10 codes from paired column)
-- **ICD-10**: CRUD + search + CSV import
+Location picker shown for `['md', 'pa', 'np']` when `doctor_id` is set on
+the user profile and the doctor has more than one assigned location. Single-
+location doctors auto-navigate without showing the picker. `cosmos_location_id`
+and `cosmos_location_name` stored in `sessionStorage` for use by
+`handleStartVisit` and manual visit INSERT in `PatientChart.tsx`.
 
 ---
 
@@ -482,9 +343,11 @@ buttons missing font-size; `ReceivedCell` missing the Oxanium font;
 `Button`'s `outline`/`ghost` variants having no text-color class at all;
 Android Chrome's separate font-boosting heuristic inflating text size
 independent of any CSS, fixed via a global `text-size-adjust: 100%`).
-Any new bare button or shadcn trigger/content element added to this
-surface needs explicit color/font/size classes set on it directly — see
-`AI_STYLE_GUIDE.md` §1 for the full list of confirmed instances.
+**This session confirmed the same pattern applies to the Admin panel's
+`SelectTrigger` elements** — fixed with explicit `style={{color:'#f0f4f8'}}`
+on all triggers. Any new bare button or shadcn trigger/content element
+added to any surface needs explicit color/font/size classes set on it
+directly — see `AI_STYLE_GUIDE.md` §1 for the full list of confirmed instances.
 
 **Shared font module** (`app/lib/fonts.ts`): the Oxanium font object used
 to be declared locally inside `BillerDashboard.tsx` only. Per the portal
@@ -503,10 +366,7 @@ already uses. **"Received" is a real, per-visit value** —
 — feeding the Received column, the Balance column (`billed -
 received_amount`, shown in red when positive/still-owed, green when
 negative/overpaid), the queue-wide KPIs, and the per-carrier Paid vs
-Outstanding chart below. (A prior version of this document described
-this as a "Not tracked" placeholder with no backing column — that was
-already stale before this session, corrected here against the live
-code, per `HANDOVER.md`'s Documentation Corrections note.)
+Outstanding chart below.
 
 **Status vs. Denial Status** — two genuinely separate fields, by
 deliberate earlier design decision, never collapsed: `claim_status`

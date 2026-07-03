@@ -1,5 +1,127 @@
 # Changelog
 
+## 2026-07-03 — NF-3 full wiring, office location Main Office, PA/NP roles, Admin polish
+
+### Migration 015 — `office_locations.is_main_office`
+
+```sql
+ALTER TABLE office_locations
+  ADD COLUMN IF NOT EXISTS is_main_office boolean NOT NULL DEFAULT false;
+```
+
+Main office sorts first in all queries. Only one location can be main at a
+time — enforced on save by clearing all others before setting the new one.
+
+### Migration 016 — `patient_visits.location_id`
+
+```sql
+ALTER TABLE patient_visits
+  ADD COLUMN IF NOT EXISTS location_id uuid REFERENCES office_locations(id);
+```
+
+Written by `handleStartVisit` (`calendar/page.tsx`) using
+`apt.location_id || sessionStorage.getItem('cosmos_location_id')`, and by
+`PatientChart.tsx` manual visit INSERT using `sessionStorage.getItem('cosmos_location_id')`.
+Used by `main.py` to fetch place of service for NF-3 Section 15.
+
+### `database.py` — refactored to shared `_build_doctor_fields()` helper
+
+- New `_build_doctor_fields(d, client)` helper used by both
+  `get_doctor_for_patient()` and `get_doctor_by_id()` — no duplicate logic.
+- Reads `mailing_street/city/state/zip` (migration 014) for Pay-To address.
+- Supervisor fallback: when `supervising_provider_id` is set, fetches
+  supervisor row and uses their mailing address + `pc_corp_name` for Pay-To.
+- Exports new fields: `doctor_mailing_address`, `doctor_mailing_street/city/
+  state/zip`, `doctor_license_type`, `supervisor_npi`, `supervisor_tax_id`,
+  `supervisor_specialty`, `supervisor_signature_url`, `supervisor_name`.
+
+### `forms/nf3.py` — full Pay-To / signature / place-of-service wiring
+
+- **Page 1 Pay-To** (`provider.name_address`): PC corp name + mailing address ✅
+- **Page 2 Section 15** (place of service): two-line format from
+  `place_of_service_address` — `street\ncity, state zip`.
+- **Page 2 Section 16**: treating provider title uses `doctor_license_type`
+  (PA/NP/MD); license/cert no. uses treating provider's own NPI.
+- **Page 3 assignee**: `assignment.provider_assignee_print_name` → PC corp
+  name; `assignment.provider_assignee_signature` → supervisor signature image.
+- **Page 3 bottom row**: `provider.signature` → supervisor signature;
+  `provider.irs_tin` → supervisor name; `provider.wcb_rating_code` →
+  supervisor NPI; `provider.specialty_if_none` → supervisor specialty.
+- Billing fields (`billing_npi`, `billing_tax_id`, `billing_specialty`) use
+  supervisor values when PC corp exists, treating provider's own otherwise.
+- `_p2_vals()` signature extended with `billing_npi` parameter (fixes
+  `NameError: name 'billing_npi' is not defined` on NF-3 generation).
+- Signature injection: both `provider_assignee_signature` and
+  `provider.signature` now inject supervisor/billing MD signature.
+
+### `main.py` — office location lookup for place of service
+
+After merging visit row, fetches `office_locations` via `visit.location_id`
+and adds `place_of_service_address` (`street\ncity, state zip` two-line
+format) to `patient_data`.
+
+### `calendar/page.tsx` — location_id on Start Visit
+
+`handleStartVisit` now writes `location_id: apt.location_id ||
+sessionStorage.getItem('cosmos_location_id') || null` into
+`patient_visits` INSERT. `Appointment` interface extended with
+`location_id?: string`.
+
+### `PatientChart.tsx` — session location on manual visit INSERT
+
+Manual visit INSERT now includes `location_id:
+sessionStorage.getItem('cosmos_location_id') || null`.
+
+### `app/admin/page.tsx` — office location Edit + Main Office flag
+
+- Location cards in manage mode now have **Edit** button alongside Del.
+- Edit populates form, shows "Edit Location" title, "Save Changes" button.
+- Add/Edit form includes custom Main Office toggle (cyan checkbox, explicit
+  18×18 px, `accentColor` not used — custom styled for dark background).
+- Main office card: cyan border `border-[#00cfff]`, sorted first.
+- Other location cards: purple border `border-[#a855f7]`.
+
+### `app/admin/page.tsx` — Admin UI polish
+
+- Practice Info card: `gap-0.5` → `gap-0`, `m-0` on all `<p>` elements.
+- Office Location cards: `m-0` on all `<p>` elements.
+- Supervisor billing card: `gap-1.5` → `gap-0`, `m-0` on all `<p>` elements.
+- Location assignment cards: `m-0` on all `<p>` elements.
+- User cards: `gap-3` → `gap-1.5`, font sizes reduced (14px/12px), `m-0`
+  on text elements.
+- All `SelectTrigger` elements: `style={{color:'#f0f4f8'}}` added explicitly
+  — fixes selected-value invisible on dark background (preflight gap).
+- Supervised provider border: `border-[#ffffff18]` → `border-[#a855f7]`
+  (purple, matching corp name color).
+
+### `app/admin/page.tsx` — PA and NP user roles
+
+- `ROLES` array extended: `['frontdesk', 'md', 'pa', 'np', 'billing', 'admin', 'superadmin']`
+- `ROLE_LABELS` map added: human-readable labels for all roles.
+- `ROLE_COLORS` extended: PA = `#3b82f6` (blue), NP = `#8b5cf6` (purple),
+  Superadmin = `#e74c3c` (red).
+- "Linked Doctor" field now shown for MD, PA, and NP roles.
+- `doctor_id` not cleared when switching between md/pa/np roles.
+- `user_profiles_role_check` constraint updated:
+  `CHECK (role IN ('frontdesk', 'md', 'pa', 'np', 'billing', 'admin', 'superadmin'))`
+
+### `app/admin/page.tsx` — supervised provider validation fix
+
+- Mailing address + tax classification fields now optional for supervised
+  providers (any provider with `supervising_provider_id` set).
+- Form auto-switches to the tab containing the first validation error
+  (Billing tab if billing fields fail, Credentials otherwise).
+
+### `app/page.tsx` — PA and NP login routing + location picker
+
+- `ROLE_META` extended with `pa` (blue `#3b82f6`, path `/md`) and
+  `np` (purple `#8b5cf6`, path `/md`).
+- `navigate()` and `handlePostLogin()`: location picker and
+  `cosmos_location_id` sessionStorage storage now applies to
+  `['md', 'pa', 'np']` instead of `md` only.
+
+---
+
 ## 2026-06-30 — Mailing address, tab merge, PA/NP, grouped provider cards, dev tools fixes
 
 ### Migration 014 — mailing address replaces PC/personal address
@@ -61,8 +183,6 @@ rows pointing at deleted patients after a data wipe, causing broken
 patient-name lookups on the Today Schedule.
 
 ---
-
-
 
 ## 2026-06-29 — Doctor location assignment Edit button, 12h time display
 

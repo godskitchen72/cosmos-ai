@@ -25,7 +25,7 @@ tiers for convenience (`SYSTEM_PROMPT.md` §7).
 | Tier | Documents | Trigger |
 |---|---|---|
 | FD-gated, fully manual | NF-2, NF-3, AOB | Front desk explicitly generates |
-| MD-discretionary, fully manual | MRI, Rx, DME, ANS, VNG, PT (referrals) | MD chooses to generate, per visit |
+| MD-discretionary, fully manual | MRI, Rx, DME, ANS, VNG, PT, Ortho, Pain Mgmt (referrals) | MD chooses to generate, per visit |
 | Automatic | ICD-10 Diagnosis PDF | Fires on visit save, no tap required |
 | Automatic (finalization, not a document) | Billing (`visit_line_items`) | Auto-finalizes on visit save when codes/pairings are valid; manual "Finalize Billing" button remains as a retry/safety net, not removed |
 
@@ -63,14 +63,28 @@ referral screen. Never re-conflate these two.
   Memory Issues, Visual Disturbances, Post-Concussion Symptoms, plus an
   "Other" toggle with free-text description.
 
-**Reserved/placeholder slots** (FD-facing `PatientProfile.tsx`,
-"Referrals & Orders" grid): two non-interactive placeholder slots exist
-for future, not-yet-defined referral types — labeled "Reserved" /
-"Future referral," no click handler, visually dimmer than a real
-"Not yet ordered" card. This is a standing **explicit product-owner
-decision**, made after hearing and overruling the default recommendation
-against building dead-end UI for undefined features. Don't remove these
-or add more without the product owner raising it.
+**Reserved/placeholder slots — resolved.** FD-facing
+`PatientProfile.tsx`'s "Referrals & Orders" grid previously carried two
+non-interactive "Reserved"/"Future referral" placeholder slots, a
+standing explicit product-owner decision (made after hearing and
+overruling the default recommendation against building dead-end UI for
+undefined features). Both slots were filled with real Ortho and Pain Mgmt
+cards — **no reserved slots remain**. The precedent stands for any future
+similar request: a placeholder UI element for a genuinely-planned future
+feature is an acceptable, explicit exception to the "never a dead-end
+control" rule (`SYSTEM_PROMPT.md` §1, §9), not a default to repeat
+without the product owner raising it again.
+
+**Save→View — standing pattern, explicit product decision**, replacing
+the prior Generate→View pattern for every MD-discretionary referral type
+**except ICD-10** (excluded deliberately — it auto-fires on visit save,
+a different mechanism, tier table above). On save, the PDF generates and
+is stored but is **not** auto-opened; the MD taps the resulting "View"
+state on their own terms. Revisiting an already-saved referral shows
+"View" immediately rather than resetting to "Save" (explicit decision,
+to prevent an accidental overwrite of a real referral with a blank one —
+`ARCHITECTURE.md` §7). A "Regenerate" link remains available as a
+deliberate, confirm-gated escape hatch.
 
 ---
 
@@ -78,14 +92,25 @@ or add more without the product owner raising it.
 
 Legally distinct roles on NY No-Fault forms — **never collapse into the
 same value**:
-- **Treating provider**: the individual MD who actually saw the patient.
+- **Treating provider**: the individual MD/PA/NP who actually saw the
+  patient. Appears in NF-3 Section 16. Title reflects actual license type
+  (MD, PA, NP). NPI is their own individual NPI.
 - **Billing/pay-to entity**: who gets paid — the doctor's Professional
   Corporation (PC) when one is on file, otherwise the individual doctor.
+  Uses the PC corp name + mailing address. For supervised providers (PA,
+  NP, DC, PT, PSY), the supervising MD's PC corp and mailing address are
+  used as the Pay-To entity.
 
-On the NF-3, the "Pay-To Provider" box reflects the PC entity
-name/address when present, falling back to the individual doctor's own
-name/address — independent of, and never overwriting, the
-treating-provider field.
+On the NF-3:
+- **Page 1 Pay-To box** (`provider.name_address`): PC corp name +
+  mailing address. For supervised providers, uses supervisor's PC +
+  mailing address.
+- **Page 3 assignee** (`assignment.provider_assignee_print_name`): PC
+  corp name. Both signature fields use the supervisor/billing MD's
+  signature.
+- **Page 3 bottom row**: supervisor's name, NPI, specialty, and signature.
+- **Page 2 Section 16**: treating provider's name, title (license type),
+  and their own individual NPI.
 
 ---
 
@@ -93,14 +118,27 @@ treating-provider field.
 
 NY No-Fault MDs commonly bill through a Professional Corporation (PC),
 distinct from their personal identity. Doctor records support:
-- PC Corp Name, Registered PC Address (street/city/state/zip).
-- Tax Classification: Individual/Sole Proprietor, C-Corp, S-Corp,
+- **PC Corp Name** — the corporation name used on all billing documents.
+- **Mailing Address** (street/city/state/zip) — where insurance companies
+  send payments, denials, and correspondence. This is the address used in
+  the NF-3 Pay-To block and on the W-9. Required for all independent
+  providers; optional for supervised providers (who inherit from their
+  supervisor). Added in migration 014 — replaces the prior "Registered PC
+  Address" block which has been removed from the schema and UI.
+- **Tax Classification**: Individual/Sole Proprietor, C-Corp, S-Corp,
   Partnership, LLC, Trust/Estate, Other — matches the real IRS W-9 Line
   3a checkbox set exactly. Selecting **LLC** requires a second
   classification (C/S/P — an LLC is not itself a federal tax category).
   Selecting **Other** requires a free-text description.
 - Default for every doctor: `individual` — nothing changes for an
   existing doctor until explicitly set otherwise.
+
+**Supervised providers (PA, NP, DC, PT, PSY):** When a provider has a
+`supervising_provider_id`, the system uses the supervisor's PC corp
+name, mailing address, NPI, tax ID, specialty, and signature for all
+billing/Pay-To purposes. The supervised provider's own mailing address
+and tax classification fields are optional in the Admin form — the
+system will use the supervisor's data for NF-3 generation regardless.
 
 **W-9 generation policy**: once per doctor, at doctor creation. Editing
 a doctor's PC/tax info later does **not** retroactively regenerate their
@@ -225,22 +263,30 @@ live booked-count/fullness coloring.
 submit-to-billing UI, fee estimates, and the "Referrals & Orders" status
 grid — 3-column layout, one card per document type showing "View" (links
 to the generated PDF) or "Not yet ordered," covering MRI / VNG / Rx /
-DME / PT / ANS / ICD-10, plus 2 reserved slots (§3).
+DME / PT / ANS / ICD-10 / Ortho / Pain Mgmt (9 types; no placeholder
+slots remain).
 
 **Patient Chart** (MD-facing, `PatientChart.tsx`): the PCE wizard, the
 CPT/ICD-10 picker, and the referral-type grid (routes into each
-referral's own screen) covering the same document types as above minus
-the reserved slots.
+referral's own screen) covering the same 9 document types as above.
 
-**Admin / Doctor Management** (`admin/page.tsx`): doctor signature
-capture (canvas), PC Corp/Address/Tax Classification (§5), Specialty
-(including Psychology), structured address fields, field validation
-(NPI, Tax ID, specialty, license, phone/fax).
+**Admin / Provider Management** (`admin/page.tsx`): six-tab system
+(Overview / Carriers / Providers / Lawyers / CPT Codes / ICD-10).
+Provider form: three-tab (Credentials / Billing / Schedule). Credentials:
+name, license type (MD/PA/NP/DC/PT/Acupuncturist/Psychologist/Podiatrist/
+Other), specialty, supervising provider, email, phone, fax, NPI, license #,
+signature. Billing: mailing address (required for independent providers,
+optional for supervised), PC corp name, tax classification. Supervised
+providers see a read-only "Billing under Supervisor's PC" card. Schedule:
+location assignments. Users tab: full CRUD, role assignment (Front Desk /
+MD / PA / NP / Billing / Admin / Superadmin), linked doctor for MD/PA/NP.
+Office Locations: main office flag (cyan border, sorts first), Edit button,
+purple border for non-main locations.
 
 **Biller Dashboard** (`app/billing/BillerDashboard.tsx`): the
 submitted-to-billing queue — see §6 for what it does and the standing
 decisions behind it. The one screen in the app using shadcn/ui as a
-deliberate, scoped exception (`ARCHITECTURE.md` §8) rather than the
+deliberate, scoped exception (`ARCHITECTURE.md` §10) rather than the
 hand-rolled inline-style pattern every other dashboard listed here uses.
 
 ---
@@ -252,7 +298,7 @@ hand-rolled inline-style pattern every other dashboard listed here uses.
   precert number) — backend ready, pure frontend work, not started.
   Whether to include Wrist is an unresolved product decision.
 - **The actual Billing department feature** — built incrementally as
-  the Biller dashboard (`/billing`, §6, `ARCHITECTURE.md` §8); real
+  the Biller dashboard (`/billing`, §6, `ARCHITECTURE.md` §10); real
   Received-amount tracking now exists (§6). Remaining gap, not yet
   scoped: a real per-visit doctor link if the practice ever needs more
   than the current one-doctor-per-patient assumption. Open, unscoped
@@ -262,6 +308,10 @@ hand-rolled inline-style pattern every other dashboard listed here uses.
 - **Full-visit edit capability** — explicitly out of scope pending a
   dedicated product conversation.
 - **Holistic Front Desk + MD dashboard planning** — see §9.
+- **Desktop sidebar nav** — confirmed target. System intended for desktop
+  use by front desk and clinical staff. Mobile-first was the development-
+  environment constraint, not the product direction. Sidebar, wider
+  containers, and multi-column layouts are the intended end state.
 
 ---
 
@@ -282,3 +332,8 @@ hand-rolled inline-style pattern every other dashboard listed here uses.
   IRS purposes (§5) — defaulting to "Individual/Sole Proprietor" for a
   doctor actually billing through a PC is a compliance-relevant error,
   not just a cosmetic one.
+- **Place of service on NF-3 Section 15** must reflect where the MD/PA/NP
+  actually saw the patient — the logged-in office location at the time
+  of the visit. This is captured via `patient_visits.location_id`
+  (migration 016), written from `sessionStorage.cosmos_location_id` at
+  visit start. A blank place of service is a billing compliance gap.
