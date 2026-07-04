@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 3, 2026, Session 10)
+# Cosmos Medical Technologies — HANDOVER (July 4, 2026, Session 11)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -15,177 +15,127 @@ self-contained.
 
 All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed via
 `tsc --noEmit` + full deploy chain. Live app confirmed healthy at session
-close. NF-3 full regression passed across all three provider scenarios.
+close.
 
 ---
 
 ## Completed This Session
 
-### `forms/base.py` — removed all `except Exception: pass` (P1 closed)
+### NF-3 — Patient signature gate (UI + backend)
 
-All silent exception swallowing eliminated from `forms/base.py`. Seven
-sessions flagged, fixed this session:
-- `requests` import failure: now logs `WARNING: requests not available`
-- `fitz` import failure: now logs `WARNING: fitz (PyMuPDF) not available`
-- `render_visible_text_in_rect`: now logs error instead of passing silently
-- `format_date` inner/outer except: both now log parse errors
+NF-3 generate is now locked until the patient has a signature on file.
 
-### `w9_filler.py` removed (P2 closed)
+**UI gate** (`PatientProfile.tsx`):
+- `canGenerateNF3 = has(patient, 'patient_signature_url')`
+- NF-3 card `blocked` state: `!selectedVisit ? 'Select a visit' : !canGenerateNF3 ? 'No signature' : null`
+- Tapping a locked card calls `setNf3Msg(blocked)` with 3-second auto-clear
+- Message strip renders below the forms grid (outside the 4-column grid, not inside it)
+- All NF-3 error handlers converted from `alert()` to inline state
 
-Legacy 120-line duplicate of `forms/w9.py` deleted from `cosmos-api` root.
-Nothing imported it. Six sessions flagged, fixed this session.
+**Backend guard** (`main.py` `/generate/nf3`):
+- Returns HTTP 400 `"Patient signature required to generate NF-3"` if `patient_signature_url` missing
 
-### PDF filename casing normalized
+### Admin — dropdown contrast fixed globally
 
-`ortho.pdf` → `ORTHO.pdf`, `pain_mgmt.pdf` → `PAIN_MGMT.pdf`. Updated
-`forms/ortho.py` line 44 and `forms/pain_mgmt.py` line 42 to match.
-All 15 PDF templates now use uppercase filenames consistently.
+All `SelectContent` components in `admin/page.tsx` changed from `bg-card`
+(dark-on-dark, unreadable) to `bg-[#1a2235]` with explicit `text-[#e2e8f0]`.
+All `SelectItem` elements changed from `text-foreground focus:bg-muted` to
+`text-[#e2e8f0] focus:bg-[#00cfff20] focus:text-white`. 12 SelectContent
+and 14 SelectItem instances fixed.
 
-### Practice Info → NF-3 wiring (P4 closed — won't do)
+### Admin — Save Provider gated on location assignment
 
-`practice_settings` feeds Admin Overview only. NF-3 billing is
-correctly sourced per-doctor via `doctors` table. No wiring needed.
+`Save Provider` button disabled when `docLocations.length === 0` for
+existing providers. Button label changes to `"Assign a location first"`.
+Warning prompt appears in the Schedule tab when no locations assigned.
 
-### Admin — Edit Provider/Carrier header shows name in green
+### Admin — New provider two-step flow
 
-Provider edit form: `Edit Provider: Dr. {first} {last}` with name in green.
-Carrier edit form: `Edit Carrier: {carrier_name}` with name in green.
+New provider flow (`editing === 'new'`) was incorrectly blocked by the
+location gate (a `doctor_id` must exist before a `doctor_locations` row
+can be created). Fix:
+- Save is allowed on first save for new providers
+- Button label: `"Save & Continue"` for new providers
+- After successful insert, reopens the same provider in edit mode on the
+  Schedule tab via `setEditing(id); setDocTab('schedule')`
+- "LOCATION ASSIGNMENTS (SAVE PROVIDER FIRST)" hint shown on Schedule tab
+  when `editing === 'new'`
 
-### Admin — backend save errors surfaced inline (all sections)
+### W9 scoped to billing entities only
 
-Previously silent Supabase failures now show a red inline error message
-below the Save button on every Admin save handler:
-- Carriers, Lawyers, CPT Codes, ICD-10 — `saveError` state
-- Practice Info — `practiceError` state
-- Office Locations (Overview) — `locOvError` state
-- Doctor Location Assignments — `locError` state
-- Lawyers `alert()` replaced with inline error for consistency
+**Business rule established** (confirmed by product owner):
+- W9 applies only to providers who are the billing entity
+- Rule: `!supervising_provider_id AND (!!pc_corp_name OR tax_classification === 'individual')`
+- Supervised providers (any license type with a supervisor set) → no W9
+- NP with own PC and no supervisor → W9 ✅
+- NP under supervising MD → no W9 ✅
+- MD supervised by another MD (e.g. Orthobot) → no W9 ✅
 
-**Side effect:** Exposed missing RLS policy on `insurance_carriers` —
-`authenticated` role had no INSERT/UPDATE/DELETE. Fixed:
-```sql
-CREATE POLICY "authenticated all insurance_carriers"
-ON public.insurance_carriers FOR ALL TO authenticated
-USING (true) WITH CHECK (true);
+**`admin/page.tsx`:**
+- Auto-W9 on creation gated: `needsW9 = !supervising_provider_id && (!!pc_corp_name || tax_classification === 'individual')`
+- W9 View and Regenerate buttons on provider cards hidden when provider
+  doesn't meet billing entity criteria
+
+**`main.py` `/generate-w9`:**
+- Returns HTTP 400 if provider has `supervising_provider_id` set, or
+  lacks both PC corp and sole-proprietor classification
+
+### NF-3 routes supervisor W9 for supervised providers
+
+In `generate_pdf` for `form_type == "nf3"`, after doctor data merge:
+- If treating doctor has `supervising_provider_id`, fetches supervisor record
+- Injects supervisor's `w9_url` into `patient_data` as the billing entity W9
+- Also sets `billing_entity_name` and `billing_tax_id` from supervisor
+
+### W9 cleanup and regeneration
+
+All 7 existing W9 PDFs deleted from `patient-forms` storage bucket via
+Supabase Storage API. `w9_url` nulled on all doctor records via SQL.
+W9 regenerated for the 3 eligible providers:
+- Jim Carrey (MD, Divine Health Practices & Cattle, S-Corp) ✅
+- Yury Gottesman (MD, Infinity Health Practices, LLC) ✅
+- Don Kramer (MD, Sole Proprietor) ✅
+
+Supervised providers confirmed with no W9: NPian, Orthobot, PAian, Pearlman.
+
+### NF-3 Section 16 — license number (not NPI)
+
+Section 16 "LICENSE OR CERTIFICATION NO." field previously populated with
+NPI. Fixed in `forms/nf3.py`:
+- `license_number` parameter added to `_p2_vals()` signature
+- `treating_provider.1.license_or_certification_number` now uses `license_number`
+- NPI fallback removed entirely (license is required; NPI is wrong field)
+- Correct key: `patient_data.get("doctor_license_number")` (prefixed by `database.py`)
+
+### License number required in provider validation
+
+`validate()` in `admin/page.tsx` now requires `license_number`:
 ```
-
-### Admin — Insurance Carriers expanded
-
-Three new columns: `claims_department text`, `street2 text`, `claims_email text`.
-CSV batch import added (upload → preview → confirm, skips duplicates by name).
-Carrier cards: name in cyan, `m-0` on all text, shows new fields when present.
-Top 20 NY No-Fault carriers imported.
-
-### MD Dashboard — logged-in doctor name in header
-
-`MDClient.tsx` header: `👤 Dr. Yury Gottesman` (cyan) above `📍 Queens Location`.
-Doctor name from `doctorNameMap[doctorId]`. `Dr.` prefix only for MD/DO.
-
-### FD Dashboard — assigned provider on patient cards
-
-Patient cards: `PT336816 · Progressive · Dr. Yury Gottesman (MD)`.
-Provider in cyan; `⚠ No provider` in red when null.
-PostgREST join `doctors(first_name, last_name, license_type)` in `loadAll`.
-Array join handled: `Array.isArray(p.doctors) ? p.doctors[0] : p.doctors`.
-`Dr.` prefix only for `['MD', 'DO']` license types.
-
-### FK constraint audit — Stage 1 complete
-
-All FK relationships audited. Added:
-- `appointments.patient_id → patients` ON DELETE CASCADE
-- `patient_visits.patient_id → patients` ON DELETE CASCADE
-- `visit_line_items.visit_id → patient_visits` ON DELETE CASCADE
-- `visit_line_items.patient_id → patients` ON DELETE CASCADE
-
-All other FKs were already in place.
-
-### NF-3 — Section 16 title fix
-
-`_p2_vals()` was hardcoding `"treating_provider.1.title": "MD"`. Fixed to
-use `license_type` parameter passed from `patient_data.get('doctor_license_type')`.
-Also fixed duplicate `doctor_license_type` key in `_build_doctor_fields()` return dict.
-
-### `database.py` — independent provider fix
-
-Supervisor fields (`supervisor_npi`, `supervisor_tax_id`, `supervisor_specialty`,
-`supervisor_signature_url`, `supervisor_name`) previously defaulted to empty
-strings when no `supervising_provider_id` was set — causing blank NF-3 Page 3
-bottom row for independent MDs (Gottesman, Jim Carrey, etc.).
-
-Fix: defaults now populated from the doctor's own fields:
-```python
-supervisor_npi           = str(d.get("npi") or "").strip()
-supervisor_tax_id        = str(d.get("tax_id") or "").strip()
-supervisor_specialty     = str(d.get("specialty") or "").strip()
-supervisor_signature_url = str(d.get("signature_url") or "").strip()
-supervisor_name          = full  # own name when no supervisor
+if (!form.license_number) e.license_number = 'Required'
+else if (form.license_number.length < 6) e.license_number = 'Minimum 6 characters'
 ```
-Supervisor block still overrides these when `supervising_provider_id` is set.
+Existing providers with blank license numbers will surface this error on
+next edit — must be populated before save.
 
-### `patients.signature_url` column removed — migrated to `patient_signature_url`
+### AOB — always uses billing entity
 
-Legacy `signature_url` column on `patients` table dropped. Data migrated:
-```sql
-UPDATE patients SET patient_signature_url = signature_url
-WHERE signature_url IS NOT NULL
-AND (patient_signature_url IS NULL OR patient_signature_url = '');
-ALTER TABLE patients DROP COLUMN signature_url;
-```
-Two patients (PT293006, PT789389) had data only in `signature_url` — migrated.
+AOB was showing treating provider (e.g. Brad PAian) as the provider/assignee.
+Fixed in `forms/aob.py`:
 
-All consumers updated:
-- `forms/nf3.py` — reads `patient_signature_url` (was `signature_url`)
-- `PatientProfile.tsx` — UPDATE writes `patient_signature_url`
-- `PatientForm.tsx` — insert/update payload uses `patient_signature_url`
-- `PatientProfile.tsx` canGenerateAOB and display checks updated
+**Provider name** resolution order:
+1. `doctor_pc_corp_name` (supervisor's PC corp when supervised — already
+   resolved by `database.py`'s `pc_corp_name` logic)
+2. `supervisor_name`
+3. `doctor_name` (treating provider — only used for independent providers
+   with no PC corp)
 
-### Dev generator — `doctor_id` assigned to generated patients
+**Provider address**: `doctor_mailing_address` — already resolves to
+supervisor's mailing address when supervised (set by `database.py`
+`sup_mailing` block).
 
-`app/dev/page.tsx` previously fetched doctor names but never assigned `doctor_id`
-to generated patients — resulting in `doctor_id = null` in the DB.
-
-Fix: generator now fetches `doctor_id` alongside name, picks a random doctor
-object, and writes both `doctor_name` and `doctor_id` on patient INSERT.
-
-Existing null-`doctor_id` patients fixed via SQL:
-```sql
-UPDATE patients SET doctor_id = (
-  SELECT doctor_id FROM doctors ORDER BY random() LIMIT 1
-) WHERE doctor_id IS NULL;
-```
-
-### NP/PA user account — linked doctor fix
-
-Reza NPian's user account had role=PA and `doctor_id` pointing to Gottesman
-instead of Reza's own doctor record. Fixed in Admin → Users:
-- Role: PA → NP
-- Linked Doctor: Gottesman → Reza NPian
-
-The `doctor_id` in `user_profiles` must always point to the user's **own**
-provider record, not their supervisor. The supervisor relationship lives in
-`doctors.supervising_provider_id`.
-
-### NF-3 full regression — all scenarios passed ✅ (P3 closed)
-
-Three scenarios verified against live generated PDFs:
-
-**Scenario 1 — Independent MD (Gottesman):**
-- Page 1 Pay-To: "Infinity Health Practices" + mailing address ✅
-- Page 2 Section 16: "Yury Gottesman" · "MD" · NPI 1313131313 ✅
-- Page 3 bottom: Gottesman's sig + name + NPI + specialty ✅
-- Patient signature: image (not typed name) ✅
-
-**Scenario 2 — Supervised PA (Brad PAian under Gottesman):**
-- Page 1 Pay-To: Gottesman's PC corp + mailing address ✅
-- Page 2 Section 16: "Brad PAian" · "PA" · PAian's own NPI ✅
-- Page 3 bottom: Gottesman's sig + name + NPI (supervisor billing) ✅
-- Patient signature: image ✅
-
-**Scenario 3 — Independent MD (Jim Carrey, own PC corp):**
-- Page 1 Pay-To: "Divine Therapy & Cattle Inc" + Carrey's mailing address ✅
-- Page 2 Section 16: "Jim Carrey" · "MD" · NPI 5566255666 ✅
-- Page 3 bottom: Carrey's own sig + name + NPI ✅
-- Patient signature: image ✅
+**Provider signature**: `supervisor_signature_url` when present, falls back
+to `doctor_signature_url`. For independent providers, these are the same
+doctor.
 
 ---
 
@@ -210,12 +160,20 @@ Three scenarios verified against live generated PDFs:
    have test/placeholder mailing addresses. Must be updated with real data
    before production use.
 
+7. **Existing providers missing license numbers** — now a required field.
+   Existing records (NPian, Orthobot, PAian, Pearlman, Carrey, Gottesman,
+   Kramer) should be audited and populated if missing.
+
+8. **NF-3 Section 15 Place of Service** — confirmed working for visits with
+   `location_id` set. Visits created before migration 016 (location tracking)
+   will have blank place of service — data gap, not a code bug.
+
 ---
 
 ## Enterprise Hardening Checklist (running)
 
 ### Stage 1 — Data Integrity
-- [x] FK constraints — all tables audited and complete (this session)
+- [x] FK constraints — all tables audited and complete (Session 10)
 - [ ] Full RLS audit — every table, every command, both roles
 - [ ] `NOT NULL` constraints on required columns
 
@@ -266,11 +224,16 @@ deferred. `?doctor_id=` URL param is the reliable doctor-scoping path.
 **PA/NP users — `doctor_id` must be own record:** `user_profiles.doctor_id`
 must point to the user's own `doctors` row, not their supervisor. The
 supervisor relationship lives in `doctors.supervising_provider_id`.
-Confirmed this session when Reza NPian's account had Gottesman's `doctor_id`.
 
 **PostgREST join shape:** FK-joined tables return as arrays even for
 many-to-one. Always handle both:
 `const d = Array.isArray(p.doctors) ? p.doctors[0] : p.doctors`.
+
+**NF-3 message state is module-level (`nf3Msg`):** `nf3Msg` useState is
+declared at module level (line 69 area) not inside the component — it works
+at runtime because React hooks are called consistently, but it's
+architecturally incorrect. Low risk for now but should be moved inside
+the component on next full PatientProfile.tsx rebuild.
 
 ---
 
@@ -280,51 +243,67 @@ many-to-one. Always handle both:
 
 | File | Confidence |
 |---|---|
-| `cosmos-api/forms/nf3.py` | ★ Verified-final (this session — Section 16 title fix, patient_signature_url) |
-| `cosmos-api/database.py` | ★ Verified-final (this session — independent provider supervisor fallback fix, duplicate key removed) |
-| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (this session — carrier CSV import, inline errors, green name headers) |
-| `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (this session — provider on cards, array join fix, license type) |
-| `cosmos-dashboard/app/dashboard/page.tsx` | ★ Verified-final (this session — reverted to select(*)) |
-| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (this session — doctor name in header) |
-| `cosmos-dashboard/app/patients/[patientId]/PatientProfile.tsx` | ★ Verified-final (this session — patient_signature_url) |
-| `cosmos-dashboard/app/components/PatientForm.tsx` | ★ Verified-final (this session — patient_signature_url) |
-| `cosmos-dashboard/app/dev/page.tsx` | ★ Verified-final (this session — doctor_id assigned to generated patients) |
-| `cosmos-api/forms/base.py` | ★ Verified-final (this session — all except Exception: pass removed) |
-| `cosmos-api/forms/ortho.py`, `forms/pain_mgmt.py` | ★ Verified-final (this session — ORTHO.pdf/PAIN_MGMT.pdf) |
-| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (session 9) |
-| `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (session 9) |
-| `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (session 9) |
-| `cosmos-api/main.py` | ★ Verified-final (session 9) |
-| `cosmos-api/forms/w9.py` | ★ Verified-final (session 8) |
-| `cosmos-dashboard/app/api/admin/users/route.ts` | ★ Verified-final (session 7) |
-| `cosmos-dashboard/lib/supabase.ts` | ★ Verified-final (session 7) |
+| `cosmos-api/forms/nf3.py` | ★ Verified-final (this session — license_number fix, doctor_license_number key) |
+| `cosmos-api/forms/aob.py` | ★ Verified-final (this session — billing entity provider name/address/sig) |
+| `cosmos-api/main.py` | ★ Verified-final (this session — NF-3 signature gate, supervisor W9 routing, generate-w9 guard) |
+| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (this session — dropdown contrast, location gate, two-step new provider, W9 billing entity logic) |
+| `cosmos-dashboard/app/patients/[patientId]/PatientProfile.tsx` | ★ Verified-final (this session — NF-3 signature gate, inline message strip) |
+| `cosmos-api/database.py` | ★ Verified-final (Session 10 — independent provider supervisor fallback fix) |
+| `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (Session 10) |
+| `cosmos-dashboard/app/dashboard/page.tsx` | ★ Verified-final (Session 10) |
+| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (Session 10) |
+| `cosmos-dashboard/app/components/PatientForm.tsx` | ★ Verified-final (Session 10) |
+| `cosmos-dashboard/app/dev/page.tsx` | ★ Verified-final (Session 10) |
+| `cosmos-api/forms/base.py` | ★ Verified-final (Session 10) |
+| `cosmos-api/forms/ortho.py`, `forms/pain_mgmt.py` | ★ Verified-final (Session 10) |
+| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 9) |
+| `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (Session 9) |
+| `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (Session 9) |
+| `cosmos-api/forms/w9.py` | ★ Verified-final (Session 8) |
+| `cosmos-dashboard/app/api/admin/users/route.ts` | ★ Verified-final (Session 7) |
+| `cosmos-dashboard/lib/supabase.ts` | ★ Verified-final (Session 7) |
 | `cosmos-dashboard/middleware.ts` | ★ Verified-final (prior session) |
 | `cosmos-dashboard/app/md/page.tsx` | ★ Verified-final (prior session) |
 | `cosmos-dashboard/app/billing/BillerDashboard.tsx` | ★ Verified-final (prior session) |
 | `cosmos-dashboard/app/lib/fonts.ts` | Obtained-current (prior session) |
 | `cosmos-api/forms/ans.py`, `dme.py`, `icd10.py`, `mri.py`, `pce.py`, `pt.py`, `rx.py`, `vng.py` | Only TEMPLATE line confirmed |
-| `cosmos-api/forms/aob.py`, `nf2.py` | Never obtained |
+| `cosmos-api/forms/nf2.py` | Never obtained |
 
 ---
 
 ## Lessons Learned This Session
 
-- **PostgREST FK join returns array, not object** — even for many-to-one.
-  Always: `const d = Array.isArray(p.doctors) ? p.doctors[0] : p.doctors`.
-- **Server-side `select('*')` and client-side join must stay separate** —
-  adding a join to the server component's select changes the data shape
-  passed as props, breaking client-side filters. Keep server as `select('*')`.
-- **`insurance_carriers` was missing `authenticated` RLS policies** — caught
-  immediately by the new inline error feedback. Inline errors are now a
-  first-class RLS debugging tool.
-- **`user_profiles.doctor_id` must be the user's own record** — not their
-  supervisor. Calendar, location picker, and schedule all use this FK to
-  scope to the logged-in provider's own appointments and locations.
-- **`patients.signature_url` was a legacy column** — real data lived in
-  `patient_signature_url`. Always audit column names against the DB before
-  assuming the field name matches the code. The migration → drop pattern
-  (verify → migrate data → drop column → remove fallback) worked cleanly.
-- **Independent provider NF-3 bottom row needs own fields** — `database.py`
-  supervisor defaults were empty strings, not the doctor's own values.
-  For an independent MD who IS the billing entity, the "supervisor" fields
-  on the NF-3 should be the doctor's own NPI, signature, and specialty.
+- **`/tmp` does not persist in Termux** — patch scripts must always write
+  to `~/` (e.g. `~/fix_something.py`), never `/tmp/`. Using `/tmp/` as an
+  intermediate path silently loses the file when the session context changes.
+- **Bash history expansion breaks `sed -i` with `!`** — any `sed` pattern
+  containing `!selectedVisit`, `!res.ok`, etc. will hit bash history
+  expansion (`!sel` → last command starting with `sel`) in interactive
+  shells. Use Python patch scripts for any anchor containing `!` characters.
+- **`pathlib.Path.home()` returns `/root` in this environment** — not the
+  actual Termux home at `/data/data/com.termux/files/home`. Use
+  `os.path.expanduser('~')` instead, which correctly resolves to the
+  Termux home.
+- **React fragments (`<>`) inside a CSS grid don't create grid items** —
+  the fragment's children become direct grid children, not the fragment
+  itself. A message strip inside a `<>` wrapper inside a 4-column grid
+  will occupy one of the 4 column slots, pushing subsequent cards to the
+  next row. Solution: render the message outside the grid container.
+- **`database.py` prefixes all doctor fields** — `license_number` from
+  the `doctors` table becomes `doctor_license_number` in `patient_data`
+  after the doctor merge. Always check `database.py` `_build_doctor_fields()`
+  for the exact key name before referencing a doctor field in any `forms/*.py`.
+- **W9 is a billing entity document, not a provider document** — only
+  providers who are the pay-to entity (no supervisor, own PC corp or
+  sole proprietor) need a W9. Supervised providers bill under their
+  supervisor's PC corp; the supervisor's W9 is what gets sent with billing.
+- **AOB assigns benefits to the billing entity** — the "Print name of
+  Provider" and provider signature on the AOB must be the billing entity
+  (PC corp / supervising MD), never the individual treating provider.
+  `database.py`'s `doctor_pc_corp_name` and `doctor_mailing_address`
+  already resolve to the supervisor's values when supervised — AOB and
+  NF-3 should always use these resolved fields, not raw `doctor_name`.
+- **NF-3 Section 16 LICENSE field is not NPI** — Section 16 asks for the
+  treating provider's state license or certification number. NPI is a
+  federal identifier used in the NF-3 billing header (Page 1), not
+  Section 16. These are legally distinct.

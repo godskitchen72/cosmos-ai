@@ -1,462 +1,164 @@
-# Changelog
+# Cosmos Medical Technologies — CHANGELOG
 
-## 2026-07-03 — Session 10 (continued): NF-3 regression, signature fix, dev generator, FK audit
+Append-only. Entries in reverse chronological order. Never renumber,
+never delete. Each entry records only what actually shipped — not what
+was planned or considered.
 
-### `forms/nf3.py` — Section 16 title uses `doctor_license_type`
+---
 
-`_p2_vals()` was hardcoding `"treating_provider.1.title": "MD"`.
-Fixed to accept `license_type` parameter and use it for the title field.
-`p2_args` dict now passes `license_type=_clean(patient_data.get('doctor_license_type', 'MD'))`.
+## 2026-07-04 — Session 11
 
-### `forms/nf3.py` — patient signature reads `patient_signature_url`
+### NF-3 — Patient signature gate
 
-```python
-# Before
-patient_sig_url = (patient_data.get("signature_url") or "").strip()
-# After
-patient_sig_url = (patient_data.get("patient_signature_url") or "").strip()
+NF-3 generate locked until `patient_signature_url` is on file.
+
+**`PatientProfile.tsx`:**
+- `canGenerateNF3 = has(patient, 'patient_signature_url')`
+- NF-3 card `blocked` state: `!selectedVisit ? 'Select a visit' : !canGenerateNF3 ? 'No signature' : null`
+- Tapping a locked card triggers `setNf3Msg(blocked)` with 3-second auto-clear
+- Message strip renders below the forms grid (outside the 4-column grid)
+- NF-3 error handlers converted from `alert()` to inline `nf3Msg` state
+
+**`main.py`:**
+- `/generate/nf3` returns HTTP 400 `"Patient signature required to generate NF-3"` if `patient_signature_url` missing
+
+### Admin — dropdown contrast fixed globally
+
+All `SelectContent` in `admin/page.tsx`:
+- Changed from `bg-card` to `bg-[#1a2235] border-[#2a3a5a] text-[#e2e8f0]`
+
+All `SelectItem` in `admin/page.tsx`:
+- Changed from `text-foreground focus:bg-muted` to `text-[#e2e8f0] focus:bg-[#00cfff20] focus:text-white`
+- 12 SelectContent and 14 SelectItem instances fixed
+
+### Admin — Save Provider gated on location assignment
+
+- `Save Provider` disabled when `docLocations.length === 0` for existing providers
+- Button label changes to `"Assign a location first"`
+- Warning prompt added in Schedule tab when no locations assigned
+
+### Admin — New provider two-step flow
+
+- New provider (`editing === 'new'`) exempt from location gate
+- Button label: `"Save & Continue"` for new providers
+- After successful insert: `setEditing(id); setDocTab('schedule')` — reopens on Schedule tab
+- "LOCATION ASSIGNMENTS (SAVE PROVIDER FIRST)" hint shown on Schedule tab for new providers
+
+### W9 — entity-based scoping rule
+
+Business rule established and implemented:
+- W9 applies only to: `!supervising_provider_id AND (!!pc_corp_name OR tax_classification === 'individual')`
+- Supervised providers → no W9 regardless of license type
+
+**`admin/page.tsx`:**
+- Auto-W9 on creation gated by `needsW9` const
+- W9 View and Regenerate buttons hidden for non-billing-entity providers
+
+**`main.py` `/generate-w9`:**
+- Returns HTTP 400 for supervised providers or providers without billing entity status
+
+### NF-3 — supervisor W9 routing for supervised providers
+
+**`main.py` `generate_pdf`:**
+- After doctor merge, if `supervising_provider_id` set, fetches supervisor's W9
+- Injects supervisor's `w9_url`, `billing_entity_name`, `billing_tax_id` into `patient_data`
+
+### W9 cleanup and regeneration
+
+- All 7 existing W9 PDFs deleted from `patient-forms` storage bucket via Storage REST API
+- `w9_url` nulled on all doctor records: `UPDATE doctors SET w9_url = NULL`
+- W9 regenerated for 3 eligible providers: Carrey, Gottesman, Kramer
+- 4 supervised providers (NPian, Orthobot, PAian, Pearlman) confirmed with no W9
+
+### NF-3 Section 16 — license number replaces NPI
+
+**`forms/nf3.py`:**
+- Added `license_number` parameter to `_p2_vals()` signature
+- `treating_provider.1.license_or_certification_number` now uses `license_number`
+- NPI fallback removed entirely
+- Correct key: `patient_data.get("doctor_license_number")` (prefixed by `database.py`)
+
+### Admin — license number required field
+
+**`admin/page.tsx` `validate()`:**
+```
+if (!form.license_number) e.license_number = 'Required'
+else if (form.license_number.length < 6) e.license_number = 'Minimum 6 characters'
 ```
 
-### `database.py` — independent provider supervisor field fix
+### AOB — always uses billing entity
 
-Supervisor fields previously defaulted to empty strings when no
-`supervising_provider_id` set — causing blank NF-3 Page 3 bottom row
-for independent MDs. Now default to doctor's own fields:
-- `supervisor_npi` → doctor's own NPI
-- `supervisor_specialty` → doctor's own specialty
-- `supervisor_signature_url` → doctor's own signature
-- `supervisor_name` → doctor's own full name
+**`forms/aob.py`:**
+- Provider name: `doctor_pc_corp_name` → `supervisor_name` → `doctor_name` (priority order)
+- Provider address: `doctor_mailing_address` (resolves to supervisor's when supervised)
+- Provider signature: `supervisor_signature_url` → `doctor_signature_url` fallback
+- Treating provider name/address/signature never used for supervised providers
 
-Also removed duplicate `doctor_license_type` key in return dict.
+---
 
-### `patients` table — `signature_url` column dropped
+## 2026-07-03 — Session 10
 
-Data migrated to `patient_signature_url` for all affected rows,
-then legacy column dropped:
+### `forms/base.py` — removed all `except Exception: pass`
 
-```sql
-UPDATE patients SET patient_signature_url = signature_url
-WHERE signature_url IS NOT NULL
-AND (patient_signature_url IS NULL OR patient_signature_url = '');
-ALTER TABLE patients DROP COLUMN signature_url;
-```
+All silent exception swallowing eliminated from `forms/base.py`.
 
-All consumers updated: `PatientProfile.tsx`, `PatientForm.tsx`, `forms/nf3.py`.
+### `w9_filler.py` removed
 
-### `app/dev/page.tsx` — doctor_id assigned to generated patients
+Legacy 120-line duplicate of `forms/w9.py` deleted from `cosmos-api` root.
 
-Generator now fetches `doctor_id` from `doctors` table and writes it
-on patient INSERT. Previously only wrote `doctor_name` (free text),
-leaving `doctor_id = null` on all generated patients.
-
-Existing null-doctor_id patients fixed:
-```sql
-UPDATE patients SET doctor_id = (
-  SELECT doctor_id FROM doctors ORDER BY random() LIMIT 1
-) WHERE doctor_id IS NULL;
-```
-
-### FK constraints added (Stage 1 complete)
-
-```sql
-ALTER TABLE appointments
-  ADD CONSTRAINT appointments_patient_id_fkey
-  FOREIGN KEY (patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE;
-
-ALTER TABLE patient_visits
-  ADD CONSTRAINT patient_visits_patient_id_fkey
-  FOREIGN KEY (patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE;
-
-ALTER TABLE visit_line_items
-  ADD CONSTRAINT visit_line_items_visit_id_fkey
-  FOREIGN KEY (visit_id) REFERENCES patient_visits(id) ON DELETE CASCADE;
-
-ALTER TABLE visit_line_items
-  ADD CONSTRAINT visit_line_items_patient_id_fkey
-  FOREIGN KEY (patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE;
-```
-
-All other FK relationships were already in place.
-
-### NF-3 full regression — all 3 scenarios passed ✅
-
-- Scenario 1: Independent MD (Gottesman) — all fields correct
-- Scenario 2: Supervised PA (Brad PAian) — supervisor billing correct
-- Scenario 3: Independent MD (Jim Carrey, own PC corp) — isolated correctly
-
-
-
-## 2026-07-03 — Session 10: FK audit, base.py fix, Admin polish, carrier import, provider display
-
-### `forms/base.py` — all `except Exception: pass` removed
-
-- `requests` import failure: now logs `WARNING: requests not available: {e}`
-- `fitz` import failure: now logs `WARNING: fitz (PyMuPDF) not available: {e}`
-- `render_visible_text_in_rect`: `except Exception: pass` → logs error
-- `format_date` inner loop and outer catch: both now log parse errors
-
-### `w9_filler.py` deleted from `cosmos-api` root
-
-120-line legacy duplicate of `forms/w9.py`. Nothing imported it.
-
-### PDF template filenames normalized to uppercase
+### PDF filename casing normalized
 
 `ortho.pdf` → `ORTHO.pdf`, `pain_mgmt.pdf` → `PAIN_MGMT.pdf`.
-Updated `forms/ortho.py` line 44 and `forms/pain_mgmt.py` line 42.
+All 15 PDF templates now use uppercase filenames consistently.
 
-### `insurance_carriers` — new columns + RLS fix
-
-```sql
-ALTER TABLE insurance_carriers
-  ADD COLUMN IF NOT EXISTS claims_department text,
-  ADD COLUMN IF NOT EXISTS street2 text,
-  ADD COLUMN IF NOT EXISTS claims_email text;
-
-CREATE POLICY "authenticated all insurance_carriers"
-ON public.insurance_carriers FOR ALL TO authenticated
-USING (true) WITH CHECK (true);
-```
-
-### `app/admin/page.tsx` — inline save error feedback
-
-All Admin save handlers now surface backend errors as red inline messages
-below the Save button. Previously all were silent on failure. Sections
-updated: Carriers, Lawyers, CPT Codes, ICD-10, Practice Info, Office
-Locations, Doctor Location Assignments.
-
-### `app/admin/page.tsx` — carrier CSV batch import
-
-CSV import added to Carriers section (same pattern as CPT/ICD-10):
-upload → preview → confirm, skips duplicates by `carrier_name`. Parses
-flexible column headers. Accepts `.csv` files. Three new fields added to
-Add/Edit form and cards: Claims Department, Street Address Line 2, Claims
-Email. Carrier name now cyan on cards, `m-0` on all text.
-
-### `app/admin/page.tsx` — Edit Provider / Edit Carrier green name headers
+### Admin — Edit Provider/Carrier header shows name in green
 
 Provider edit form: `Edit Provider: Dr. {first} {last}` with name in green.
 Carrier edit form: `Edit Carrier: {carrier_name}` with name in green.
 
-### `app/md/MDClient.tsx` — logged-in doctor name in header
+### Admin — backend save errors surfaced inline (all sections)
 
-Header now shows `👤 Dr. {name}` (cyan) above `📍 {location}` (green).
-`Dr.` prefix only for MD/DO license types.
+Silent Supabase failures now show red inline error messages on all Admin
+save handlers. Side effect: exposed missing RLS policy on `insurance_carriers`.
 
-### `app/dashboard/DashboardClient.tsx` — assigned provider on patient cards
+### Admin — Insurance Carriers expanded
 
-Patient cards show: `PT336816 · Progressive · Dr. Yury Gottesman (MD)`.
-Implemented via PostgREST join `doctors(first_name, last_name, license_type)`
-in client `loadAll`. Handles PostgREST array join shape. `Dr.` prefix only
-for `['MD', 'DO']`. Red `⚠ No provider` when `doctor_id` is null.
+Three new columns: `claims_department`, `street2`, `claims_email`.
+CSV batch import added. Top 20 NY No-Fault carriers imported.
+
+### MD Dashboard — logged-in doctor name in header
+
+`MDClient.tsx` header: `👤 Dr. [Name]` (cyan) above `📍 [Location]`.
+
+### FD Dashboard — assigned provider on patient cards
+
+Patient cards show provider name in cyan with license type.
 
 ### FK constraint audit — Stage 1 complete
 
-Added missing FK constraints:
+Added FK constraints on `appointments`, `patient_visits`, `visit_line_items`.
 
-```sql
--- appointments
-ALTER TABLE appointments
-  ADD CONSTRAINT appointments_patient_id_fkey
-  FOREIGN KEY (patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE;
+### NF-3 — Section 16 title fix
 
--- patient_visits
-ALTER TABLE patient_visits
-  ADD CONSTRAINT patient_visits_patient_id_fkey
-  FOREIGN KEY (patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE;
+`_p2_vals()` was hardcoding `"treating_provider.1.title": "MD"`. Fixed to
+use `license_type` parameter from `patient_data.get('doctor_license_type')`.
 
--- visit_line_items
-ALTER TABLE visit_line_items
-  ADD CONSTRAINT visit_line_items_visit_id_fkey
-  FOREIGN KEY (visit_id) REFERENCES patient_visits(id) ON DELETE CASCADE;
+### `database.py` — independent provider supervisor fallback fix
 
-ALTER TABLE visit_line_items
-  ADD CONSTRAINT visit_line_items_patient_id_fkey
-  FOREIGN KEY (patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE;
-```
+Supervisor fields now default to doctor's own values for independent MDs.
 
-All other FK relationships (`patients.doctor_id`, `appointments.doctor_id`,
-`appointments.location_id`, `patient_visits.location_id`,
-`doctor_locations.*`, `user_profiles.doctor_id`) were already in place.
+### `patients.signature_url` column removed
 
+Data migrated to `patient_signature_url`. All consumers updated.
 
+### Dev generator — `doctor_id` assigned to generated patients
 
-## 2026-07-03 — NF-3 full wiring, office location Main Office, PA/NP roles, Admin polish
+Fixed `app/dev/page.tsx` to write both `doctor_name` and `doctor_id` on INSERT.
 
-### Migration 015 — `office_locations.is_main_office`
+### NF-3 full regression — all scenarios passed
 
-```sql
-ALTER TABLE office_locations
-  ADD COLUMN IF NOT EXISTS is_main_office boolean NOT NULL DEFAULT false;
-```
-
-Main office sorts first in all queries. Only one location can be main at a
-time — enforced on save by clearing all others before setting the new one.
-
-### Migration 016 — `patient_visits.location_id`
-
-```sql
-ALTER TABLE patient_visits
-  ADD COLUMN IF NOT EXISTS location_id uuid REFERENCES office_locations(id);
-```
-
-Written by `handleStartVisit` (`calendar/page.tsx`) using
-`apt.location_id || sessionStorage.getItem('cosmos_location_id')`, and by
-`PatientChart.tsx` manual visit INSERT using `sessionStorage.getItem('cosmos_location_id')`.
-Used by `main.py` to fetch place of service for NF-3 Section 15.
-
-### `database.py` — refactored to shared `_build_doctor_fields()` helper
-
-- New `_build_doctor_fields(d, client)` helper used by both
-  `get_doctor_for_patient()` and `get_doctor_by_id()` — no duplicate logic.
-- Reads `mailing_street/city/state/zip` (migration 014) for Pay-To address.
-- Supervisor fallback: when `supervising_provider_id` is set, fetches
-  supervisor row and uses their mailing address + `pc_corp_name` for Pay-To.
-- Exports new fields: `doctor_mailing_address`, `doctor_mailing_street/city/
-  state/zip`, `doctor_license_type`, `supervisor_npi`, `supervisor_tax_id`,
-  `supervisor_specialty`, `supervisor_signature_url`, `supervisor_name`.
-
-### `forms/nf3.py` — full Pay-To / signature / place-of-service wiring
-
-- **Page 1 Pay-To** (`provider.name_address`): PC corp name + mailing address ✅
-- **Page 2 Section 15** (place of service): two-line format from
-  `place_of_service_address` — `street\ncity, state zip`.
-- **Page 2 Section 16**: treating provider title uses `doctor_license_type`
-  (PA/NP/MD); license/cert no. uses treating provider's own NPI.
-- **Page 3 assignee**: `assignment.provider_assignee_print_name` → PC corp
-  name; `assignment.provider_assignee_signature` → supervisor signature image.
-- **Page 3 bottom row**: `provider.signature` → supervisor signature;
-  `provider.irs_tin` → supervisor name; `provider.wcb_rating_code` →
-  supervisor NPI; `provider.specialty_if_none` → supervisor specialty.
-- Billing fields (`billing_npi`, `billing_tax_id`, `billing_specialty`) use
-  supervisor values when PC corp exists, treating provider's own otherwise.
-- `_p2_vals()` signature extended with `billing_npi` parameter (fixes
-  `NameError: name 'billing_npi' is not defined` on NF-3 generation).
-- Signature injection: both `provider_assignee_signature` and
-  `provider.signature` now inject supervisor/billing MD signature.
-
-### `main.py` — office location lookup for place of service
-
-After merging visit row, fetches `office_locations` via `visit.location_id`
-and adds `place_of_service_address` (`street\ncity, state zip` two-line
-format) to `patient_data`.
-
-### `calendar/page.tsx` — location_id on Start Visit
-
-`handleStartVisit` now writes `location_id: apt.location_id ||
-sessionStorage.getItem('cosmos_location_id') || null` into
-`patient_visits` INSERT. `Appointment` interface extended with
-`location_id?: string`.
-
-### `PatientChart.tsx` — session location on manual visit INSERT
-
-Manual visit INSERT now includes `location_id:
-sessionStorage.getItem('cosmos_location_id') || null`.
-
-### `app/admin/page.tsx` — office location Edit + Main Office flag
-
-- Location cards in manage mode now have **Edit** button alongside Del.
-- Edit populates form, shows "Edit Location" title, "Save Changes" button.
-- Add/Edit form includes custom Main Office toggle (cyan checkbox, explicit
-  18×18 px, `accentColor` not used — custom styled for dark background).
-- Main office card: cyan border `border-[#00cfff]`, sorted first.
-- Other location cards: purple border `border-[#a855f7]`.
-
-### `app/admin/page.tsx` — Admin UI polish
-
-- Practice Info card: `gap-0.5` → `gap-0`, `m-0` on all `<p>` elements.
-- Office Location cards: `m-0` on all `<p>` elements.
-- Supervisor billing card: `gap-1.5` → `gap-0`, `m-0` on all `<p>` elements.
-- Location assignment cards: `m-0` on all `<p>` elements.
-- User cards: `gap-3` → `gap-1.5`, font sizes reduced (14px/12px), `m-0`
-  on text elements.
-- All `SelectTrigger` elements: `style={{color:'#f0f4f8'}}` added explicitly
-  — fixes selected-value invisible on dark background (preflight gap).
-- Supervised provider border: `border-[#ffffff18]` → `border-[#a855f7]`
-  (purple, matching corp name color).
-
-### `app/admin/page.tsx` — PA and NP user roles
-
-- `ROLES` array extended: `['frontdesk', 'md', 'pa', 'np', 'billing', 'admin', 'superadmin']`
-- `ROLE_LABELS` map added: human-readable labels for all roles.
-- `ROLE_COLORS` extended: PA = `#3b82f6` (blue), NP = `#8b5cf6` (purple),
-  Superadmin = `#e74c3c` (red).
-- "Linked Doctor" field now shown for MD, PA, and NP roles.
-- `doctor_id` not cleared when switching between md/pa/np roles.
-- `user_profiles_role_check` constraint updated:
-  `CHECK (role IN ('frontdesk', 'md', 'pa', 'np', 'billing', 'admin', 'superadmin'))`
-
-### `app/admin/page.tsx` — supervised provider validation fix
-
-- Mailing address + tax classification fields now optional for supervised
-  providers (any provider with `supervising_provider_id` set).
-- Form auto-switches to the tab containing the first validation error
-  (Billing tab if billing fields fail, Credentials otherwise).
-
-### `app/page.tsx` — PA and NP login routing + location picker
-
-- `ROLE_META` extended with `pa` (blue `#3b82f6`, path `/md`) and
-  `np` (purple `#8b5cf6`, path `/md`).
-- `navigate()` and `handlePostLogin()`: location picker and
-  `cosmos_location_id` sessionStorage storage now applies to
-  `['md', 'pa', 'np']` instead of `md` only.
-
----
-
-## 2026-06-30 — Mailing address, tab merge, PA/NP, grouped provider cards, dev tools fixes
-
-### Migration 014 — mailing address replaces PC/personal address
-
-Dropped from `doctors`: `street`, `city`, `state`, `zip`, `pc_street`,
-`pc_city`, `pc_state`, `pc_zip`. Added: `mailing_street`, `mailing_city`,
-`mailing_state` (DEFAULT `'NY'`), `mailing_zip`. Mailing address is required
-for all providers regardless of tax classification — it is where insurance
-companies send payments, denials, and correspondence.
-
-### `forms/w9.py` — reads `mailing_*` columns
-
-Dropped old fallback chain (`pc_street → street`). W-9 address lines now
-read `mailing_street`, `mailing_city`, `mailing_state`, `mailing_zip` directly.
-
-### Provider form — General + Credentials tab merge
-
-`General` tab removed. Fields merged into `Credentials` tab:
-First/Last Name, License Type, Specialty, Supervising Provider, Email,
-Phone, Fax, NPI, License #, Signature. Provider form now has three tabs:
-**Credentials** · **Billing** · **Schedule**.
-
-### Billing tab — Mailing Address replaces Registered PC Address
-
-`Registered PC Address` block removed from Billing tab. New **Mailing Address**
-block (Street/City/State/Zip) added — always visible regardless of tax
-classification. PC Corp Name remains, still conditionally shown for non-individual
-tax classifications. Validation: all four mailing address fields are required.
-
-### PA and NP license types
-
-`LICENSE_TYPE_OPTIONS` extended: `NP — Nurse Practitioner`,
-`PA — Physician Assistant`. Validation: `license_type === 'NP'` requires
-`supervising_provider_id` (NPs must work under a supervising MD). PAs can
-have their own PC with no supervisor.
-
-### Provider cards — grouped hierarchy + visual tiers
-
-Doctor list now groups by billing hierarchy: independent/supervising MDs
-first (full cyan border), supervised providers indented under their
-supervisor (dim border, `ml-4`). Card content: name + inline license
-abbreviation, specialty, NPI, corp name (purple), supervisor line (green),
-signature status. Short labels for license types: PSY, ACU, POD. No empty
-line gaps between card fields (`gap-[3px]` + `m-0`).
-
-### Dev test-data generator — real doctors/carriers/attorneys
-
-`app/dev/page.tsx` `generate()` fetches real records from `doctors`,
-`insurance_carriers`, and `lawyers` before generating patients. Falls
-back to hardcoded fictional data only if a table returns empty rows.
-No more "Yuri Goddesman" or fictional carriers/law firms in generated
-test data.
-
-### Wipe-patients endpoint — appointments cascade
-
-`app/api/wipe-patients/route.ts`: `appointments` table now deleted before
-`patients` in the cascade chain. Previous gap left orphaned appointment
-rows pointing at deleted patients after a data wipe, causing broken
-patient-name lookups on the Today Schedule.
-
----
-
-## 2026-06-29 — Doctor location assignment Edit button, 12h time display
-
-### Location Assignments — Edit capability (new)
-
-- `app/admin/page.tsx` (`DoctorsSection`): added `editingLocId` state and
-  `handleEditLocation(dl)` helper. Reuses the existing Add Location form
-  and `handleAddLocation`'s upsert (`onConflict: 'doctor_id,location_id'`)
-  — no new backend path needed.
-- Each Location Assignment card now shows **Edit** alongside **Remove**.
-  Edit populates the form with the assignment's existing values and
-  opens it in edit mode.
-- Location dropdown is locked (read-only display) while editing — only
-  the schedule (days/hours/capacity/slot length) can change, not which
-  location the assignment points to.
-- Save button reads "Save Changes" in edit mode vs. "Assign Location" in
-  add mode. Cancel resets `editingLocId` and the form back to blank.
-
-### Location hours — 12-hour display format
-
-- Location Assignment card time display (`{start_time} – {end_time}`)
-  changed from 24-hour (`09:00 – 17:00`) to 12-hour with AM/PM
-  (`9:00 AM – 5:00 PM`) via `toLocaleTimeString`. Display-only change —
-  underlying `start_time`/`end_time` columns remain unchanged (still
-  24-hour `time` type in Postgres).
-
----
-
-## 2026-06-29 — Admin Users, Superadmin role, Visit conversion, RLS audit
-
-### Admin Users Tab (new)
-
-- `app/api/admin/users/route.ts` — new API route, full CRUD via Supabase
-  Admin client. GET lists all users (auth.users + user_profiles join).
-  POST creates auth user + profile row with rollback on failure. PATCH
-  handles profile edits, PIN reset, and active toggle. DELETE removes
-  auth user (cascades to profile).
-- `user_profiles.active` column added: `ALTER TABLE user_profiles ADD
-  COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true`
-- `user_profiles` CHECK constraint updated to include `superadmin` role
-- `lib/supabase.ts`: `padPin()` helper — pads PIN to 6 chars for Supabase
-  Auth minimum password length requirement
-- All test users reset to PIN `999999` via direct SQL on `auth.users`
-- `UsersSection` fetch calls forward `Authorization: Bearer <token>`
-
-### Superadmin Role (new)
-
-- `app/page.tsx`: full rewrite in shadcn/ui + Oxanium. Three stages:
-  `login` → `location` (MD) → `dashboard` (superadmin 2×2 picker)
-- `ROLE_META` updated with `superadmin` entry (gold crown, dashboard picker)
-- API route guard: non-superadmin cannot create/assign/modify/delete
-  superadmin accounts. `getCallerRole()` reads Bearer token server-side.
-- `user_profiles` CHECK constraint: added `superadmin` to allowed values
-- Admin Users dropdown: `superadmin` added as selectable role
-
-### Active Users KPI Card
-
-- `OverviewSection`: `activeUserCount` state + fetch from `user_profiles
-  WHERE active = true`. Replaces `—` placeholder.
-
-### RLS Full Audit
-
-Added `authenticated` role policies to all tables that had `anon`-only
-coverage: `cpt_codes`, `doctor_locations`, `doctors`, `office_locations`,
-`practice_settings`, `user_profiles`, `patient_pain_chart`,
-`patient_procedures`, `patients`. Consolidated `patient_visits` and
-`visit_line_items` to single `allow_all` policies covering both roles.
-
-### Appointment → Visit Conversion
-
-- `app/calendar/page.tsx`: `handleStartVisit()` — creates `patient_visits`
-  row, marks appointment `Checked In`, navigates to chart with `?visit_id=`
-- Role-based calendar buttons:
-  - FD: View Chart · Confirm → · Check In → · No-Show · Cancel · Delete
-  - MD: Start Visit (Checked In only) · No-Show/Cancel (Confirmed/Checked
-    In only) · "Awaiting confirmation" text for Scheduled
-- `app/md/[patientId]/PatientChart.tsx`:
-  - `handleSave` dual-mode: UPDATE if `savedVisitId` exists, INSERT if not
-  - `visitDirty` flag: detects empty pre-created visits vs saved visits.
-    Initialized from visit data (`pce_data`/`cpt_codes` presence).
-  - CPT/ICD-10 pickers gated on `(!visitDirty && savedVisitId)` — show
-    pickers when dirty, read-only chips when already saved
-  - Auto-complete: saves appointment as `Completed` when visit is saved
-  - `canSave` simplified to `!tx.expired` (removed `!savedVisitId` gate)
-
-### Booking Form Improvements
-
-- Free-form time entry (`<input type="time">`) replaces slot system.
-  NY No-Fault walk-in/queue model — exact time is administrative only.
-- Double-booking guard in `handleBook`: blocks same doctor + date + time
-- Dark doctor selector: locked MD shows as text, FD gets dropdown
-- Hours hint below time input shows location service hours
-- `generateSlots` retained but unused (available for future strict-slot
-  practices)
+Three provider scenarios verified: independent MD, supervised PA, independent
+MD with own PC corp.
 
 ---
 

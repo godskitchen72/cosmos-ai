@@ -109,18 +109,19 @@ Docs uploads/deletes — see §8), `cpt_codes` (fee schedule — the *only*
 source of fee data; there is no separate "fee schedule" concept anywhere
 in the codebase; unique constraint on `cpt_code` added migration 011),
 `doctors` (PC/tax fields per §5 of `PRODUCT_SPEC.md`, `w9_url`,
-signature; `doctor_id` is its primary key; also `license_type` text
-DEFAULT 'MD' (options: MD, NP, PA, DC, PT, Acupuncturist, Psychologist,
-Podiatrist, Other), `supervising_provider_id` uuid FK self-referencing
-(required when `license_type = 'NP'`), `available_days` text[],
-`max_patients_per_day` int DEFAULT 25 — migration 009.
-`default_start_time`/`default_end_time` time DEFAULT '09:00'/'17:00' —
+`license_number` (required — minimum 6 chars, state license/certification
+number used in NF-3 Section 16), signature; `doctor_id` is its primary
+key; also `license_type` text DEFAULT 'MD' (options: MD, NP, PA, DC, PT,
+Acupuncturist, Psychologist, Podiatrist, Other), `supervising_provider_id`
+uuid FK self-referencing (required when `license_type = 'NP'`),
+`available_days` text[], `max_patients_per_day` int DEFAULT 25 — migration
+009. `default_start_time`/`default_end_time` time DEFAULT '09:00'/'17:00' —
 migration 013. `mailing_street`/`mailing_city`/`mailing_state`/
 `mailing_zip` text (mailing address for insurance correspondence;
 replaces the dropped `street`/`city`/`state`/`zip`/`pc_street`/
 `pc_city`/`pc_state`/`pc_zip` columns) — migration 014.
 
-**Tables with schema changes this session:**
+**Tables with schema changes in Sessions 10–11:**
 - `office_locations` — added `is_main_office boolean NOT NULL DEFAULT false`
   (migration 015). Main office sorts first in all queries
   (`order('is_main_office', ascending: false).order('name')`). Only one
@@ -132,6 +133,12 @@ replaces the dropped `street`/`city`/`state`/`zip`/`pc_street`/
   and by `PatientChart.tsx` manual visit INSERT (uses `sessionStorage.getItem('cosmos_location_id')`).
   Used by `main.py` to fetch the office location address for NF-3
   Section 15 Place of Service.
+- `insurance_carriers` — added `claims_department text`, `street2 text`,
+  `claims_email text` columns (session 10). Added `authenticated` role
+  RLS policy (was missing — `anon`-only coverage).
+- `patients` — `signature_url` column dropped (session 10), data migrated
+  to `patient_signature_url`. The canonical patient signature column is
+  now `patient_signature_url` only.
 
 **`user_profiles` table changes (session 9):**
 - `user_profiles_role_check` constraint updated to include `pa` and `np`:
@@ -139,17 +146,8 @@ replaces the dropped `street`/`city`/`state`/`zip`/`pc_street`/
 - `doctor_id` column (pre-existing) is now also linked for PA/NP users —
   required for the login location picker to work for those roles.
 
-**`insurance_carriers` table changes (session 10):**
-- Added `claims_department text`, `street2 text`, `claims_email text` columns.
-- Added `authenticated` role RLS policy (was missing — `anon`-only coverage).
-
-**`patients` table changes (session 10):**
-- `signature_url` column dropped — data migrated to `patient_signature_url`.
-  All consumers updated: `PatientProfile.tsx`, `PatientForm.tsx`, `forms/nf3.py`.
-  The canonical patient signature column is now `patient_signature_url` only.
-
 **FK constraints added (session 10):** All FK relationships are now complete.
-See `HANDOVER.md` Session 10 completion list. Key additions:
+Key additions:
 - `appointments.patient_id → patients` ON DELETE CASCADE
 - `patient_visits.patient_id → patients` ON DELETE CASCADE
 - `visit_line_items.visit_id → patient_visits` ON DELETE CASCADE
@@ -169,6 +167,13 @@ is `patients.doctor_id`, captured through an actual dropdown on
 the patient registration form. `patient_visits.location_id` (migration
 016) now reliably records where the visit occurred.
 
+**W9 storage — Supabase Storage API only:** W9 PDFs (and all other
+generated documents) are stored in the `patient-forms` storage bucket.
+Direct SQL DELETE on `storage.objects` is blocked by Supabase's
+`storage.protect_delete()` trigger — always delete storage objects via
+the Supabase Storage REST API (`DELETE /storage/v1/object/{bucket}/{path}`
+with service role key), never via SQL.
+
 ---
 
 ## 4. Backend API (`cosmos-api`)
@@ -176,13 +181,19 @@ the patient registration form. `patient_visits.location_id` (migration
 FastAPI on Render. File ownership:
 - `main.py` — route definitions + shared dispatcher
 - `database.py` — builds request-specific data dicts for PDF generators.
-  **Refactored this session** to a `_build_doctor_fields(d, client)` shared
-  helper used by both `get_doctor_for_patient()` and `get_doctor_by_id()`.
-  Now exports: `doctor_mailing_address`, `doctor_mailing_street/city/state/zip`,
-  `doctor_license_type`, `supervisor_npi`, `supervisor_tax_id`,
-  `supervisor_specialty`, `supervisor_signature_url`, `supervisor_name`.
-  Supervisor fields are populated only when `supervising_provider_id` is set;
-  empty strings otherwise.
+  Exports prefixed doctor fields: `doctor_name`, `doctor_npi`,
+  `doctor_license_number`, `doctor_phone`, `doctor_fax`, `doctor_tax_id`,
+  `doctor_specialty`, `doctor_license_type`, `doctor_signature_url`,
+  `doctor_address`, `doctor_street`, `doctor_city`, `doctor_zip`,
+  `doctor_pc_corp_name`, `doctor_mailing_address`,
+  `doctor_mailing_street/city/state/zip`, `supervisor_npi`,
+  `supervisor_tax_id`, `supervisor_specialty`, `supervisor_signature_url`,
+  `supervisor_name`. Supervisor fields are populated from the supervisor's
+  own record when `supervising_provider_id` is set; fall back to the
+  treating doctor's own values when not supervised (so independent MDs
+  correctly have their own data in all supervisor fields).
+  **Always check `database.py` `_build_doctor_fields()` for the exact
+  prefixed key name before referencing a doctor field in any `forms/*.py`.**
 - `forms/*.py` — one module per document/referral type; PDF field-fill logic only
 - `forms/base.py` — shared PDF helpers only (signature injection, field filling);
   no database logic
@@ -200,11 +211,16 @@ not all import through `pdf_engine.py` (`/generate-w9` imports `forms.w9`
 directly) — confirm the actual import path per document rather than assuming
 the referral pattern applies.
 
+**W9 generation rules (`/generate-w9`):**
+- Requires `!supervising_provider_id AND (!!pc_corp_name OR tax_classification === 'individual')`
+- Returns HTTP 400 for supervised providers or providers without billing
+  entity status — enforced at the API level regardless of UI state.
+
 ---
 
-## 5. NF-3 Field Mapping (current state, post-Session 9)
+## 5. NF-3 Field Mapping (current state, post-Session 11)
 
-Key field assignments as of this session's wiring work:
+Key field assignments:
 
 | Field | Value |
 |---|---|
@@ -212,23 +228,50 @@ Key field assignments as of this session's wiring work:
 | `services.N.place_of_service_zip` | Office location address (two-line: `street\ncity, state zip`) |
 | `treating_provider.1.name` | Treating provider full name |
 | `treating_provider.1.title` | `doctor_license_type` (MD/PA/NP/etc.) |
-| `treating_provider.1.license_or_certification_number` | Treating provider NPI |
+| `treating_provider.1.license_or_certification_number` | Treating provider **state license number** (`doctor_license_number`) — **not NPI** |
 | `assignment.provider_assignee_print_name` | PC corp name (payee_name) |
 | `assignment.provider_assignee_signature` | Supervisor/billing MD signature (image injection) |
 | `provider.signature` (bottom row) | Supervisor/billing MD signature (image injection) |
-| `provider.irs_tin` | Supervisor name (Gottesman's printed name) |
+| `provider.irs_tin` | Supervisor name (printed name) |
 | `provider.wcb_rating_code` | Supervisor NPI |
 | `provider.specialty_if_none` | Supervisor specialty |
 | `provider.owners_and_credentials` | Empty (Section 17 — left blank by product decision) |
 
+**Section 16 rule:** LICENSE OR CERTIFICATION NO. is the treating
+provider's state-issued license/certification number — never NPI. NPI
+is a federal identifier used elsewhere on the form (billing header).
+
 **Supervisor fallback logic:** When treating provider has `supervising_provider_id`,
 all billing fields (corp name, mailing address, NPI, tax ID, specialty, signature)
-use the supervisor's data. When no supervisor (`has_corp = False`), treating
-provider's own data is used for all fields.
+use the supervisor's data. When no supervisor, treating provider's own data
+is used for all fields.
+
+**W9 routing for NF-3:** After doctor merge, if treating doctor has
+`supervising_provider_id`, fetches supervisor's `w9_url` and injects it
+into `patient_data` as the billing entity W9. Supervised providers have
+no W9 of their own; the supervisor's W9 is the correct document.
 
 ---
 
-## 6. Frontend Data Fetch Pattern
+## 6. AOB Field Mapping (current state, post-Session 11)
+
+AOB (Assignment of Benefits) assigns benefits to the **billing entity**,
+never to the treating provider. Provider fields:
+
+| Field | Resolution |
+|---|---|
+| `assignee_provider_name` | `doctor_pc_corp_name` → `supervisor_name` → `doctor_name` |
+| `provider_printed_name` | Same as above |
+| `provider_address` | `doctor_mailing_address` (resolves to supervisor's mailing address when supervised) |
+| Provider signature | `supervisor_signature_url` → `doctor_signature_url` |
+
+`doctor_pc_corp_name` and `doctor_mailing_address` are already resolved
+to the supervisor's values by `database.py` when `supervising_provider_id`
+is set — AOB uses these resolved fields directly.
+
+---
+
+## 7. Frontend Data Fetch Pattern
 
 Standard: a server-component `page.tsx` wrapper does the initial Supabase
 query with `revalidate: 0`, then passes the result as props to a client
@@ -237,7 +280,7 @@ component unless there's a specific reason to deviate.
 
 ---
 
-## 7. Document Generation Pattern (Save→View)
+## 8. Document Generation Pattern (Save→View)
 
 All MD-discretionary referral types follow the Save→View pattern:
 - Button starts as "Save [type]", generates and stores the PDF on tap.
@@ -251,7 +294,7 @@ All MD-discretionary referral types follow the Save→View pattern:
 
 ---
 
-## 8. Admin Panel (`app/admin/page.tsx`)
+## 9. Admin Panel (`app/admin/page.tsx`)
 
 Six-tab system: Overview / Carriers / Providers / Lawyers / CPT Codes /
 ICD-10. Uses shadcn/ui + Oxanium — second approved exception to the
@@ -265,10 +308,29 @@ Location form with Main Office toggle), Dev Tools card.
 **Providers tab** shows: grouped hierarchy (supervising/independent MDs
 with cyan border, supervised providers with purple border `#a855f7`,
 indented `ml-4`). Three-tab provider form: Credentials / Billing / Schedule.
-Billing tab: mailing address (required for independent providers, optional
+Credentials: name, license type, specialty, supervising provider, email,
+phone, fax, NPI, **license # (required — minimum 6 chars)**, signature.
+Billing: mailing address (required for independent providers, optional
 for supervised), PC corp name, tax classification. Supervised providers
 show a read-only "Billing under Supervisor's PC" card instead of the
 mailing address form.
+Schedule: location assignments (required before Save Provider can be clicked
+for existing providers). New provider flow: two-step — first save creates the
+record, then reopens in edit mode on Schedule tab for location assignment.
+
+**W9 buttons on provider cards**: shown only when provider meets billing
+entity criteria (`!supervising_provider_id AND (!!pc_corp_name OR tax_classification === 'individual')`).
+Supervised providers show no W9 button regardless of `w9_url` value.
+
+**Dropdown contrast fix (Session 11):** All `SelectContent` use
+`bg-[#1a2235] border-[#2a3a5a] text-[#e2e8f0]`. All `SelectItem` use
+`text-[#e2e8f0] focus:bg-[#00cfff20] focus:text-white`. Native `bg-card`
+was dark-on-dark unreadable.
+
+**SelectTrigger color fix** — all `SelectTrigger` elements in Admin have
+`style={{color:'#f0f4f8'}}` explicitly set. Shadcn's `SelectValue` renders
+its selected value in the trigger's own color context, which is not
+reliably inherited on this project (preflight gap, §10).
 
 **Users tab** shows: user cards (name, email, role badge with color,
 active/inactive state). Role dropdown: Front Desk / MD / PA / NP / Billing
@@ -276,14 +338,9 @@ active/inactive state). Role dropdown: Front Desk / MD / PA / NP / Billing
 PA/NP users must have `doctor_id` linked for the login location picker
 to function.
 
-**SelectTrigger color fix** — all `SelectTrigger` elements in Admin have
-`style={{color:'#f0f4f8'}}` explicitly set. Shadcn's `SelectValue` renders
-its selected value in the trigger's own color context, which is not
-reliably inherited on this project (preflight gap, `ARCHITECTURE.md` §10).
-
 ---
 
-## 9. Login Flow (`app/page.tsx`)
+## 10. Login Flow (`app/page.tsx`)
 
 Three stages: `login` → `location` (md/pa/np) → `dashboard` (superadmin picker).
 
@@ -304,7 +361,7 @@ and `cosmos_location_name` stored in `sessionStorage` for use by
 
 ---
 
-## 10. Biller Dashboard (`/billing`)
+## 11. Biller Dashboard (`/billing`)
 
 Built across multiple sessions. v1 was the first build against
 `PRODUCT_SPEC.md` §10's "actual Billing department feature," previously
@@ -357,18 +414,14 @@ automatically inherits color, font-family, or font-size from its parent
 Radix portaled content (`SelectContent`, `DropdownMenuContent`) renders
 to `document.body`, entirely outside its logical parent's DOM subtree,
 so even an inherited style that *would* otherwise apply structurally
-still can't reach it. This has been the root cause of five separate,
-independently-discovered bugs on this dashboard (sortable header
-buttons missing font-size; `ReceivedCell` missing the Oxanium font;
-`SelectTrigger` losing its text color once a value is selected;
-`Button`'s `outline`/`ghost` variants having no text-color class at all;
-Android Chrome's separate font-boosting heuristic inflating text size
-independent of any CSS, fixed via a global `text-size-adjust: 100%`).
-**This session confirmed the same pattern applies to the Admin panel's
-`SelectTrigger` elements** — fixed with explicit `style={{color:'#f0f4f8'}}`
-on all triggers. Any new bare button or shadcn trigger/content element
-added to any surface needs explicit color/font/size classes set on it
-directly — see `AI_STYLE_GUIDE.md` §1 for the full list of confirmed instances.
+still can't reach it. This has been the root cause of multiple
+independently-discovered bugs across the Biller and Admin dashboards.
+**Confirmed instances on Admin (Session 11):** all `SelectContent`
+dropdowns were dark-on-dark (fixed with explicit background/text colors);
+all `SelectTrigger` elements lost text color once a value was selected
+(fixed with `style={{color:'#f0f4f8'}}`). Always set color/font/size
+explicitly on any new bare button or shadcn trigger/content element —
+see `AI_STYLE_GUIDE.md` §1 for the full confirmed list.
 
 **Shared font module** (`app/lib/fonts.ts`): the Oxanium font object used
 to be declared locally inside `BillerDashboard.tsx` only. Per the portal
@@ -394,8 +447,8 @@ deliberate earlier design decision, never collapsed: `claim_status`
 (workflow stage: Submitted/Accepted/Needs Review/Appeal/Under
 Investigation — the "Status" column) and `payment_status` (outcome:
 none/Denied/Paid/IME Cut Off/Missing Docs/Fraudulent/Policy Exhausted —
-the "Denial Status" column, renamed from "Payment Status" this session
-for clarity; label-only change, field name unchanged). The "Submitted"
+the "Denial Status" column, renamed from "Payment Status" for clarity;
+label-only change, field name unchanged). The "Submitted"
 column (now labeled "Bill Received") is `submitted_to_billing_at`, the
 producer-side timestamp described above — a third, separate field from
 both of the above and from the `$` Received column.

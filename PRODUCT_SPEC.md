@@ -29,6 +29,11 @@ tiers for convenience (`SYSTEM_PROMPT.md` §7).
 | Automatic | ICD-10 Diagnosis PDF | Fires on visit save, no tap required |
 | Automatic (finalization, not a document) | Billing (`visit_line_items`) | Auto-finalizes on visit save when codes/pairings are valid; manual "Finalize Billing" button remains as a retry/safety net, not removed |
 
+**NF-3 gate (Session 11):** NF-3 cannot be generated until the patient
+has a `patient_signature_url` on file. This is enforced at both the UI
+level (card shows 🔒 "No signature" with a tappable inline message) and
+the backend level (HTTP 400 from `/generate/nf3`).
+
 ---
 
 ## 3. Referral Workflow
@@ -83,7 +88,7 @@ is stored but is **not** auto-opened; the MD taps the resulting "View"
 state on their own terms. Revisiting an already-saved referral shows
 "View" immediately rather than resetting to "Save" (explicit decision,
 to prevent an accidental overwrite of a real referral with a blank one —
-`ARCHITECTURE.md` §7). A "Regenerate" link remains available as a
+`ARCHITECTURE.md` §8). A "Regenerate" link remains available as a
 deliberate, confirm-gated escape hatch.
 
 ---
@@ -94,7 +99,9 @@ Legally distinct roles on NY No-Fault forms — **never collapse into the
 same value**:
 - **Treating provider**: the individual MD/PA/NP who actually saw the
   patient. Appears in NF-3 Section 16. Title reflects actual license type
-  (MD, PA, NP). NPI is their own individual NPI.
+  (MD, PA, NP). License number is their own state-issued license/
+  certification number (not NPI). NPI is their own individual NPI (used
+  on the billing header, not Section 16).
 - **Billing/pay-to entity**: who gets paid — the doctor's Professional
   Corporation (PC) when one is on file, otherwise the individual doctor.
   Uses the PC corp name + mailing address. For supervised providers (PA,
@@ -110,7 +117,15 @@ On the NF-3:
   signature.
 - **Page 3 bottom row**: supervisor's name, NPI, specialty, and signature.
 - **Page 2 Section 16**: treating provider's name, title (license type),
-  and their own individual NPI.
+  and their own **state license/certification number** — never NPI.
+
+On the AOB:
+- **Assignee/provider name**: PC corp name → supervisor name → treating
+  MD name (priority order). Never the supervised treating provider's name.
+- **Provider address**: billing entity's mailing address (resolves to
+  supervisor's mailing address for supervised providers).
+- **Provider signature**: supervisor's signature for supervised providers;
+  treating doctor's own signature for independent providers.
 
 ---
 
@@ -119,6 +134,9 @@ On the NF-3:
 NY No-Fault MDs commonly bill through a Professional Corporation (PC),
 distinct from their personal identity. Doctor records support:
 - **PC Corp Name** — the corporation name used on all billing documents.
+- **License Number** — the doctor's state-issued license or certification
+  number. Required field (minimum 6 characters). Used in NF-3 Section 16
+  "LICENSE OR CERTIFICATION NO." — not NPI.
 - **Mailing Address** (street/city/state/zip) — where insurance companies
   send payments, denials, and correspondence. This is the address used in
   the NF-3 Pay-To block and on the W-9. Required for all independent
@@ -140,10 +158,27 @@ billing/Pay-To purposes. The supervised provider's own mailing address
 and tax classification fields are optional in the Admin form — the
 system will use the supervisor's data for NF-3 generation regardless.
 
-**W-9 generation policy**: once per doctor, at doctor creation. Editing
-a doctor's PC/tax info later does **not** retroactively regenerate their
-W-9 — this is by design, not a bug. Regenerating requires an explicit
-manual action per doctor; no bulk-regenerate path exists.
+**W-9 generation policy — entity-based rule (Session 11):**
+W-9 applies only to billing entities: providers with no
+`supervising_provider_id` AND either a `pc_corp_name` set or
+`tax_classification === 'individual'` (sole proprietor).
+
+- Independent MD with PC corp → W9 ✅
+- Independent MD sole proprietor → W9 ✅
+- NP with own PC and no supervisor → W9 ✅
+- NP under supervising MD → no W9 ❌
+- PA/PT/DC/Psych under supervising MD → no W9 ❌
+- MD supervised by another MD → no W9 ❌
+
+W-9 routing: when an NF-3 is generated for a supervised provider, the
+supervisor's W-9 is used as the billing entity W-9 (injected into the
+billing packet). The supervised provider has no W-9 of their own.
+
+W-9 generation is once per eligible doctor, at doctor creation (or on
+explicit regeneration). Editing a doctor's PC/tax info later does **not**
+retroactively regenerate their W-9 — this is by design, not a bug.
+Regenerating requires an explicit manual action per doctor; no bulk-
+regenerate path exists.
 
 ---
 
@@ -179,20 +214,13 @@ manual action per doctor; no bulk-regenerate path exists.
   decisions:
   - **"Received" is a real, per-visit dollar amount**
     (`patient_visits.received_amount`), directly editable on the
-    dashboard. (An earlier version of this document described this as a
-    placeholder "Not tracked" value with no backing column — that was
-    already inaccurate by the time of this revision; corrected against
-    the live code. If real-payment-tracking questions remain — partial
-    payments, carrier remittance matching, etc. — those are still a
-    separate, unscoped product conversation, just not the basic
-    existence of the column itself.)
+    dashboard.
   - **Outstanding, per carrier, is floored at $0** in the Paid-vs-
     Outstanding chart specifically — an overpaid carrier (negative
     outstanding) renders as fully Paid with no negative segment, rather
     than displaying a negative bar. This is a chart-display-only
     decision; it does not change the real underlying balance shown
-    elsewhere (e.g. the per-visit Balance column, which still correctly
-    shows a negative/green value for an overpaid visit).
+    elsewhere.
   - **Denial Status** is the current label for what generation/screens
     may still internally refer to as Payment Status — same field
     (`payment_status`), same values (none/Denied/Paid/IME Cut
@@ -202,12 +230,15 @@ manual action per doctor; no bulk-regenerate path exists.
     delete; removes both the uploaded file and its `patient_forms`
     record) — lets a biller correct a wrongly-uploaded document without
     needing a separate workflow or support ticket.
-  - **W9 is matched via `patients.doctor_id`, not a per-visit doctor
-    field** — `patient_visits` doesn't reliably record which doctor
+  - **W9 is matched via `patients.doctor_id`**, not a per-visit doctor
+    field — `patient_visits` doesn't reliably record which doctor
     treated a given visit (`ARCHITECTURE.md` §3). Using the patient's
     assigned doctor is correct today (one doctor per patient in
     practice) but is a standing assumption, not a guarantee — revisit if
     the practice ever has multiple treating doctors per patient.
+  - **W9 on the Biller dashboard** reflects the billing entity's W9 —
+    for patients treated by supervised providers, this should be the
+    supervising MD's W9 (per the W9 routing in §5).
 
 ---
 
@@ -264,7 +295,7 @@ submit-to-billing UI, fee estimates, and the "Referrals & Orders" status
 grid — 3-column layout, one card per document type showing "View" (links
 to the generated PDF) or "Not yet ordered," covering MRI / VNG / Rx /
 DME / PT / ANS / ICD-10 / Ortho / Pain Mgmt (9 types; no placeholder
-slots remain).
+slots remain). NF-3 card gated on patient signature.
 
 **Patient Chart** (MD-facing, `PatientChart.tsx`): the PCE wizard, the
 CPT/ICD-10 picker, and the referral-type grid (routes into each
@@ -274,14 +305,15 @@ referral's own screen) covering the same 9 document types as above.
 (Overview / Carriers / Providers / Lawyers / CPT Codes / ICD-10).
 Provider form: three-tab (Credentials / Billing / Schedule). Credentials:
 name, license type (MD/PA/NP/DC/PT/Acupuncturist/Psychologist/Podiatrist/
-Other), specialty, supervising provider, email, phone, fax, NPI, license #,
-signature. Billing: mailing address (required for independent providers,
-optional for supervised), PC corp name, tax classification. Supervised
-providers see a read-only "Billing under Supervisor's PC" card. Schedule:
-location assignments. Users tab: full CRUD, role assignment (Front Desk /
-MD / PA / NP / Billing / Admin / Superadmin), linked doctor for MD/PA/NP.
-Office Locations: main office flag (cyan border, sorts first), Edit button,
-purple border for non-main locations.
+Other), specialty, supervising provider, email, phone, fax, NPI, **license #
+(required)**, signature. Billing: mailing address (required for independent
+providers, optional for supervised), PC corp name, tax classification.
+Supervised providers see a read-only "Billing under Supervisor's PC" card.
+Schedule: location assignments (at least one required before Save Provider).
+New provider two-step flow: save first, then assign location. Users tab:
+full CRUD, role assignment, linked doctor for MD/PA/NP. Office Locations:
+main office flag (cyan border, sorts first), Edit button, purple border for
+non-main locations.
 
 **Biller Dashboard** (`app/billing/BillerDashboard.tsx`): the
 submitted-to-billing queue — see §6 for what it does and the standing
@@ -337,3 +369,17 @@ hand-rolled inline-style pattern every other dashboard listed here uses.
   of the visit. This is captured via `patient_visits.location_id`
   (migration 016), written from `sessionStorage.cosmos_location_id` at
   visit start. A blank place of service is a billing compliance gap.
+- **NF-3 Section 16 LICENSE field is not NPI** — it is the treating
+  provider's state-issued license or certification number. NPI is a
+  federal identifier used in the billing header (Page 1), not Section 16.
+  Using NPI in Section 16 is a billing error. License number is now a
+  required field in the provider record.
+- **AOB must name the billing entity as assignee** — the AOB legally
+  assigns the patient's right to payment to the billing entity (PC corp
+  or supervising MD's PC), not to the individual treating provider. Using
+  a treating provider's name on an AOB when they bill under a supervisor
+  is legally incorrect.
+- **W-9 in billing packets** — the W-9 accompanying an NF-3 must belong
+  to the billing entity (pay-to entity), not the treating provider.
+  For supervised providers, this is the supervising MD's W-9. Cosmos
+  automatically routes the correct W-9 at NF-3 generation time.
