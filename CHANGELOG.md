@@ -6,6 +6,68 @@ was planned or considered.
 
 ---
 
+## 2026-07-04 — Session 12
+
+### Enterprise Hardening — RLS full audit and hardening
+
+Full audit of all RLS policies via `pg_policies`. All `anon` and `public`
+policies removed from every table. Every table now locked to `authenticated`
+only.
+
+**Tables hardened (anon/public policies removed):**
+- `patients` — `{public}` INSERT/SELECT/UPDATE dropped (PHI exposure)
+- `patient_forms` — zero-policy state fixed; `authenticated full access`
+  policy added (document tracking was silently blocked for all users)
+- `patient_visits` — `{anon,authenticated}` ALL replaced with
+  `authenticated` only
+- `visit_line_items` — `{anon}` DELETE/INSERT/SELECT + combined ALL
+  replaced with `authenticated` only
+- `appointments` — 5 `{anon}` policies dropped
+- `doctors` — 4 `{anon}` + 1 `{public}` policies dropped
+- `insurance_carriers` — 4 `{anon}` + 1 `{public}` policies dropped
+- `lawyers` — 5 `{anon}/{public}` policies dropped
+- `cpt_codes` — 4 `{anon,authenticated}` combined policies dropped
+- `icd10_codes` — `{public}` ALL + 4 combined policies dropped
+- `office_locations` — 4 `{anon,authenticated}` combined policies dropped
+- `doctor_locations` — 4 `{anon,authenticated}` combined policies dropped
+- `practice_settings` — 4 `{anon,authenticated}` combined policies dropped
+- `user_profiles` — 4 `{anon,authenticated}` + 1 `{public}` policies dropped
+- `cpt_icd10_map` — `{public}` ALL replaced with `authenticated` only
+- `_deprecated_cpt_templates` — `{public}` ALL policy dropped
+- `_deprecated_icd10_templates` — `{public}` ALL policy dropped
+
+**Verified clean:**
+```sql
+SELECT policyname, tablename, roles FROM pg_policies
+WHERE schemaname = 'public'
+AND ('anon' = ANY(roles) OR 'public' = ANY(roles));
+-- 0 rows returned ✅
+```
+
+### Enterprise Hardening — NOT NULL constraints (migration 018)
+
+Full null audit conducted across all critical columns before constraining.
+
+**`doctors` table:**
+- `license_number SET NOT NULL`
+- `npi SET NOT NULL`
+- `mailing_state SET NOT NULL`
+
+**`patient_forms` table:**
+- `form_type SET NOT NULL`
+
+**Deferred (documented in HANDOVER.md):**
+- `doctors.mailing_street/city/zip` — supervised providers legitimately
+  have no own mailing address; left nullable by design
+- `patients.patient_signature_url` — collected post-intake; app-layer
+  gate is correct enforcement; left nullable
+- `patient_forms.visit_id` — NF-2 is patient-level; 50 null records
+  confirmed correct; left nullable
+- `patients.doctor_id` — 3 test patients unassigned; deferred to
+  pre-production go-live pass
+
+---
+
 ## 2026-07-04 — Session 11
 
 ### NF-3 — Patient signature gate

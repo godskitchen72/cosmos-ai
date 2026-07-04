@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 4, 2026, Session 11)
+# Cosmos Medical Technologies — HANDOVER (July 4, 2026, Session 12)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -15,135 +15,98 @@ self-contained.
 
 All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed via
 `tsc --noEmit` + full deploy chain. Live app confirmed healthy at session
-close.
+close. No code changes this session — all work was database-layer hardening
+executed directly in the Supabase SQL Editor.
 
 ---
 
 ## Completed This Session
 
-### NF-3 — Patient signature gate (UI + backend)
+### Enterprise Hardening Stage 1 — RLS full audit and hardening
 
-NF-3 generate is now locked until the patient has a signature on file.
+Full RLS audit conducted via `sql/003_rls_audit_query.sql`. Every table
+inspected for `anon` and `public` policy exposure.
 
-**UI gate** (`PatientProfile.tsx`):
-- `canGenerateNF3 = has(patient, 'patient_signature_url')`
-- NF-3 card `blocked` state: `!selectedVisit ? 'Select a visit' : !canGenerateNF3 ? 'No signature' : null`
-- Tapping a locked card calls `setNf3Msg(blocked)` with 3-second auto-clear
-- Message strip renders below the forms grid (outside the 4-column grid, not inside it)
-- All NF-3 error handlers converted from `alert()` to inline state
+**Findings:**
+- `patient_forms` — RLS enabled, zero policies (every authenticated
+  operation silently blocked). Fixed.
+- `patients` — `{public}` INSERT/SELECT/UPDATE (unauthenticated PHI
+  access). Fixed.
+- `patient_visits`, `visit_line_items` — `{anon,authenticated}` combined
+  policies. Fixed.
+- `doctors`, `insurance_carriers`, `lawyers`, `appointments`,
+  `cpt_codes`, `icd10_codes`, `office_locations`, `doctor_locations`,
+  `practice_settings`, `user_profiles` — all had residual `anon` or
+  `public` policies. All fixed.
+- `cpt_icd10_map` — `{public}` ALL policy. Fixed.
+- `_deprecated_cpt_templates`, `_deprecated_icd10_templates` — open
+  `{public}` policies. Fixed.
 
-**Backend guard** (`main.py` `/generate/nf3`):
-- Returns HTTP 400 `"Patient signature required to generate NF-3"` if `patient_signature_url` missing
-
-### Admin — dropdown contrast fixed globally
-
-All `SelectContent` components in `admin/page.tsx` changed from `bg-card`
-(dark-on-dark, unreadable) to `bg-[#1a2235]` with explicit `text-[#e2e8f0]`.
-All `SelectItem` elements changed from `text-foreground focus:bg-muted` to
-`text-[#e2e8f0] focus:bg-[#00cfff20] focus:text-white`. 12 SelectContent
-and 14 SelectItem instances fixed.
-
-### Admin — Save Provider gated on location assignment
-
-`Save Provider` button disabled when `docLocations.length === 0` for
-existing providers. Button label changes to `"Assign a location first"`.
-Warning prompt appears in the Schedule tab when no locations assigned.
-
-### Admin — New provider two-step flow
-
-New provider flow (`editing === 'new'`) was incorrectly blocked by the
-location gate (a `doctor_id` must exist before a `doctor_locations` row
-can be created). Fix:
-- Save is allowed on first save for new providers
-- Button label: `"Save & Continue"` for new providers
-- After successful insert, reopens the same provider in edit mode on the
-  Schedule tab via `setEditing(id); setDocTab('schedule')`
-- "LOCATION ASSIGNMENTS (SAVE PROVIDER FIRST)" hint shown on Schedule tab
-  when `editing === 'new'`
-
-### W9 scoped to billing entities only
-
-**Business rule established** (confirmed by product owner):
-- W9 applies only to providers who are the billing entity
-- Rule: `!supervising_provider_id AND (!!pc_corp_name OR tax_classification === 'individual')`
-- Supervised providers (any license type with a supervisor set) → no W9
-- NP with own PC and no supervisor → W9 ✅
-- NP under supervising MD → no W9 ✅
-- MD supervised by another MD (e.g. Orthobot) → no W9 ✅
-
-**`admin/page.tsx`:**
-- Auto-W9 on creation gated: `needsW9 = !supervising_provider_id && (!!pc_corp_name || tax_classification === 'individual')`
-- W9 View and Regenerate buttons on provider cards hidden when provider
-  doesn't meet billing entity criteria
-
-**`main.py` `/generate-w9`:**
-- Returns HTTP 400 if provider has `supervising_provider_id` set, or
-  lacks both PC corp and sole-proprietor classification
-
-### NF-3 routes supervisor W9 for supervised providers
-
-In `generate_pdf` for `form_type == "nf3"`, after doctor data merge:
-- If treating doctor has `supervising_provider_id`, fetches supervisor record
-- Injects supervisor's `w9_url` into `patient_data` as the billing entity W9
-- Also sets `billing_entity_name` and `billing_tax_id` from supervisor
-
-### W9 cleanup and regeneration
-
-All 7 existing W9 PDFs deleted from `patient-forms` storage bucket via
-Supabase Storage API. `w9_url` nulled on all doctor records via SQL.
-W9 regenerated for the 3 eligible providers:
-- Jim Carrey (MD, Divine Health Practices & Cattle, S-Corp) ✅
-- Yury Gottesman (MD, Infinity Health Practices, LLC) ✅
-- Don Kramer (MD, Sole Proprietor) ✅
-
-Supervised providers confirmed with no W9: NPian, Orthobot, PAian, Pearlman.
-
-### NF-3 Section 16 — license number (not NPI)
-
-Section 16 "LICENSE OR CERTIFICATION NO." field previously populated with
-NPI. Fixed in `forms/nf3.py`:
-- `license_number` parameter added to `_p2_vals()` signature
-- `treating_provider.1.license_or_certification_number` now uses `license_number`
-- NPI fallback removed entirely (license is required; NPI is wrong field)
-- Correct key: `patient_data.get("doctor_license_number")` (prefixed by `database.py`)
-
-### License number required in provider validation
-
-`validate()` in `admin/page.tsx` now requires `license_number`:
+**Result:** Zero `anon` or `public` policies remain on any table.
+Every table is now locked to `authenticated` only. Verified via:
+```sql
+SELECT policyname, tablename, roles FROM pg_policies
+WHERE schemaname = 'public'
+AND ('anon' = ANY(roles) OR 'public' = ANY(roles));
+-- Returns 0 rows ✅
 ```
-if (!form.license_number) e.license_number = 'Required'
-else if (form.license_number.length < 6) e.license_number = 'Minimum 6 characters'
+
+**Key finding during audit:** Login flow (`app/page.tsx`) confirmed to
+make zero pre-auth database queries — `signIn()` authenticates via
+Supabase Auth before any DB read occurs. Dropping `anon` policies had
+no impact on the login screen. Verified from source.
+
+**Policy name lesson learned:** Supabase SQL Editor CSV export omits
+`policyname` when using the standard audit query columns. Always use:
+```sql
+SELECT tablename, policyname, cmd, roles FROM pg_policies
+WHERE schemaname = 'public';
 ```
-Existing providers with blank license numbers will surface this error on
-next edit — must be populated before save.
+to get actual policy names for DROP POLICY statements.
 
-### AOB — always uses billing entity
+**Mobile paste truncation lesson learned:** The Supabase SQL Editor on
+mobile Chrome truncates large pastes silently. Keep each SQL block under
+~20 lines when pasting on mobile. Split into numbered chunks.
 
-AOB was showing treating provider (e.g. Brad PAian) as the provider/assignee.
-Fixed in `forms/aob.py`:
+### Enterprise Hardening Stage 1 — NOT NULL constraints (migration 018)
 
-**Provider name** resolution order:
-1. `doctor_pc_corp_name` (supervisor's PC corp when supervised — already
-   resolved by `database.py`'s `pc_corp_name` logic)
-2. `supervisor_name`
-3. `doctor_name` (treating provider — only used for independent providers
-   with no PC corp)
+Full audit of null counts across all critical columns conducted before
+constraining anything.
 
-**Provider address**: `doctor_mailing_address` — already resolves to
-supervisor's mailing address when supervised (set by `database.py`
-`sup_mailing` block).
+**Constrained (migration 018):**
+- `doctors.license_number NOT NULL` — zero nulls confirmed pre-migration
+- `doctors.npi NOT NULL` — zero nulls confirmed pre-migration
+- `doctors.mailing_state NOT NULL` — zero nulls confirmed pre-migration
+- `patient_forms.form_type NOT NULL` — zero nulls confirmed pre-migration
 
-**Provider signature**: `supervisor_signature_url` when present, falls back
-to `doctor_signature_url`. For independent providers, these are the same
-doctor.
+**Left nullable — supervised providers:**
+- `doctors.mailing_street/city/zip` — 4 supervised providers (NPian,
+  Orthobot, PAian, Pearlman) legitimately have no own mailing address;
+  `database.py` resolves to supervisor's address at document generation.
+  NOT NULL would be architecturally incorrect for this column.
+
+**Left nullable — application-layer gate sufficient:**
+- `patients.patient_signature_url` — 13 patients without signature;
+  collected post-intake. App-layer gate on NF-3 generation is the
+  correct enforcement point. DB constraint would break new patient intake.
+
+**Left nullable — NF-2 is patient-level:**
+- `patient_forms.visit_id` — 50 null records confirmed as NF-2 (25) and
+  NF-3 (25) test records from Session 10 dev generator. NF-2 is
+  patient-level, not visit-scoped — `visit_id` is legitimately nullable.
+
+**Deferred to pre-production:**
+- `patients.doctor_id` — 3 test patients (Maria Anderson PT457696,
+  Dorothy Lewis PT322913, John Ramirez PT326475) have no doctor assigned.
+  System is in test mode; constraining now adds friction during testing.
+  Enforce at go-live after test data cleared.
 
 ---
 
 ## Open Items, Priority Order
 
-1. **RLS full audit** — enterprise hardening Stage 1. Every table, every
-   command (SELECT/INSERT/UPDATE/DELETE), both `anon` and `authenticated`.
-   FK audit complete; RLS audit is next.
+1. **NOT NULL — `patients.doctor_id`** — deferred to pre-production.
+   3 test patients identified with null `doctor_id`. Enforce at go-live.
 
 2. **MRI Extremity Studies + insurance fields** — backend ready, pure
    frontend work, never started.
@@ -158,13 +121,11 @@ doctor.
 
 6. **Doctor mailing address data** — Gottesman, Orthobot, Pearlman, Kramer
    have test/placeholder mailing addresses. Must be updated with real data
-   before production use.
+   before production use. (Orthobot, NPian, PAian, Pearlman are supervised
+   — their mailing address resolves through supervisor. Gottesman and
+   Kramer are independent — their addresses are required for NF-3/W9.)
 
-7. **Existing providers missing license numbers** — now a required field.
-   Existing records (NPian, Orthobot, PAian, Pearlman, Carrey, Gottesman,
-   Kramer) should be audited and populated if missing.
-
-8. **NF-3 Section 15 Place of Service** — confirmed working for visits with
+7. **NF-3 Section 15 Place of Service** — confirmed working for visits with
    `location_id` set. Visits created before migration 016 (location tracking)
    will have blank place of service — data gap, not a code bug.
 
@@ -174,8 +135,9 @@ doctor.
 
 ### Stage 1 — Data Integrity
 - [x] FK constraints — all tables audited and complete (Session 10)
-- [ ] Full RLS audit — every table, every command, both roles
-- [ ] `NOT NULL` constraints on required columns
+- [x] Full RLS audit — every table, every command, both roles (Session 12)
+- [x] `NOT NULL` constraints on required columns — partial (Session 12);
+      `patients.doctor_id` deferred to pre-production
 
 ### Stage 2 — Security
 - [ ] API JWT authentication on all `cosmos-api` endpoints
@@ -235,6 +197,9 @@ at runtime because React hooks are called consistently, but it's
 architecturally incorrect. Low risk for now but should be moved inside
 the component on next full PatientProfile.tsx rebuild.
 
+**`patients.doctor_id` NOT NULL deferred:** 3 test patients have null
+`doctor_id`. Constraint deferred to pre-production go-live pass.
+
 ---
 
 ## File Confidence Levels (cumulative)
@@ -243,11 +208,11 @@ the component on next full PatientProfile.tsx rebuild.
 
 | File | Confidence |
 |---|---|
-| `cosmos-api/forms/nf3.py` | ★ Verified-final (this session — license_number fix, doctor_license_number key) |
-| `cosmos-api/forms/aob.py` | ★ Verified-final (this session — billing entity provider name/address/sig) |
-| `cosmos-api/main.py` | ★ Verified-final (this session — NF-3 signature gate, supervisor W9 routing, generate-w9 guard) |
-| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (this session — dropdown contrast, location gate, two-step new provider, W9 billing entity logic) |
-| `cosmos-dashboard/app/patients/[patientId]/PatientProfile.tsx` | ★ Verified-final (this session — NF-3 signature gate, inline message strip) |
+| `cosmos-api/forms/nf3.py` | ★ Verified-final (Session 11 — license_number fix, doctor_license_number key) |
+| `cosmos-api/forms/aob.py` | ★ Verified-final (Session 11 — billing entity provider name/address/sig) |
+| `cosmos-api/main.py` | ★ Verified-final (Session 11 — NF-3 signature gate, supervisor W9 routing, generate-w9 guard) |
+| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (Session 11 — dropdown contrast, location gate, two-step new provider, W9 billing entity logic) |
+| `cosmos-dashboard/app/patients/[patientId]/PatientProfile.tsx` | ★ Verified-final (Session 11 — NF-3 signature gate, inline message strip) |
 | `cosmos-api/database.py` | ★ Verified-final (Session 10 — independent provider supervisor fallback fix) |
 | `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (Session 10) |
 | `cosmos-dashboard/app/dashboard/page.tsx` | ★ Verified-final (Session 10) |
@@ -256,7 +221,7 @@ the component on next full PatientProfile.tsx rebuild.
 | `cosmos-dashboard/app/dev/page.tsx` | ★ Verified-final (Session 10) |
 | `cosmos-api/forms/base.py` | ★ Verified-final (Session 10) |
 | `cosmos-api/forms/ortho.py`, `forms/pain_mgmt.py` | ★ Verified-final (Session 10) |
-| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 9) |
+| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 12 — source read and confirmed; login makes zero pre-auth DB queries) |
 | `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (Session 9) |
 | `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (Session 9) |
 | `cosmos-api/forms/w9.py` | ★ Verified-final (Session 8) |
@@ -273,37 +238,54 @@ the component on next full PatientProfile.tsx rebuild.
 
 ## Lessons Learned This Session
 
+- **Supabase SQL Editor CSV export omits `policyname`** when using
+  `SELECT tablename, cmd, roles` — must explicitly select `policyname`
+  as a column to get it in output. Always use
+  `SELECT tablename, policyname, cmd, roles FROM pg_policies` for any
+  policy name lookup.
+- **`DROP POLICY IF EXISTS` with guessed names silently no-ops** — if
+  the policy name doesn't match exactly, the DROP succeeds with no error
+  but does nothing. Always confirm actual policy names via `pg_policies`
+  before writing DROP statements.
+- **Supabase SQL Editor on mobile Chrome truncates large pastes** — any
+  block over ~20 lines risks being cut off mid-statement, producing a
+  `42601: syntax error at end of input`. Split into chunks of ~15-20
+  lines when pasting on mobile.
+- **`ALTER TABLE ... DISABLE ROW LEVEL SECURITY` requires superuser** —
+  the Supabase SQL Editor role (`postgres`) does not have superuser
+  privileges on managed tables. This approach does not work; use
+  explicit DROP POLICY with exact names instead.
+- **`patients` primary key is `patient_id` (text), not `id`** — unlike
+  most other tables which use `uuid` PKs, `patients` uses a text-format
+  `patient_id` column (e.g. `PT457696`). Queries against this table
+  must use `patient_id`, not `id`.
+- **Supervised providers legitimately have null mailing addresses** —
+  `database.py` resolves mailing address to the supervisor's at document
+  generation time. NOT NULL on `doctors.mailing_street/city/zip` would
+  be architecturally incorrect — do not add it.
+- **`patient_forms.visit_id` is legitimately nullable** — NF-2 is
+  patient-level, not visit-scoped. The 50 null `visit_id` records in
+  `patient_forms` are expected and correct, not a data gap.
+- **Login flow makes zero pre-auth DB queries** — `app/page.tsx`
+  confirmed by source review. `signIn()` authenticates via Supabase Auth
+  first; all subsequent DB reads run under `authenticated`. Dropping all
+  `anon` policies is safe with no code changes required.
+
+---
+
+## Lessons Learned (carried forward from Session 11)
+
 - **`/tmp` does not persist in Termux** — patch scripts must always write
-  to `~/` (e.g. `~/fix_something.py`), never `/tmp/`. Using `/tmp/` as an
-  intermediate path silently loses the file when the session context changes.
-- **Bash history expansion breaks `sed -i` with `!`** — any `sed` pattern
-  containing `!selectedVisit`, `!res.ok`, etc. will hit bash history
-  expansion (`!sel` → last command starting with `sel`) in interactive
-  shells. Use Python patch scripts for any anchor containing `!` characters.
-- **`pathlib.Path.home()` returns `/root` in this environment** — not the
-  actual Termux home at `/data/data/com.termux/files/home`. Use
-  `os.path.expanduser('~')` instead, which correctly resolves to the
-  Termux home.
+  to `~/` (e.g. `~/fix_something.py`), never `/tmp/`.
+- **Bash history expansion breaks `sed -i` with `!`** — use Python patch
+  scripts for any anchor containing `!` characters.
+- **`pathlib.Path.home()` returns `/root` in this environment** — use
+  `os.path.expanduser('~')` instead.
 - **React fragments (`<>`) inside a CSS grid don't create grid items** —
-  the fragment's children become direct grid children, not the fragment
-  itself. A message strip inside a `<>` wrapper inside a 4-column grid
-  will occupy one of the 4 column slots, pushing subsequent cards to the
-  next row. Solution: render the message outside the grid container.
-- **`database.py` prefixes all doctor fields** — `license_number` from
-  the `doctors` table becomes `doctor_license_number` in `patient_data`
-  after the doctor merge. Always check `database.py` `_build_doctor_fields()`
-  for the exact key name before referencing a doctor field in any `forms/*.py`.
-- **W9 is a billing entity document, not a provider document** — only
-  providers who are the pay-to entity (no supervisor, own PC corp or
-  sole proprietor) need a W9. Supervised providers bill under their
-  supervisor's PC corp; the supervisor's W9 is what gets sent with billing.
-- **AOB assigns benefits to the billing entity** — the "Print name of
-  Provider" and provider signature on the AOB must be the billing entity
-  (PC corp / supervising MD), never the individual treating provider.
-  `database.py`'s `doctor_pc_corp_name` and `doctor_mailing_address`
-  already resolve to the supervisor's values when supervised — AOB and
-  NF-3 should always use these resolved fields, not raw `doctor_name`.
-- **NF-3 Section 16 LICENSE field is not NPI** — Section 16 asks for the
-  treating provider's state license or certification number. NPI is a
-  federal identifier used in the NF-3 billing header (Page 1), not
-  Section 16. These are legally distinct.
+  render message strips outside the grid container.
+- **`database.py` prefixes all doctor fields** — `license_number` becomes
+  `doctor_license_number` in `patient_data`. Always check
+  `_build_doctor_fields()` for exact key names.
+- **W9 is a billing entity document, not a provider document.**
+- **AOB assigns benefits to the billing entity, never the treating provider.**
+- **NF-3 Section 16 LICENSE field is not NPI.**
