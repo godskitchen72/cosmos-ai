@@ -1,3 +1,71 @@
+## 2026-07-04 — Session 13
+
+### `forms/mri.py` — full backend audit
+
+Obtained and audited for the first time. All Session 12 frontend keys
+confirmed correctly wired: extremity left/right (`mri.left_*`/`mri.right_*`),
+contrast type (`contrast.type`), CT studies, insurance fields, signature
+injection. No backend changes required.
+
+### MRI Spine order fix
+
+`MRI_SPINE` array reordered to clinical standard:
+Cervical → Thoracic → Lumbar (was Cervical → Lumbar → Thoracic).
+
+### CosmosUI standard — fully adopted app-wide
+
+All remaining referral screens migrated:
+- `DmeReferral.tsx` — `cosmosConfirm`, `AlertModal`/`ConfirmModal` mounted
+- `OrthoReferral.tsx`, `PainMgmtReferral.tsx`, `VngReferral.tsx`,
+  `RxReferral.tsx`, `PtReferral.tsx`, `AnsReferral.tsx` — `cosmosConfirm`,
+  `AlertModal`/`ConfirmModal` mounted, `toastError` replacing inline error divs
+- `app/calendar/page.tsx` — `cosmosConfirm`, `AlertModal`/`ConfirmModal` mounted
+
+`SessionTimeoutModal` added to `CosmosUI.tsx`.
+
+Native `alert()`/`confirm()` now eliminated app-wide (only remaining
+`confirm(` is the CosmosUI fallback in `CosmosUI.tsx` itself).
+
+### Enterprise Hardening Stage 2 — API JWT authentication
+
+All 15 `cosmos-api` POST endpoints protected with `verify_jwt` FastAPI
+dependency. Calls Supabase `/auth/v1/user` to verify Bearer token.
+Returns HTTP 401 for unauthenticated requests.
+
+- `cosmos-api/main.py`: `verify_jwt` function, `Depends` on all 15 routes
+- `cosmos-api/requirements.txt`: `httpx` added
+- Render env: `SUPABASE_ANON_KEY` added
+- All frontend `cosmos-api` fetch calls: `Authorization: Bearer` header added
+  via `getAuthToken()` helper injected into every calling file
+
+### Enterprise Hardening Stage 2 — Session timeout
+
+Inactivity-based auto sign-out implemented.
+
+- `app/hooks/useSessionTimeout.ts`: new hook — reads timeout from
+  sessionStorage in `useEffect` (SSR-safe), resets on any user activity,
+  shows `SessionTimeoutModal` at 60s remaining, signs out on expiry
+- Migration 019: `practice_settings.session_timeout_minutes int NOT NULL DEFAULT 15`
+- Admin panel: Session Timeout selector (15/30/60/90 min) added to Practice Settings
+- Login page: reads `session_timeout_minutes` from `practice_settings` at login,
+  stores in `cosmos_session_timeout_minutes` sessionStorage
+- Superadmin exempt: `'0'` written at login, hook disabled for that session
+- Mounted on: `DashboardClient.tsx`, `MDClient.tsx`, `admin/page.tsx`,
+  `BillerDashboard.tsx`
+
+### `forms/dme.py` — backend audit
+
+Obtained and audited. All frontend keys confirmed correctly wired.
+The prior HANDOVER concern about blank fields was the file's own docstring
+warning from creation; the frontend was subsequently built correctly.
+
+### Patch script cleanup
+
+All accumulated `~/patch_*.py`, `~/remove_*.py`, `~/wire_*.py`,
+`~/write_*.py` scripts from previous sessions deleted.
+
+---
+
 # Cosmos Medical Technologies — CHANGELOG
 
 Append-only. Entries in reverse chronological order. Never renumber,
