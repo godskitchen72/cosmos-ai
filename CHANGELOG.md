@@ -10,61 +10,79 @@ was planned or considered.
 
 ### Enterprise Hardening — RLS full audit and hardening
 
-Full audit of all RLS policies via `pg_policies`. All `anon` and `public`
-policies removed from every table. Every table now locked to `authenticated`
-only.
+Full audit of all RLS policies. All `anon` and `public` policies removed
+from every table. Every table now locked to `authenticated` only.
 
-**Tables hardened (anon/public policies removed):**
-- `patients` — `{public}` INSERT/SELECT/UPDATE dropped (PHI exposure)
-- `patient_forms` — zero-policy state fixed; `authenticated full access`
-  policy added (document tracking was silently blocked for all users)
-- `patient_visits` — `{anon,authenticated}` ALL replaced with
-  `authenticated` only
-- `visit_line_items` — `{anon}` DELETE/INSERT/SELECT + combined ALL
-  replaced with `authenticated` only
-- `appointments` — 5 `{anon}` policies dropped
-- `doctors` — 4 `{anon}` + 1 `{public}` policies dropped
-- `insurance_carriers` — 4 `{anon}` + 1 `{public}` policies dropped
-- `lawyers` — 5 `{anon}/{public}` policies dropped
-- `cpt_codes` — 4 `{anon,authenticated}` combined policies dropped
-- `icd10_codes` — `{public}` ALL + 4 combined policies dropped
-- `office_locations` — 4 `{anon,authenticated}` combined policies dropped
-- `doctor_locations` — 4 `{anon,authenticated}` combined policies dropped
-- `practice_settings` — 4 `{anon,authenticated}` combined policies dropped
-- `user_profiles` — 4 `{anon,authenticated}` + 1 `{public}` policies dropped
-- `cpt_icd10_map` — `{public}` ALL replaced with `authenticated` only
-- `_deprecated_cpt_templates` — `{public}` ALL policy dropped
-- `_deprecated_icd10_templates` — `{public}` ALL policy dropped
+Tables hardened: `patients`, `patient_forms`, `patient_visits`,
+`visit_line_items`, `appointments`, `doctors`, `insurance_carriers`,
+`lawyers`, `cpt_codes`, `icd10_codes`, `office_locations`,
+`doctor_locations`, `practice_settings`, `user_profiles`, `cpt_icd10_map`,
+`_deprecated_cpt_templates`, `_deprecated_icd10_templates`.
 
-**Verified clean:**
-```sql
-SELECT policyname, tablename, roles FROM pg_policies
-WHERE schemaname = 'public'
-AND ('anon' = ANY(roles) OR 'public' = ANY(roles));
--- 0 rows returned ✅
-```
+Verified: 0 rows returned by anon/public policy query post-migration.
 
 ### Enterprise Hardening — NOT NULL constraints (migration 018)
 
-Full null audit conducted across all critical columns before constraining.
+Full null audit before constraining. Four columns constrained:
+- `doctors.license_number NOT NULL`
+- `doctors.npi NOT NULL`
+- `doctors.mailing_state NOT NULL`
+- `patient_forms.form_type NOT NULL`
 
-**`doctors` table:**
-- `license_number SET NOT NULL`
-- `npi SET NOT NULL`
-- `mailing_state SET NOT NULL`
+### NF-3 regression fix — place of service + description of treatment
 
-**`patient_forms` table:**
-- `form_type SET NOT NULL`
+**Root cause:** Dead doctor address columns (`street/city/zip` dropped in
+migration 014) silently returned empty strings. `main.py` had no fallback
+when `visit.location_id` was null.
 
-**Deferred (documented in HANDOVER.md):**
-- `doctors.mailing_street/city/zip` — supervised providers legitimately
-  have no own mailing address; left nullable by design
-- `patients.patient_signature_url` — collected post-intake; app-layer
-  gate is correct enforcement; left nullable
-- `patient_forms.visit_id` — NF-2 is patient-level; 50 null records
-  confirmed correct; left nullable
-- `patients.doctor_id` — 3 test patients unassigned; deferred to
-  pre-production go-live pass
+**`main.py`:** Place of service now falls back to MD's assigned
+`doctor_locations` when `visit.location_id` is null. Prefers
+`is_main_office = true`, else first assigned location.
+
+**`database.py`:** Dead doctor address column references removed.
+
+### MRI Referral — extremity studies, contrast, metal implant gate
+
+Full rebuild of `app/md/[patientId]/mri/MriReferral.tsx`:
+- Metal implant contraindication toggle (YES/NO) at top of form
+- YES collapses and disables MRI Spine, MRI Extremities, Contrast, MRA
+- CT section always active; labeled "← Required (metal implant)" when YES
+- Extremity Studies table: Left/Right per body part (Shoulder, Elbow,
+  Wrist, Hip, Knee, Ankle) — maps to `mri.left_*`/`mri.right_*`
+- Contrast: Without / With & Without — maps to `contrast.type`
+- Insurance (carrier, policy_num) auto-read from patient, passed to PDF
+  silently — not shown in UI per product decision
+
+### CPT codes filtered by provider license type
+
+**`app/page.tsx`:** `fetchLicenseType(doctorId)` added — reads
+`license_type` from `doctors` at login, stored as `cosmos_license_type`
+in sessionStorage.
+
+**`app/md/[patientId]/PatientChart.tsx`:** `useEffect` reads
+`cosmos_license_type` post-hydration. `filteredCptCodes` filters by
+`provider_type === licenseType`. Falls back to all codes if unset.
+
+Result: MD sees only MD-tagged CPT codes; PT sees only PT-tagged codes.
+Zero unassigned CPT codes — hard filter has no edge cases.
+
+### CosmosUI — universal notification standard
+
+New file: `app/components/ui/CosmosUI.tsx`
+
+Exports: `toastSuccess()`, `toastError()`, `toastInfo()`,
+`cosmosConfirm()`, `ToastContainer`, `AlertModal`, `ConfirmModal`
+
+Standard adopted:
+- All notifications (success + error) → `AlertModal` — dark background,
+  cyan border (`#00cfff60`), cyan message text, single OK button
+- Destructive confirmations → `ConfirmModal` — cyan border, Cancel (cyan)
+  + Delete (red) buttons
+- Native `alert()` and `confirm()` eliminated app-wide
+
+Adopted in: `admin/page.tsx` (15 instances), `BillerDashboard.tsx`
+(8 instances), `PatientProfile.tsx` (2 instances), `MriReferral.tsx`
+(1 instance), `dev/page.tsx` (1 instance).
 
 ---
 
@@ -127,34 +145,31 @@ Business rule established and implemented:
 
 ### W9 cleanup and regeneration
 
-- All 7 existing W9 PDFs deleted from `patient-forms` storage bucket via Storage REST API
-- `w9_url` nulled on all doctor records: `UPDATE doctors SET w9_url = NULL`
+- All 7 existing W9 PDFs deleted from `patient-forms` storage bucket
+- `w9_url` nulled on all doctor records
 - W9 regenerated for 3 eligible providers: Carrey, Gottesman, Kramer
-- 4 supervised providers (NPian, Orthobot, PAian, Pearlman) confirmed with no W9
+- 4 supervised providers confirmed with no W9
 
 ### NF-3 Section 16 — license number replaces NPI
 
 **`forms/nf3.py`:**
-- Added `license_number` parameter to `_p2_vals()` signature
+- `license_number` parameter added to `_p2_vals()` signature
 - `treating_provider.1.license_or_certification_number` now uses `license_number`
 - NPI fallback removed entirely
-- Correct key: `patient_data.get("doctor_license_number")` (prefixed by `database.py`)
+- Correct key: `patient_data.get("doctor_license_number")`
 
 ### Admin — license number required field
 
 **`admin/page.tsx` `validate()`:**
-```
-if (!form.license_number) e.license_number = 'Required'
-else if (form.license_number.length < 6) e.license_number = 'Minimum 6 characters'
-```
+- `if (!form.license_number) e.license_number = 'Required'`
+- `else if (form.license_number.length < 6) e.license_number = 'Minimum 6 characters'`
 
 ### AOB — always uses billing entity
 
 **`forms/aob.py`:**
-- Provider name: `doctor_pc_corp_name` → `supervisor_name` → `doctor_name` (priority order)
+- Provider name: `doctor_pc_corp_name` → `supervisor_name` → `doctor_name`
 - Provider address: `doctor_mailing_address` (resolves to supervisor's when supervised)
 - Provider signature: `supervisor_signature_url` → `doctor_signature_url` fallback
-- Treating provider name/address/signature never used for supervised providers
 
 ---
 
@@ -181,7 +196,7 @@ Carrier edit form: `Edit Carrier: {carrier_name}` with name in green.
 ### Admin — backend save errors surfaced inline (all sections)
 
 Silent Supabase failures now show red inline error messages on all Admin
-save handlers. Side effect: exposed missing RLS policy on `insurance_carriers`.
+save handlers.
 
 ### Admin — Insurance Carriers expanded
 
@@ -203,7 +218,7 @@ Added FK constraints on `appointments`, `patient_visits`, `visit_line_items`.
 ### NF-3 — Section 16 title fix
 
 `_p2_vals()` was hardcoding `"treating_provider.1.title": "MD"`. Fixed to
-use `license_type` parameter from `patient_data.get('doctor_license_type')`.
+use `license_type` parameter.
 
 ### `database.py` — independent provider supervisor fallback fix
 
@@ -230,25 +245,19 @@ MD with own PC corp.
 
 - `app/calendar/page.tsx`: Phase 4 `useEffect` — after `doctorLocations`
   loads, jumps calendar to first available day for locked doctor+location
-- `app/page.tsx`: `navigate()` stores `cosmos_location_name` in
-  sessionStorage alongside `cosmos_location_id`
+- `app/page.tsx`: `navigate()` stores `cosmos_location_name` in sessionStorage
 - `app/md/MDClient.tsx`: `📍 {locationName}` badge in green under heading
-- `app/calendar/page.tsx`: `📍 {locationName}` badge under "Showing your
-  schedule only"
+- `app/calendar/page.tsx`: `📍 {locationName}` badge under "Showing your schedule only"
 
 ### Union-of-locations availability
 
 - `getDoctorLocs()`, `getAvailDaysForDoctor()` helpers added
-- Grid/chips use union of all assigned location days (not just selected one)
-- Capacity uses max across assigned locations when no location selected
-- `isDayAvailable` guards on `doctorLocations.length === 0`
+- Grid/chips use union of all assigned location days
 
 ### Admin — blocked days in location assignment form
 
-- Location Assignment day chips: days taken by other locations shown in
-  amber with 🔒 and tooltip
+- Location Assignment day chips: days taken by other locations shown in amber with 🔒
 - Default Schedule day chips: days assigned to any location shown in amber
-- Location dropdown: removed filter hiding already-assigned locations
 
 ---
 
@@ -257,14 +266,6 @@ MD with own PC corp.
 ### Scheduling Phase 3A — location-driven schedule (live)
 
 Full implementation of Doctor → Location → Available Days → Time Slots flow.
-
-**`app/calendar/page.tsx` — full rebuild:**
-
-- `DoctorLocation` interface; `doctor_locations` fetched in `load()`
-- `getActiveDoctorLoc()`, `getAvailDays()`, `getCapacity()`,
-  `getLocationsForDoctor()` helpers
-- Location picker above Time Slot
-- Slot generation reads `start_time`, `slot_minutes`, `capacity`
 
 ### Timezone fix — `localDateStr()` helper
 
