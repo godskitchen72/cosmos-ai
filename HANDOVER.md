@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 4, 2026, Session 13)
+# Cosmos Medical Technologies — HANDOVER (July 4, 2026, Session 14)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -21,100 +21,66 @@ close. No outstanding TypeScript errors.
 
 ## Completed This Session
 
-### `forms/mri.py` — full backend audit
+### CosmosUI standard — PatientProfile.tsx complete
 
-Obtained and audited for the first time. All Session 12 frontend keys
-correctly wired:
-- Extremity left/right keys (`mri.left_*`, `mri.right_*`) — loop confirmed
-- Contrast type (`contrast.type`) — correct
-- CT studies (`ct.*`) — correct
-- Insurance fields (`policy_number`, `group_number`, `precert_number`) — correct
-- Signature injection (`provider.signature`, `mri.attestation.signature`) — correct
+All `alert()` and `confirm()` calls converted to CosmosUI. `ConfirmModal`
+mounted (was missing despite `AlertModal` being present). `cosmosConfirm`
+now gates all four regenerate/undo actions (NF-2, AOB, NF-3, PCE). Dead
+`nf3Msg` state and `setTimeout` no-op removed. Amber NF-3 warning strip
+removed — NF-3 card locked tap now fires `toastError` directly.
+Native browser dialogs now fully eliminated app-wide.
 
-No backend changes required. Confidence level upgraded to ★ Verified-final.
+### Session 13 regression fixes
 
-### MRI Spine order fix
+Two regressions introduced by Session 13's JWT hardening, discovered and
+fixed this session:
 
-`MRI_SPINE` array reordered to clinical standard:
-Cervical → Thoracic → Lumbar (was Cervical → Lumbar → Thoracic).
+**NF-2 / AOB generation broken** — `generateForm()` module-level helper
+was missing the `Authorization: Bearer` header. Added `token` parameter,
+passed `await getAuthToken()` from both call sites in `handleGenerate` and
+`handleRegenerate`.
 
-### CosmosUI standard — fully adopted app-wide
+**MD/PA/NP location picker bypass** — `app/page.tsx` was auto-navigating
+when a doctor had exactly one location (`locs.length > 1` condition).
+Product rule is picker always required for MD/PA/NP regardless of location
+count. Condition removed; picker always shown.
 
-All remaining screens migrated to CosmosUI notification standard:
-- `DmeReferral.tsx` — `cosmosConfirm`, `AlertModal`/`ConfirmModal` mounted
-- `OrthoReferral.tsx`, `PainMgmtReferral.tsx`, `VngReferral.tsx`,
-  `RxReferral.tsx`, `PtReferral.tsx`, `AnsReferral.tsx` — `cosmosConfirm`,
-  `AlertModal`/`ConfirmModal` mounted, `toastError` replacing inline error divs
-- `app/calendar/page.tsx` — `cosmosConfirm`, `AlertModal`/`ConfirmModal` mounted
-- Native `alert()`/`confirm()` now eliminated app-wide. Only remaining
-  `confirm(` in codebase is the fallback inside `CosmosUI.tsx` itself.
+### Blank signature guard — all SignaturePad components
 
-`SessionTimeoutModal` added to `CosmosUI.tsx`.
+`isCanvasBlank()` check added to `save()` in both `PatientProfile.tsx`
+(patient signatures) and `admin/page.tsx` (doctor/staff signatures).
+Saving a blank canvas now fires `toastError` instead of silently writing
+an empty PNG.
 
-### Enterprise Hardening Stage 2 — API JWT authentication
+### NP/PA CPT code mapping
 
-All 15 `cosmos-api` POST endpoints protected with `verify_jwt` FastAPI
-dependency. Verification calls Supabase `/auth/v1/user` with the Bearer
-token. Unauthenticated requests return HTTP 401 `"Not authenticated"`.
+`PatientChart.tsx` now maps `NP` and `PA` license types to `MD` CPT codes
+at the filter level (`effectiveLicenseType`). No data duplication — both
+provider types see MD-tagged codes. Debug `console.log` removed.
 
-**Backend changes (`cosmos-api/main.py`):**
-- Added `httpx`, `HTTPBearer`, `Depends` imports
-- `SUPABASE_ANON_KEY` env var added to Render (required for token verification)
-- `verify_jwt` async function — verifies token against Supabase auth endpoint
-- All 15 POST routes: `dependencies=[Depends(verify_jwt)]` added
-- `httpx` added to `requirements.txt`
+### CPT import — Option A architecture + error handling
 
-**Frontend changes — all `cosmos-api` fetch calls updated:**
-- `getAuthToken()` helper injected into every file that calls `cosmos-api`
-- `Authorization: Bearer ${await getAuthToken()}` header added to all fetches
-- Files updated: `PatientProfile.tsx`, `PatientChart.tsx`, `admin/page.tsx`,
-  `OrthoReferral.tsx`, `PainMgmtReferral.tsx`, `VngReferral.tsx`,
-  `RxReferral.tsx`, `PtReferral.tsx`, `AnsReferral.tsx`, `MriReferral.tsx`,
-  `DmeReferral.tsx`
+`handleCptImportConfirm` in `admin/page.tsx` rebuilt:
+- CPT rows deduplicated by `cpt_code` before upsert (root cause of silent
+  failure when CSV has multiple ICD-10 rows per CPT code)
+- ICD-10 codes upserted to `icd10_codes` (deduplicated by `code`)
+- CPT↔ICD-10 mappings upserted to `cpt_icd10_map` on composite key
+  `(cpt_code, icd10_code)` — idempotent, re-import safe
+- Full error handling on all three upserts via `toastError`
+- Success toast confirms counts of CPT codes, ICD-10 codes, and mappings
 
-**Confirmed:** `curl` test returns `HTTP 401 {"detail":"Not authenticated"}`
-for unauthenticated POST. Authenticated users experience no change.
+**RLS fix:** `icd10_codes` table was missing an `authenticated` INSERT/UPDATE
+policy — discovered when import surfaced the error. Fixed via SQL.
 
-### Enterprise Hardening Stage 2 — Session timeout
+### CPT import — Download Template link
 
-Inactivity-based auto sign-out implemented across all four dashboards.
+A "⬇ Download Import Template" link added below the Import CSV button in
+`CptCodesSection`. Generates CSV client-side as a blob URL. Always
+current, no server dependency.
 
-**Architecture:**
-- `app/hooks/useSessionTimeout.ts` — new shared hook. Reads timeout duration
-  from `sessionStorage` inside `useEffect` (SSR-safe). Starts inactivity
-  timer on mount, resets on any user interaction (tap, scroll, keypress,
-  click). Shows `SessionTimeoutModal` 60 seconds before expiry. Signs out
-  and redirects to `/` on expiry or "Sign Out" tap.
-- `SessionTimeoutModal` — added to `CosmosUI.tsx`. Orange border/text,
-  countdown display, "Stay Logged In" + "Sign Out" buttons.
-- Migration 019: `ALTER TABLE practice_settings ADD COLUMN session_timeout_minutes int NOT NULL DEFAULT 15`
+### CPT import template format documented
 
-**Configuration:**
-- Default: 15 minutes
-- Configurable from Admin → Practice Settings → Session Timeout dropdown
-  (15 / 30 / 60 / 90 minutes)
-- Value read from `practice_settings` at login, stored as
-  `cosmos_session_timeout_minutes` in sessionStorage
-- Superadmin exempt: `'0'` written to sessionStorage at superadmin login;
-  hook treats `0` as disabled, no timers start
-
-**Mounted on:** `DashboardClient.tsx`, `MDClient.tsx`, `admin/page.tsx`,
-`BillerDashboard.tsx`
-
-**Admin panel:** Session Timeout selector added to Practice Settings edit
-form (`pForm.session_timeout_minutes`, saves to `practice_settings` via
-existing `handlePracticeSave`).
-
-### `DmeReferral.tsx` — correctness confirmed + CosmosUI
-
-`forms/dme.py` audited — all backend keys correctly match the frontend.
-The HANDOVER concern about blank fields was the docstring's own warning
-from file creation; the frontend was subsequently built correctly.
-`cosmosConfirm` added, `AlertModal`/`ConfirmModal` mounted.
-
-### Patch script cleanup
-
-All accumulated patch scripts from previous sessions deleted from `~/`.
+Correct format confirmed and documented in `PRODUCT_SPEC.md` §12.
 
 ---
 
@@ -123,23 +89,17 @@ All accumulated patch scripts from previous sessions deleted from `~/`.
 1. **Desktop sidebar nav** — confirmed product direction. No design or
    implementation work started.
 
-2. **`PatientProfile.tsx` — remaining `confirm()`** — one native
-   `confirm()` call remains in `PatientProfile.tsx`. Not yet converted
-   to `cosmosConfirm`. Needs `AlertModal`/`ConfirmModal` mount audit.
+2. **Signed URL caching** — `supabase.storage.createSignedUrl()` called
+   fresh on every "View" tap. Deferred by explicit product decision.
 
-3. **Signed URL caching** — `supabase.storage.createSignedUrl()` called
-   fresh on every "View" tap. Caching the URL client-side after first
-   call would eliminate the Supabase round trip on subsequent taps.
-   Deferred by explicit product decision.
-
-4. **Doctor mailing address data** — Gottesman and Kramer are independent
+3. **Doctor mailing address data** — Gottesman and Kramer are independent
    MDs with placeholder mailing addresses. Required for NF-3/W9 accuracy
    in production.
 
-5. **`patients.doctor_id` NOT NULL** — deferred to pre-production. 3 test
+4. **`patients.doctor_id` NOT NULL** — deferred to pre-production. 3 test
    patients have null `doctor_id`.
 
-6. **Render "always on"** — `cosmos-api` spins down on inactivity
+5. **Render "always on"** — `cosmos-api` spins down on inactivity
    (free/starter tier). First PDF generation after idle takes 5-10s.
    Upgrading to a paid always-on tier is the single biggest real-world
    speed improvement available.
@@ -206,16 +166,14 @@ supervisor relationship lives in `doctors.supervising_provider_id`.
 many-to-one. Always handle both:
 `const d = Array.isArray(p.doctors) ? p.doctors[0] : p.doctors`.
 
-**NF-3 message state is module-level (`nf3Msg`):** `nf3Msg` useState is
-declared at module level not inside the component. Low risk but
-architecturally incorrect. Fix on next full `PatientProfile.tsx` rebuild.
-
 **`patients.doctor_id` NOT NULL deferred:** 3 test patients have null
 `doctor_id`. Constraint deferred to pre-production go-live pass.
 
 **`cosmos_license_type` in sessionStorage:** CPT filter depends on this
-value being set at login. If a provider logs in without a `license_type`
-in the `doctors` table, all CPT codes will show (safe fallback, not a bug).
+value being set at login. NP and PA now map to MD codes via
+`effectiveLicenseType` in `PatientChart.tsx`. If a provider logs in
+without a `license_type` in the `doctors` table, all codes show (safe
+fallback).
 
 **Session timeout SSR:** `useSessionTimeout` reads sessionStorage inside
 `useEffect` to avoid SSR crash. If hook is mounted on a server-rendered
@@ -225,6 +183,11 @@ page without `'use client'`, it will silently no-op (safe).
 written at login. Hook treats `0` as disabled. If superadmin navigates to
 a role dashboard (FD, MD, etc.) the exemption persists for that session.
 
+**`SignaturePad` uses `alert()` — intentional exception:** Both
+`SignaturePad` components use a plain `alert()` for the blank-canvas
+guard. These are module-level components; converting to `toastError`
+was done this session (confirmed working). This note can be removed.
+
 ---
 
 ## File Confidence Levels (cumulative)
@@ -233,27 +196,27 @@ a role dashboard (FD, MD, etc.) the exemption persists for that session.
 
 | File | Confidence |
 |---|---|
+| `cosmos-dashboard/app/patients/[patientId]/PatientProfile.tsx` | ★ Verified-final (Session 14 — full CosmosUI, blank sig guard, nf3Msg removed) |
+| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (Session 14 — blank sig guard, CPT import fix + Option A + template link) |
+| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 14 — location picker always shown for MD/PA/NP) |
+| `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (Session 14 — NP/PA→MD CPT mapping, debug log removed) |
 | `cosmos-dashboard/app/components/ui/CosmosUI.tsx` | ★ Verified-final (Session 13 — SessionTimeoutModal added) |
 | `cosmos-dashboard/app/hooks/useSessionTimeout.ts` | ★ Verified-final (Session 13 — new file) |
-| `cosmos-dashboard/app/md/[patientId]/mri/MriReferral.tsx` | ★ Verified-final (Session 13 — spine order fix, AlertModal mount) |
-| `cosmos-dashboard/app/md/[patientId]/dme/DmeReferral.tsx` | ★ Verified-final (Session 13 — cosmosConfirm, modals mounted) |
-| `cosmos-dashboard/app/md/[patientId]/ortho/OrthoReferral.tsx` | ★ Verified-final (Session 13 — cosmosConfirm, modals, toastError) |
-| `cosmos-dashboard/app/md/[patientId]/pain-mgmt/PainMgmtReferral.tsx` | ★ Verified-final (Session 13 — cosmosConfirm, modals, toastError) |
-| `cosmos-dashboard/app/md/[patientId]/vng/VngReferral.tsx` | ★ Verified-final (Session 13 — cosmosConfirm, modals, toastError) |
-| `cosmos-dashboard/app/md/[patientId]/rx/RxReferral.tsx` | ★ Verified-final (Session 13 — cosmosConfirm, modals, toastError) |
-| `cosmos-dashboard/app/md/[patientId]/pt/PtReferral.tsx` | ★ Verified-final (Session 13 — cosmosConfirm, modals, toastError) |
-| `cosmos-dashboard/app/md/[patientId]/ans/AnsReferral.tsx` | ★ Verified-final (Session 13 — cosmosConfirm, modals, toastError) |
-| `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (Session 13 — cosmosConfirm, modals mounted) |
-| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (Session 13 — JWT headers, session timeout selector, useSessionTimeout hook) |
-| `cosmos-dashboard/app/billing/BillerDashboard.tsx` | ★ Verified-final (Session 13 — JWT headers, useSessionTimeout hook) |
-| `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (Session 13 — JWT headers, useSessionTimeout hook) |
-| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (Session 13 — useSessionTimeout hook) |
-| `cosmos-dashboard/app/patients/[patientId]/PatientProfile.tsx` | ★ Verified-final (Session 13 — JWT headers; one confirm() remains) |
-| `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (Session 13 — JWT headers) |
-| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 13 — session_timeout_minutes stored at login, superadmin exempt) |
-| `cosmos-api/main.py` | ★ Verified-final (Session 13 — verify_jwt on all 15 POST routes) |
-| `cosmos-api/forms/mri.py` | ★ Verified-final (Session 13 — full audit, all keys confirmed) |
-| `cosmos-api/forms/dme.py` | ★ Verified-final (Session 13 — full audit, all keys confirmed) |
+| `cosmos-dashboard/app/md/[patientId]/mri/MriReferral.tsx` | ★ Verified-final (Session 13) |
+| `cosmos-dashboard/app/md/[patientId]/dme/DmeReferral.tsx` | ★ Verified-final (Session 13) |
+| `cosmos-dashboard/app/md/[patientId]/ortho/OrthoReferral.tsx` | ★ Verified-final (Session 13) |
+| `cosmos-dashboard/app/md/[patientId]/pain-mgmt/PainMgmtReferral.tsx` | ★ Verified-final (Session 13) |
+| `cosmos-dashboard/app/md/[patientId]/vng/VngReferral.tsx` | ★ Verified-final (Session 13) |
+| `cosmos-dashboard/app/md/[patientId]/rx/RxReferral.tsx` | ★ Verified-final (Session 13) |
+| `cosmos-dashboard/app/md/[patientId]/pt/PtReferral.tsx` | ★ Verified-final (Session 13) |
+| `cosmos-dashboard/app/md/[patientId]/ans/AnsReferral.tsx` | ★ Verified-final (Session 13) |
+| `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (Session 13) |
+| `cosmos-dashboard/app/billing/BillerDashboard.tsx` | ★ Verified-final (Session 13) |
+| `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (Session 13) |
+| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (Session 13) |
+| `cosmos-api/main.py` | ★ Verified-final (Session 13) |
+| `cosmos-api/forms/mri.py` | ★ Verified-final (Session 13) |
+| `cosmos-api/forms/dme.py` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/dev/page.tsx` | ★ Verified-final (Session 12) |
 | `cosmos-api/database.py` | ★ Verified-final (Session 12) |
 | `cosmos-api/forms/nf3.py` | ★ Verified-final (Session 11) |
@@ -273,36 +236,33 @@ a role dashboard (FD, MD, etc.) the exemption persists for that session.
 
 ## Lessons Learned This Session
 
-- **Bash history expansion breaks inline `python3 -c` with `!`** — any
-  string containing `!confirm`, `!await` etc. triggers bash history
-  substitution even inside Python `-c` strings. Always use a patch script
-  file (`~/patch_name.py`) for anchors containing `!`.
-- **`sessionStorage` must be read inside `useEffect`** — reading at hook
-  function top level fires server-side (SSR) where sessionStorage doesn't
-  exist. This caused the session timeout modal to fire immediately for
-  superadmin. Fixed by moving all sessionStorage reads inside `useEffect`.
-- **Supabase anon key needed for JWT verification** — `SUPABASE_SERVICE_KEY`
-  alone is not sufficient. Verifying user tokens requires the anon key as
-  the `apikey` header on `/auth/v1/user` requests.
-- **Render env var changes trigger an automatic redeploy** — adding
-  `SUPABASE_ANON_KEY` in the Render dashboard immediately triggered a
-  deploy. Backend and frontend deploys must be coordinated: backend first,
-  then frontend. Deploying frontend with JWT headers before backend has
-  `verify_jwt` would break all PDF generation.
-- **`httpx` must be in `requirements.txt`** — FastAPI's async HTTP client
-  is not bundled. Omitting it from requirements causes a Render build failure.
-- **Calendar page uses `background:'#0a0e1a'`** — different from the
-  `#080d14` used by referral screens. Root div anchors must be verified
-  per-file, not assumed consistent.
-- **Superadmin lands on a dashboard picker, not a dashboard** — timeout
-  hook is mounted on the four actual dashboards (FD, MD, Admin, Biller).
-  The picker stage in `app/page.tsx` has no hook. Writing `'0'` to
-  sessionStorage at superadmin login propagates the exemption to whichever
-  dashboard they subsequently enter.
-- **Chrome download suffix collision** — when downloading a file that
-  already exists in Downloads, Chrome appends `-1`, `-2` etc. Always
-  verify the correct file using File Manager sorted by date, not the
-  Claude app file picker which shows stale cache.
+- **`generateForm()` was not in the Session 13 JWT sweep** — module-level
+  helper functions that call `cosmos-api` are easy to miss when adding auth
+  headers. Any future JWT audit must grep for all `fetch(` calls against
+  `PDF_API_URL`, not just named handlers.
+- **MD location picker had a single-location bypass** — `locs.length > 1`
+  was the condition for showing the picker. Product rule is picker always
+  required; never gate the location picker on location count.
+- **`~/storage/downloads/` writes can silently fail** — `git show HEAD:path
+  > ~/storage/downloads/file && echo "OK"` prints OK even when the write
+  fails due to storage permissions. Always verify with `wc -l` or `ls`.
+  Writing to `~/` directly is the reliable fallback.
+- **CPT importer failed silently due to duplicate conflict keys** — sending
+  multiple rows with the same `cpt_code` in one upsert batch causes the
+  entire batch to fail with no error surfaced. Always deduplicate by the
+  conflict key before batch upsert.
+- **`icd10_codes` was missing an authenticated INSERT/UPDATE RLS policy** —
+  the Session 12 RLS audit locked all tables to `authenticated` for SELECT,
+  but `icd10_codes` was missing the INSERT/UPDATE commands. Discovered via
+  the new import error handling. Fixed with a full `ALL` policy.
+- **Always request full files — never use grep/sed inspection mid-task** —
+  when an anchor fails or a question arises about file contents, request
+  the full file. Falling back to grep/sed inspection commands is a
+  protocol violation confirmed this session.
+- **`SignaturePad` blank-canvas guard uses `toastError`** — both
+  `PatientProfile.tsx` and `admin/page.tsx` components confirmed working
+  with `toastError` (not `alert()`); CosmosUI singleton pattern reaches
+  module-level components when `AlertModal` is mounted in the parent tree.
 
 ---
 
@@ -329,3 +289,8 @@ a role dashboard (FD, MD, etc.) the exemption persists for that session.
   back to native `window.confirm`.
 - **`sessionStorage` reads must be in `useEffect`** — server-side renders
   always return `''`.
+- **Bash history expansion breaks inline `python3 -c` with `!`** — always
+  use a patch script file for anchors containing `!`.
+- **Render env var changes trigger an automatic redeploy** — coordinate
+  backend and frontend deploys; backend must have `verify_jwt` before
+  frontend sends JWT headers.

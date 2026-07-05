@@ -1,3 +1,54 @@
+## 2026-07-04 — Session 14
+
+### CosmosUI standard — PatientProfile.tsx complete
+
+All `alert()` and `confirm()` calls converted. `ConfirmModal` mounted
+(was missing). `cosmosConfirm` gates all regenerate/undo actions (NF-2,
+AOB, NF-3, PCE). Dead `nf3Msg` state and `setTimeout` no-op removed.
+Amber NF-3 warning strip removed — locked card tap fires `toastError`.
+
+### Session 13 regression fixes
+
+**NF-2/AOB generation restored** — `generateForm()` helper was missing
+`Authorization: Bearer` header from Session 13 JWT sweep. Added `token`
+parameter; `await getAuthToken()` passed from both call sites.
+
+**MD/PA/NP location picker always shown** — `locs.length > 1` bypass
+removed from `app/page.tsx`. Picker always shown for MD/PA/NP roles
+regardless of location count.
+
+### Blank signature guard — all SignaturePad components
+
+`isCanvasBlank()` pixel check added to `save()` in `PatientProfile.tsx`
+and `admin/page.tsx`. Blank canvas fires `toastError` instead of saving
+empty PNG.
+
+### NP/PA CPT code mapping
+
+`PatientChart.tsx`: `effectiveLicenseType` maps NP and PA to MD at the
+filter level. No data duplication. Debug `console.log` removed.
+
+### CPT import — Option A architecture + error handling
+
+`handleCptImportConfirm` rebuilt:
+- Deduplicates CPT rows by `cpt_code` before upsert (was root cause of
+  silent batch failure with multi-ICD-10 CSVs)
+- Upserts ICD-10 codes to `icd10_codes` (deduplicated by `code`)
+- Upserts mappings to `cpt_icd10_map` on `(cpt_code, icd10_code)` —
+  idempotent, re-import safe
+- Full `toastError` on all three upsert operations
+- Success toast confirms CPT, ICD-10, and mapping counts
+
+**RLS fix:** `icd10_codes` missing `authenticated` INSERT/UPDATE policy —
+discovered via new error surfacing. Fixed with full `ALL` policy.
+
+### CPT import — Download Template link
+
+"⬇ Download Import Template" link added below Import CSV button in
+`CptCodesSection`. Client-side blob URL, no server dependency.
+
+---
+
 ## 2026-07-04 — Session 13
 
 ### `forms/mri.py` — full backend audit
