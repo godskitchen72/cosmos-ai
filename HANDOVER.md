@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 5, 2026, Session 16)
+# Cosmos Medical Technologies — HANDOVER (July 5, 2026, Session 17)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -17,49 +17,107 @@ All `cosmos-dashboard` commits confirmed deployed via `tsc --noEmit` + full
 deploy chain. Live app confirmed healthy at session close. No outstanding
 TypeScript errors.
 
-**One open deploy carried from Session 15:** The billing W9 supervisor-chain
-fix (`BillerDashboard.tsx` + `billing/page.tsx`) was patched and confirmed
-via node script (all checks OK) but `tsc --noEmit` + deploy chain was not
-run before Session 15 ended. This must be the first task of Session 17 —
-verify TSC passes and deploy before any other work.
-
 ---
 
 ## Completed This Session
 
-### Documentation update only
+### W9 supervisor-chain deploy (carried from Session 15)
 
-Session 16 was a documentation-only session. No code was written or deployed.
+`BillerDashboard.tsx` + `billing/page.tsx` W9 patch confirmed already
+committed before Session 17 started. `tsc --noEmit` passed clean.
+Working tree clean — no deploy action needed.
 
-Updated documents:
-- `CHANGELOG.md` — Session 15 entries added (dev tools rebuild + W9 supervisor-chain fix)
-- `ARCHITECTURE.md` — Migrations 017–019 added to §3 migration list; §10 login flow updated to reflect Session 14 fix (location picker now always shown for MD/PA/NP regardless of location count)
-- `HANDOVER.md` — This document (Session 15 → Session 16)
+### NF-3 workflow redesign — full implementation
+
+**Product decision:** NF-3 generation moves from FD to Biller. FD role
+becomes validation-only (preflight check). Biller generates NF-3 per visit
+directly from the billing queue.
+
+**Migration 020:** `patient_visits.nf3_preflight_passed boolean DEFAULT false`
++ `biller_md_flags` table with RLS.
+
+**FD (`PatientProfile.tsx`):**
+- NF-3 card replaced with "NF-3 Preflight" card
+- Opens `PreflightModal` — checks 8 required fields (signature, carrier,
+  claim #, policy #, DOI, attorney, CPT codes, ICD-10 codes for selected visit)
+- Green = present, red = missing. "Confirm Ready" writes
+  `nf3_preflight_passed = true` on the visit
+- Submission gate updated: `hasNf3` replaced with `nf3_preflight_passed`
+- `handleGenerateNF3` / `handleRegenerateNF3` removed
+
+**Biller (`BillerDashboard.tsx`):**
+- `+ NF-3` badge in Docs column generates NF-3 when missing; flips to
+  tappable `NF-3` badge when generated
+- `⚑ Flag MD` button per row — opens `FlagMdModal`
+
+**Biller → MD flag system (`biller_md_flags` table):**
+- Flag reasons: Missing/Incorrect CPT Codes, Missing/Incorrect ICD-10 Codes
+- Full CPT and ICD-10 code library pickers in flag modal
+- Suggested codes stored as `suggested_cpt_codes text[]` and
+  `suggested_icd10_codes text[]`
+- Biller dashboard shows suggested codes in amber (⏳) alongside confirmed
+  cyan codes in CPT and ICD-10 columns
+- Flagged rows show ⚠️ Flagged button; rejected rows show ↩ MD Rejected
+  with Dismiss × button
+
+**MD (`MDClient.tsx`):**
+- Persistent amber alert card at top of dashboard for unresolved flags
+- Shows patient name, visit date, reason, note, suggested CPT and ICD-10 codes
+- Tapping flag navigates to `/md/[patientId]?visit_id=[flaggedVisitId]`
+
+**MD (`PatientChart.tsx`):**
+- Flag strip rendered when `visit_id` URL param matches an open flag
+- Shows suggested codes with Accept & Apply / Reject options
+- Accept: pre-fills code pickers with suggested codes (additive)
+- Reject: writes `resolved_at + resolution: rejected + rejection_note`
+- On visit save after accept: auto-resolves flag as `accepted`
+
+**Migrations run:**
+- `020`: `nf3_preflight_passed` + `biller_md_flags` table + RLS
+- `021`: `biller_md_flags.suggested_cpt_codes text[]`,
+  `suggested_icd10_codes text[]`
+- `022`: `biller_md_flags.resolution text`, `rejection_note text`,
+  `biller_dismissed_at timestamptz`
+
+### IcdReferral.tsx — Authorization header fix
+
+`app/md/[patientId]/icd10/IcdReferral.tsx` was missing `getAuthToken()`
+and the `Authorization: Bearer` header on its fetch call. Added both.
+All other referral screens confirmed already had the header — grep
+false-positive from multi-line fetch pattern.
+
+### Biller dashboard docs column
+
+Docs column (NF-3, AOB, PCE, W9, Flag MD) confirmed rendering in a single
+horizontal `nowrap` row. Multiple layout iterations required due to Tailwind
+purge — final fix uses inline `style={{ display:'flex', flexDirection:'row',
+flexWrap:'nowrap' }}` rather than Tailwind classes.
 
 ---
 
 ## Open Items, Priority Order
 
-1. **Complete billing W9 deploy** — `tsc --noEmit` + deploy chain for
-   `BillerDashboard.tsx` + `billing/page.tsx` changes. First task Session 17.
-
-2. **Desktop sidebar nav** — confirmed product direction. No design or
+1. **Desktop sidebar nav** — confirmed product direction. No design or
    implementation work started.
 
-3. **Signed URL caching** — `supabase.storage.createSignedUrl()` called
+2. **Signed URL caching** — `supabase.storage.createSignedUrl()` called
    fresh on every "View" tap. Deferred by explicit product decision.
 
-4. **Doctor mailing address data** — Gottesman and Kramer are independent
+3. **Doctor mailing address data** — Gottesman and Kramer are independent
    MDs with placeholder mailing addresses. Required for NF-3/W9 accuracy
    in production.
 
-5. **`patients.doctor_id` NOT NULL** — deferred to pre-production. 3 test
+4. **`patients.doctor_id` NOT NULL** — deferred to pre-production. 3 test
    patients have null `doctor_id`.
 
-6. **Render "always on"** — `cosmos-api` spins down on inactivity
+5. **Render "always on"** — `cosmos-api` spins down on inactivity
    (free/starter tier). First PDF generation after idle takes 5–10s.
    Upgrading to a paid always-on tier is the single biggest real-world
    speed improvement available.
+
+6. **Failed PIN attempt lockout** — Enterprise Hardening Stage 2 remainder.
+
+7. **MFA for admin and billing roles** — Enterprise Hardening Stage 2.
 
 ---
 
@@ -140,10 +198,19 @@ page without `'use client'`, it will silently no-op (safe).
 written at login. Hook treats `0` as disabled. If superadmin navigates to
 a role dashboard (FD, MD, etc.) the exemption persists for that session.
 
-**Biller W9 resolution:** W9 on the biller dashboard now walks the supervisor
+**Biller W9 resolution:** W9 on the biller dashboard walks the supervisor
 chain (`doctor.w9_url → supervisor.w9_url`). The `doctors` prop fetched in
-`billing/page.tsx` must include `supervising_provider_id` for this to work —
-confirmed added Session 15, deploy pending Session 17.
+`billing/page.tsx` must include `supervising_provider_id` for this to work.
+
+**`nf3_preflight_passed` gate:** FD submission now requires preflight check
+instead of NF-3 generation. `PatientProfile.tsx` reads this from
+`patient_visits` via `select('*')` — no explicit column selection needed.
+
+**`biller_md_flags` fetch condition:** `billing/page.tsx` fetches both
+`resolved_at IS NULL` (pending) and `resolution = rejected AND
+biller_dismissed_at IS NULL` (rejected, not yet dismissed by biller).
+Uses PostgREST `.or()` filter — confirm RLS covers authenticated role
+for all commands if flag queries ever return unexpectedly empty.
 
 ---
 
@@ -153,13 +220,15 @@ confirmed added Session 15, deploy pending Session 17.
 
 | File | Confidence |
 |---|---|
-| `cosmos-dashboard/app/dev/page.tsx` | ★ Verified-final (Session 15 — full rebuild: live CPT, visit count, DOI guard, individual referral selector, Render warm-up) |
-| `cosmos-dashboard/app/billing/BillerDashboard.tsx` | Patched Session 15 (W9 supervisor-chain resolution) — TSC + deploy pending Session 17 |
-| `cosmos-dashboard/app/billing/page.tsx` | Patched Session 15 (`supervising_provider_id` added to doctors select) — TSC + deploy pending Session 17 |
-| `cosmos-dashboard/app/patients/[patientId]/PatientProfile.tsx` | ★ Verified-final (Session 14) |
+| `cosmos-dashboard/app/billing/BillerDashboard.tsx` | ★ Verified-final (Session 17 — NF-3 generation, Flag MD with code pickers, suggested codes amber display, reject/dismiss flow) |
+| `cosmos-dashboard/app/billing/page.tsx` | ★ Verified-final (Session 17 — CPT/ICD-10 fetches, biller_md_flags with resolution columns) |
+| `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (Session 17 — biller flag strip, Accept & Apply, Reject with note, auto-resolve on save) |
+| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (Session 17 — persistent biller flag alert card with suggested codes, visit_id in nav URL) |
+| `cosmos-dashboard/app/patients/[patientId]/PatientProfile.tsx` | ★ Verified-final (Session 17 — NF-3 preflight modal, updated submission gate) |
+| `cosmos-dashboard/app/md/[patientId]/icd10/IcdReferral.tsx` | ★ Verified-final (Session 17 — Authorization header added) |
+| `cosmos-dashboard/app/dev/page.tsx` | ★ Verified-final (Session 15) |
 | `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (Session 14) |
 | `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 14) |
-| `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (Session 14) |
 | `cosmos-dashboard/app/components/ui/CosmosUI.tsx` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/hooks/useSessionTimeout.ts` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/md/[patientId]/mri/MriReferral.tsx` | ★ Verified-final (Session 13) |
@@ -172,7 +241,6 @@ confirmed added Session 15, deploy pending Session 17.
 | `cosmos-dashboard/app/md/[patientId]/ans/AnsReferral.tsx` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (Session 13) |
-| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (Session 13) |
 | `cosmos-api/main.py` | ★ Verified-final (Session 13) |
 | `cosmos-api/forms/mri.py` | ★ Verified-final (Session 13) |
 | `cosmos-api/forms/dme.py` | ★ Verified-final (Session 13) |
@@ -202,10 +270,17 @@ confirmed added Session 15, deploy pending Session 17.
 - **Chrome silently saves re-downloads as `filename-1.ext`** — always run
   `ls -lt ~/storage/downloads/filename*` before `cp` to confirm which copy
   is newest. Or clear old copies with `rm -f` first.
+- **Tailwind purge eliminates classes not present at build time** — when a
+  new Tailwind class is added to a component that previously didn't use it,
+  it may not appear in the generated CSS bundle. Use inline `style={{}}` as
+  the reliable fallback for one-off layout fixes on the Biller dashboard.
+- **`grep` multi-line fetch pattern gives false positives** — `grep "fetch("
+  | grep -v "Authorization"` misses auth headers on the next line. Always
+  verify by viewing the actual lines around the match before concluding a
+  header is missing.
 - **Biller W9 badge requires supervisor-chain resolution** — a simple
-  `doctor.w9_url` join is insufficient for supervised providers. The billing
-  entity W9 must walk `doctor → supervising_provider_id → supervisor.w9_url`.
-  Implemented in `BillerDashboard.tsx`.
+  `doctor.w9_url` join is insufficient for supervised providers. Walk
+  `doctor → supervising_provider_id → supervisor.w9_url`.
 - **Dev generator Render cold-start pattern** — warm-up ping must fire before
   each patient's referral batch, not just once at session start.
 - **`/tmp` does not persist in Termux** — patch scripts must always write
