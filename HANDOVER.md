@@ -19,84 +19,62 @@ TypeScript errors.
 
 ---
 
-## Completed This Session (Session 17 final continued)
+## Completed This Session (Session 18)
 
-### Audit Log — full implementation
+### Admin page refactor — complete
 
-**Enterprise Hardening Stage 2 complete.**
+`app/admin/page.tsx` split from 2,761 lines into 9 files. Pure structural
+refactor — zero behavioral changes, all functionality confirmed working.
 
-**Migration 023:** `audit_logs` table — `id`, `created_at`, `user_id`,
-`user_email`, `user_role`, `action`, `category`, `record_type`, `record_id`,
-`record_label`, `old_data` (jsonb), `new_data` (jsonb), `metadata` (jsonb).
-Indexes on `created_at DESC`, `user_id`, `category`. RLS: authenticated
-SELECT + INSERT.
-
-**DB triggers** on 7 tables — `log_audit_event()` PLPGSQL function fires
-AFTER INSERT/UPDATE/DELETE on: `patients`, `patient_visits`,
-`visit_line_items`, `doctors`, `insurance_carriers`, `user_profiles`,
-`practice_settings`. Captures old/new data automatically. User attribution
-is "System" for trigger-fired entries (no session context in DB).
-
-**Frontend audit logging** (`app/lib/auditLogger.ts`) — shared
-`writeAuditLog()` helper fetches current session user + role from
-`user_profiles` and inserts into `audit_logs`. Called from:
-- `app/page.tsx` — login (success + failed), MFA verified
-- `app/patients/[patientId]/PatientProfile.tsx` — NF-2/AOB generated,
-  NF-3 preflight confirmed, visit submitted to billing
-- `app/billing/BillerDashboard.tsx` — NF-3 generated, claim status
-  changed, received amount updated, MD flagged
-- `app/md/[patientId]/PatientChart.tsx` — visit created/updated,
-  flag accepted, flag rejected
-
-**Admin Audit Log tab** — new tab in Admin panel using shadcn/TanStack Table
-(same pattern as Biller dashboard). Shows last 500 entries, newest first.
-Category filter chips (patient/visit/billing/document/admin/user/system),
-search by user/record/action, pagination. Fixed: `useMemo` on filtered data
-to prevent freeze on filter chip tap.
-
----
-
-## First Task — Session 18
-
-**Refactor `app/admin/page.tsx`** — the file is ~2600+ lines with all 8
-tab sections in one file. Split into separate component files:
+**New file structure:**
 
 ```
 app/admin/
-  page.tsx                    ← main shell, tab routing only
+  page.tsx                    ← shell only, 114 lines (tab router + header)
+  shared.tsx                  ← all shared helpers, components, constants
   components/
-    OverviewSection.tsx
-    CarriersSection.tsx
-    DoctorsSection.tsx
-    LawyersSection.tsx
-    CptCodesSection.tsx
-    Icd10Section.tsx
-    UsersSection.tsx
-    AuditLogSection.tsx
+    OverviewSection.tsx        ← practice info, security, KPIs, locations
+    CarriersSection.tsx        ← insurance carriers CRUD + CSV import
+    DoctorsSection.tsx         ← providers CRUD, credentials/billing/schedule tabs
+    LawyersSection.tsx         ← lawyers CRUD, grouped by firm
+    CptCodesSection.tsx        ← CPT codes CRUD + CSV import + ICD-10 map
+    Icd10Section.tsx           ← ICD-10 codes CRUD + CSV import
+    UsersSection.tsx           ← user management, PIN reset, activate/deactivate
+    AuditLogSection.tsx        ← TanStack Table, category filters, pagination
 ```
 
-Pure refactor — no functionality changes. Main risks: missing shared
-helpers/imports during split, and the `handlePracticeSave` / security
-settings state that spans Overview only. Read the full file before splitting.
+**`shared.tsx` exports:** `getAuthToken`, `PDF_API_URL`, `formatPhone`,
+`Field`, `SectionHeading`, `STATES`, `StateSelectField`, `SignaturePad`,
+`TAX_CLASS_OPTIONS`, `LLC_CLASS_OPTIONS`, `SPECIALTY_OPTIONS`,
+`LICENSE_TYPE_OPTIONS`, `BLANK_DOCTOR`, `PROVIDER_TYPES`.
+
+**Key preservation notes:**
+- `useMemo` on `filtered` in `AuditLogSection` preserved intact (prevents
+  TanStack Table infinite re-render freeze)
+- `handlePracticeSave` scoped to `OverviewSection` only (owns both Practice
+  Info and Security & Access save)
+- `TAX_LABELS` (display-only, Overview) kept local to `OverviewSection`
+- `KpiCard` kept as local function inside `OverviewSection`
+- `DoctorCard` kept as local function inside `DoctorsSection` IIFE
+- `UsersSection.getToken` left as-is (identical to `getAuthToken` but pure
+  refactor = no behavioral changes)
+- `admin-tab` custom event listener preserved in shell `page.tsx`
 
 ---
 
 ## Open Items, Priority Order
 
-1. **Admin page refactor** — split `app/admin/page.tsx` into per-section
-   components. First task Session 18.
-
-2. **Desktop sidebar nav** — confirmed product direction. No design or
+1. **Desktop sidebar nav** — confirmed product direction. No design or
    implementation work started.
 
-3. **Signed URL caching** — deferred by explicit product decision.
+2. **Signed URL caching** — deferred by explicit product decision.
 
-4. **Doctor mailing address data** — Gottesman and Kramer placeholders.
+3. **Doctor mailing address data** — Gottesman and Kramer placeholders.
    Required for NF-3/W9 accuracy in production.
 
-5. **`patients.doctor_id` NOT NULL** — deferred to pre-production.
+4. **`patients.doctor_id` NOT NULL** — deferred to pre-production.
 
-6. **Render "always on"** — upgrade for PDF speed.
+5. **Render "always on"** — upgrade for PDF speed.
 
 ---
 
@@ -123,7 +101,7 @@ settings state that spans Overview only. Read the full file before splitting.
 - [ ] Error monitoring (Sentry or equivalent)
 
 ### Stage 4 — Code Quality
-- [ ] Admin page refactor (first task Session 18)
+- [x] Admin page refactor (Session 18)
 - [ ] Replace all `print()` in `cosmos-api` with structured logging
 - [ ] Eliminate remaining `any` types — TypeScript strict mode
 - [ ] React error boundaries on all dashboard surfaces
@@ -204,7 +182,16 @@ before user is authenticated.
 
 | File | Confidence |
 |---|---|
-| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (Session 17 — Audit Log tab, Security & Access section, MFA toggle, useMemo filter fix) — **refactor target Session 18** |
+| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (Session 18 — shell only, 114 lines) |
+| `cosmos-dashboard/app/admin/shared.tsx` | ★ Verified-final (Session 18 — new) |
+| `cosmos-dashboard/app/admin/components/OverviewSection.tsx` | ★ Verified-final (Session 18 — new) |
+| `cosmos-dashboard/app/admin/components/CarriersSection.tsx` | ★ Verified-final (Session 18 — new) |
+| `cosmos-dashboard/app/admin/components/DoctorsSection.tsx` | ★ Verified-final (Session 18 — new) |
+| `cosmos-dashboard/app/admin/components/LawyersSection.tsx` | ★ Verified-final (Session 18 — new) |
+| `cosmos-dashboard/app/admin/components/CptCodesSection.tsx` | ★ Verified-final (Session 18 — new) |
+| `cosmos-dashboard/app/admin/components/Icd10Section.tsx` | ★ Verified-final (Session 18 — new) |
+| `cosmos-dashboard/app/admin/components/UsersSection.tsx` | ★ Verified-final (Session 18 — new) |
+| `cosmos-dashboard/app/admin/components/AuditLogSection.tsx` | ★ Verified-final (Session 18 — new) |
 | `cosmos-dashboard/app/lib/auditLogger.ts` | ★ Verified-final (Session 17 — new file) |
 | `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 17 — PIN lockout + TOTP MFA + audit logging) |
 | `cosmos-dashboard/app/billing/BillerDashboard.tsx` | ★ Verified-final (Session 17 — audit logging added) |
@@ -226,7 +213,6 @@ before user is authenticated.
 | `cosmos-dashboard/app/md/[patientId]/pt/PtReferral.tsx` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/md/[patientId]/ans/AnsReferral.tsx` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (Session 13) |
-| `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (Session 13) |
 | `cosmos-api/main.py` | ★ Verified-final (Session 13) |
 | `cosmos-api/forms/mri.py` | ★ Verified-final (Session 13) |
 | `cosmos-api/forms/dme.py` | ★ Verified-final (Session 13) |
@@ -275,3 +261,5 @@ before user is authenticated.
 - **Bash history expansion breaks inline `python3 -c` with `!`**
 - **Render env var changes trigger automatic redeploy**
 - **`~/storage/downloads/` writes can silently fail** — verify with `wc -l` or `ls`
+- **Large file refactors: read full source before splitting** — never reconstruct from changelog summaries
+- **`shared.tsx` pattern: all cross-section helpers in one file** — eliminates duplicate imports across component splits

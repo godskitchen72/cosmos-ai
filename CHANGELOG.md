@@ -1,3 +1,38 @@
+## 2026-07-05 — Session 18
+
+### Admin page refactor — complete
+
+Pure structural refactor of `app/admin/page.tsx` (2,761 lines → 114-line
+shell). Zero behavioral changes. All 8 tabs confirmed working in production.
+
+**New file structure:**
+
+```
+app/admin/
+  page.tsx                    ← shell only, 114 lines
+  shared.tsx                  ← shared helpers, components, constants (264 lines)
+  components/
+    OverviewSection.tsx        (543 lines)
+    CarriersSection.tsx        (320 lines)
+    DoctorsSection.tsx         (803 lines)
+    LawyersSection.tsx         (186 lines)
+    CptCodesSection.tsx        (424 lines)
+    Icd10Section.tsx           (310 lines)
+    UsersSection.tsx           (306 lines)
+    AuditLogSection.tsx        (257 lines)
+```
+
+**`shared.tsx`** exports all cross-section utilities: `getAuthToken`,
+`PDF_API_URL`, `formatPhone`, `Field`, `SectionHeading`, `STATES`,
+`StateSelectField`, `SignaturePad`, `TAX_CLASS_OPTIONS`, `LLC_CLASS_OPTIONS`,
+`SPECIALTY_OPTIONS`, `LICENSE_TYPE_OPTIONS`, `BLANK_DOCTOR`, `PROVIDER_TYPES`.
+
+**Preserved intact:** `useMemo` on `filtered` in `AuditLogSection` (prevents
+TanStack Table infinite re-render freeze). `admin-tab` custom event listener
+in shell `page.tsx`. All handler logic byte-for-byte identical to original.
+
+---
+
 ## 2026-07-05 — Session 18 prep / Session 17 final
 
 ### Audit Log — full implementation (Enterprise Hardening Stage 2 complete)
@@ -29,12 +64,6 @@ into `audit_logs`. Never throws — audit failures must not break main flow.
 last 500 entries newest-first, category filter chips, search, pagination.
 Fixed freeze: `useMemo` on filtered data (non-memoized array passed to
 `useReactTable` caused infinite re-render on filter chip tap).
-
-### Next session — Admin page refactor
-
-`app/admin/page.tsx` is ~2600 lines. First task Session 18: split into
-per-section components under `app/admin/components/`. Pure refactor,
-no functionality changes.
 
 ---
 
@@ -204,45 +233,15 @@ when the supervisor's W9 existed.
   exposes it as `doctorWithW9` on each `RowData` row; W9 `DocBadge`
   reads `doctorWithW9?.w9_url`
 
-**Status:** Patch confirmed applied (all node script checks OK).
-`tsc --noEmit` + deploy chain pending — first task of Session 16.
-
 ---
 
 ## 2026-07-04 — Session 14
 
-### CosmosUI standard — PatientProfile.tsx complete
+### CPT import — many-to-many ICD-10 mapping
 
-All `alert()` and `confirm()` calls converted. `ConfirmModal` mounted
-(was missing). `cosmosConfirm` gates all regenerate/undo actions (NF-2,
-AOB, NF-3, PCE). Dead `nf3Msg` state and `setTimeout` no-op removed.
-Amber NF-3 warning strip removed — locked card tap fires `toastError`.
+CPT CSV importer now handles multi-ICD-10 rows per CPT code correctly:
 
-### Session 13 regression fixes
-
-**NF-2/AOB generation restored** — `generateForm()` helper was missing
-`Authorization: Bearer` header from Session 13 JWT sweep. Added `token`
-parameter; `await getAuthToken()` passed from both call sites.
-
-**MD/PA/NP location picker always shown** — `locs.length > 1` bypass
-removed from `app/page.tsx`. Picker always shown for MD/PA/NP roles
-regardless of location count.
-
-### Blank signature guard — all SignaturePad components
-
-`isCanvasBlank()` pixel check added to `save()` in `PatientProfile.tsx`
-and `admin/page.tsx`. Blank canvas fires `toastError` instead of saving
-empty PNG.
-
-### NP/PA CPT code mapping
-
-`PatientChart.tsx`: `effectiveLicenseType` maps NP and PA to MD at the
-filter level. No data duplication. Debug `console.log` removed.
-
-### CPT import — Option A architecture + error handling
-
-`handleCptImportConfirm` rebuilt:
-- Deduplicates CPT rows by `cpt_code` before upsert (was root cause of
+- Deduplicates CPT rows by `cpt_code` before upsert (fixes
   silent batch failure with multi-ICD-10 CSVs)
 - Upserts ICD-10 codes to `icd10_codes` (deduplicated by `code`)
 - Upserts mappings to `cpt_icd10_map` on `(cpt_code, icd10_code)` —
