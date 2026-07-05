@@ -1,3 +1,28 @@
+## 2026-07-05 — Session 17 (final)
+
+### MFA for admin/billing/superadmin
+
+TOTP-based MFA via Supabase Auth for `admin`, `billing`, `superadmin` roles.
+
+**Migration:** `practice_settings.mfa_required boolean DEFAULT false`.
+
+**`app/page.tsx`** — After PIN login, checks `mfa_required` setting. If enabled and device not trusted: checks TOTP enrollment → shows setup screen (QR code + manual key entry) or challenge screen (6-digit code). On successful verify, stores 30-day device trust token in `localStorage`. Trusted devices skip MFA for 30 days.
+
+**`app/admin/page.tsx`** — New **Security & Access** section on Overview tab, separated from Practice Info. Contains MFA toggle and Session Timeout selector with dedicated "Save Security Settings" button. Toast confirmation on save. "Reset MFA" button added to admin/billing/superadmin user cards in Users tab.
+
+**`app/api/admin/users/route.ts`** — Added `reset_mfa: true` PATCH handler — unenrolls all TOTP factors for the user via Supabase Admin API.
+
+### FD dashboard queue subtitle updates
+
+- "All Missing Forms": "NF-2 or AOB missing; or NF-3 preflight not completed"
+- "NF-3 — 45 Day Deadline": "Biller must generate NF-3 within 45 days of service date"
+
+### Security & Access section — admin Overview tab
+
+MFA toggle and Session Timeout moved from Practice Info form into dedicated Security & Access card. Each section now saves independently with appropriate confirmation feedback.
+
+---
+
 ## 2026-07-05 — Session 17 (continued)
 
 ### PIN attempt lockout (`app/page.tsx`)

@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 5, 2026, Session 17 continued)
+# Cosmos Medical Technologies — HANDOVER (July 5, 2026, Session 17 final)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -20,6 +20,22 @@ TypeScript errors.
 ---
 
 ## Completed This Session
+
+### MFA for admin/billing/superadmin (`app/page.tsx`, `app/admin/page.tsx`, `app/api/admin/users/route.ts`)
+
+TOTP-based MFA via Supabase Auth. Roles enforced: `admin`, `billing`, `superadmin`.
+
+**Flow:** PIN login → check `practice_settings.mfa_required` → if enabled, check 30-day device trust token in `localStorage` → if not trusted, check TOTP enrollment → setup (QR + manual key) or challenge (6-digit code) → on verify, trust device 30 days.
+
+**Migration:** `practice_settings.mfa_required boolean DEFAULT false`.
+
+**Admin panel** — new **Security & Access** section on Overview tab (separated from Practice Info). Contains MFA toggle and Session Timeout selector, each with their own "Save Security Settings" button. Toast confirmation on save.
+
+**Reset MFA** — "Reset MFA" button on admin/billing/superadmin user cards in Users tab. Calls `/api/admin/users` PATCH with `reset_mfa: true` → unenrolls all TOTP factors via Supabase Admin API → user must re-enroll on next login.
+
+**30-day device trust** — after first successful MFA verify, stores expiry token in `localStorage`. Subsequent logins on same device skip MFA challenge for 30 days. Clearing localStorage or using a new device/browser forces re-challenge.
+
+**MFA toggle** — `mfa_required` in `practice_settings`. When off: no MFA at all (testing mode). When on: 30-day device trust applies. Flip via Security & Access → Save Security Settings, no redeploy needed.
 
 ### PIN attempt lockout
 
@@ -126,7 +142,7 @@ flexWrap:'nowrap' }}` rather than Tailwind classes.
    Upgrading to a paid always-on tier is the single biggest real-world
    speed improvement available.
 
-6. **MFA for admin and billing roles** — Enterprise Hardening Stage 2 remainder.
+6. **Audit log table** — Enterprise Hardening Stage 2 remainder.
 
 ---
 
@@ -142,7 +158,7 @@ flexWrap:'nowrap' }}` rather than Tailwind classes.
 - [x] API JWT authentication on all `cosmos-api` endpoints (Session 13)
 - [x] Session timeout / auto sign-out after inactivity (Session 13)
 - [x] Failed PIN attempt lockout (Session 17 — `login_attempts` table, 5 attempts / 15 min window)
-- [ ] MFA for admin and billing roles
+- [x] MFA for admin and billing roles (Session 17 — TOTP via Supabase Auth, 30-day device trust, toggle in Security & Access)
 - [ ] HIPAA BAA with Supabase
 - [ ] Audit log table (who changed what, when)
 
@@ -233,11 +249,13 @@ for all commands if flag queries ever return unexpectedly empty.
 | `cosmos-dashboard/app/billing/page.tsx` | ★ Verified-final (Session 17 — CPT/ICD-10 fetches, biller_md_flags with resolution columns) |
 | `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (Session 17 — biller flag strip, Accept & Apply, Reject with note, auto-resolve on save) |
 | `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (Session 17 — persistent biller flag alert card with suggested codes, visit_id in nav URL) |
+| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (Session 17 — Security & Access section, MFA toggle, session timeout, Reset MFA button) |
+| `cosmos-dashboard/app/api/admin/users/route.ts` | ★ Verified-final (Session 17 — reset_mfa PATCH handler) |
 | `cosmos-dashboard/app/patients/[patientId]/PatientProfile.tsx` | ★ Verified-final (Session 17 — NF-3 preflight modal, updated submission gate) |
 | `cosmos-dashboard/app/md/[patientId]/icd10/IcdReferral.tsx` | ★ Verified-final (Session 17 — Authorization header added) |
 | `cosmos-dashboard/app/dev/page.tsx` | ★ Verified-final (Session 15) |
 | `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (Session 14) |
-| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 17 — PIN lockout, 5 attempts / 15 min window) |
+| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 17 — PIN lockout + TOTP MFA with 30-day device trust) |
 | `cosmos-dashboard/app/components/ui/CosmosUI.tsx` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/hooks/useSessionTimeout.ts` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/md/[patientId]/mri/MriReferral.tsx` | ★ Verified-final (Session 13) |
@@ -279,6 +297,8 @@ for all commands if flag queries ever return unexpectedly empty.
 - **Chrome silently saves re-downloads as `filename-1.ext`** — always run
   `ls -lt ~/storage/downloads/filename*` before `cp` to confirm which copy
   is newest. Or clear old copies with `rm -f` first.
+- **MFA `localStorage` device trust uses email-derived key** — key format: `cosmos_mfa_trusted_{email_normalized}`. Clearing localStorage or switching browsers forces re-challenge. 30-day expiry stored as Unix timestamp.
+- **Supabase `mfa.listFactors()` returns `factors.totp` array** — filter by `status === 'verified'` to find active factors. Unverified factors from incomplete enrollment still appear.
 - **`login_attempts` RLS must include `anon` role** — lockout tracking runs before the user is authenticated. An `authenticated`-only policy causes all inserts/selects to silently fail (RLS returns empty, no error), making the counter always show MAX attempts. Always add an `anon` policy for any table written to before login.
 - **Tailwind purge eliminates classes not present at build time** — when a
   new Tailwind class is added to a component that previously didn't use it,
