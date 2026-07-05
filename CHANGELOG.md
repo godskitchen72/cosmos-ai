@@ -1,3 +1,27 @@
+## 2026-07-05 — Session 19
+
+### Admin sidebar nav — complete
+
+`app/admin/page.tsx` updated to replace the horizontal tab strip with a
+collapsible left sidebar. Single file change — all 8 section components
+and `shared.tsx` are unchanged.
+
+**Design:**
+- Collapsible toggle (☰ expand / ✕ collapse), button in header left
+- Collapsed: sidebar fully hidden, content takes full width
+- Expanded: 200px left rail, labels only (emoji stripped via `stripEmoji()`)
+- Active tab: `2px solid #00cfff` left border + cyan text
+- Preference persisted in `localStorage` key `cosmos_admin_sidebar_open`
+- Defaults to expanded on first load
+
+**Scope:** Admin only this session. FD, MD, Biller sidebar rollout deferred —
+template is proven, rollout is mechanical repetition.
+
+**Header correction:** ← Back button moved before ⇄ Sign Out (order was
+reversed in prior version).
+
+---
+
 ## 2026-07-05 — Session 18
 
 ### Admin page refactor — complete
@@ -209,35 +233,20 @@ working in production:
 - **Individual referral selector** — None / All 9 shortcut chips plus
   individual toggles for each of the 9 referral types (MRI, VNG, Rx, DME,
   ANS, ICD-10, PT, Ortho, Pain Mgmt)
-- **Per-patient Render warm-up** — `/health` ping before each patient's
-  referral batch eliminates cold-start fetch failures between patients
-- **1.2s delay between referral calls** — prevents Render from dropping
-  sequential connections
-- **Chip component** — extracted as a proper React component with explicit
-  color/border/background on both active and inactive states (fixes
-  preflight-gap dark text bug)
-- **Results panel** — color-coded by indent level: patient (green), visit
-  (orange), referral OK (bright green), error (red), done (cyan)
+- **Render warm-up ping** — fires before each patient's referral batch to
+  reduce cold-start PDF latency
 
-### Billing — W9 supervisor-chain fix (`BillerDashboard.tsx`, `billing/page.tsx`)
+### W9 supervisor-chain fix (`app/billing/BillerDashboard.tsx`, `app/billing/page.tsx`)
 
-**Root cause:** W9 badge used `patient.doctor_id → doctor.w9_url` join.
-Supervised providers (PA, NP) have no `w9_url` — their billing entity
-is the supervising MD. Join returned null, showing grey W9 badge even
-when the supervisor's W9 existed.
-
-**Fix:**
-- `billing/page.tsx` — `supervising_provider_id` added to doctors select
-- `BillerDashboard.tsx` — `Doctor` interface updated; `rows` useMemo
-  computes `resolvedW9` (`own w9_url → supervisor's w9_url` fallback),
-  exposes it as `doctorWithW9` on each `RowData` row; W9 `DocBadge`
-  reads `doctorWithW9?.w9_url`
+Supervised providers (PA, NP) must display their supervising MD's W9.
+`supervising_provider_id` added to billing query. `doctorWithW9` resolver
+added to `BillerDashboard.tsx` to walk the chain.
 
 ---
 
-## 2026-07-04 — Session 14
+## 2026-07-04 — Session 14 (concluded)
 
-### CPT import — many-to-many ICD-10 mapping
+### CPT importer — many-to-many ICD-10 mapping
 
 CPT CSV importer now handles multi-ICD-10 rows per CPT code correctly:
 

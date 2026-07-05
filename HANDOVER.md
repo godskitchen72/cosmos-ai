@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 5, 2026, Session 18)
+# Cosmos Medical Technologies — HANDOVER (July 5, 2026, Session 19)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -19,53 +19,40 @@ TypeScript errors.
 
 ---
 
-## Completed This Session (Session 18)
+## Completed This Session (Session 19)
 
-### Admin page refactor — complete
+### Admin sidebar nav — complete
 
-`app/admin/page.tsx` split from 2,761 lines into 9 files. Pure structural
-refactor — zero behavioral changes, all functionality confirmed working.
+`app/admin/page.tsx` updated to replace the horizontal tab strip with a
+collapsible left sidebar. All 8 section components and `shared.tsx`
+are unchanged — layout change only.
 
-**New file structure:**
+**Design decisions confirmed:**
+- Pattern: collapsible toggle (☰ / ✕ button in header)
+- Collapsed state: sidebar fully hidden — full content width
+- Expanded state: 200px left rail, labels only (no icons, emoji stripped)
+- Default: expanded on first load
+- Persistence: `localStorage` key `cosmos_admin_sidebar_open`
+- Scope this session: Admin only — FD, MD, Biller deferred to a future session
 
-```
-app/admin/
-  page.tsx                    ← shell only, 114 lines (tab router + header)
-  shared.tsx                  ← all shared helpers, components, constants
-  components/
-    OverviewSection.tsx        ← practice info, security, KPIs, locations
-    CarriersSection.tsx        ← insurance carriers CRUD + CSV import
-    DoctorsSection.tsx         ← providers CRUD, credentials/billing/schedule tabs
-    LawyersSection.tsx         ← lawyers CRUD, grouped by firm
-    CptCodesSection.tsx        ← CPT codes CRUD + CSV import + ICD-10 map
-    Icd10Section.tsx           ← ICD-10 codes CRUD + CSV import
-    UsersSection.tsx           ← user management, PIN reset, activate/deactivate
-    AuditLogSection.tsx        ← TanStack Table, category filters, pagination
-```
-
-**`shared.tsx` exports:** `getAuthToken`, `PDF_API_URL`, `formatPhone`,
-`Field`, `SectionHeading`, `STATES`, `StateSelectField`, `SignaturePad`,
-`TAX_CLASS_OPTIONS`, `LLC_CLASS_OPTIONS`, `SPECIALTY_OPTIONS`,
-`LICENSE_TYPE_OPTIONS`, `BLANK_DOCTOR`, `PROVIDER_TYPES`.
-
-**Key preservation notes:**
-- `useMemo` on `filtered` in `AuditLogSection` preserved intact (prevents
-  TanStack Table infinite re-render freeze)
-- `handlePracticeSave` scoped to `OverviewSection` only (owns both Practice
-  Info and Security & Access save)
-- `TAX_LABELS` (display-only, Overview) kept local to `OverviewSection`
-- `KpiCard` kept as local function inside `OverviewSection`
-- `DoctorCard` kept as local function inside `DoctorsSection` IIFE
-- `UsersSection.getToken` left as-is (identical to `getAuthToken` but pure
-  refactor = no behavioral changes)
-- `admin-tab` custom event listener preserved in shell `page.tsx`
+**Implementation notes:**
+- `stripEmoji()` helper strips Unicode emoji prefix from `NAV_TABS` labels
+  for sidebar display — `NAV_TABS` data itself is unchanged
+- Active tab: cyan left border (`2px solid #00cfff`) + cyan text
+- Hover state: inline `onMouseEnter`/`onMouseLeave` (Tailwind purge avoidance)
+- Sidebar is `sticky top-[52px]` with `height: calc(100vh - 52px)` —
+  scrolls independently of content
+- Body layout: `flex` row — sidebar + `flex-1 min-w-0` content area
+- `admin-tab` custom event listener preserved intact
+- Header button order corrected: ← Back before ⇄ Sign Out (was reversed)
 
 ---
 
 ## Open Items, Priority Order
 
-1. **Desktop sidebar nav** — confirmed product direction. No design or
-   implementation work started.
+1. **Sidebar rollout to FD, MD, Biller** — template proven in Admin. Mechanical
+   repetition of the same pattern. Product decision: do all three in one session
+   or one at a time.
 
 2. **Signed URL caching** — deferred by explicit product decision.
 
@@ -108,7 +95,8 @@ app/admin/
 - [ ] Loading states on all data fetches
 
 ### Stage 5 — Product & UX
-- [ ] Desktop sidebar nav
+- [x] Admin sidebar nav (Session 19)
+- [ ] Sidebar rollout — FD, MD, Biller dashboards
 - [ ] Holistic UX audit
 - [ ] Accessibility (ARIA, keyboard nav)
 - [ ] Multi-tenancy for commercial SaaS
@@ -174,33 +162,39 @@ Clearing localStorage or new browser forces re-challenge.
 **`login_attempts` RLS:** Must include `anon` role — lockout check runs
 before user is authenticated.
 
+**Admin sidebar `localStorage`:** Key `cosmos_admin_sidebar_open`. Defaults
+to expanded (`true`) on first load if key is absent.
+
+**`ARCHITECTURE.md` migration list gap:** Migrations 020–023 are missing
+from `ARCHITECTURE.md §3`. Should be added next time that document is updated.
+
 ---
 
 ## File Confidence Levels (cumulative)
 
-**★ Verified-final** — confirmed deployed via full deploy chain + live screenshot.
+**★ Verified-final** — confirmed deployed via full deploy chain + live confirmation.
 
 | File | Confidence |
 |---|---|
-| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (Session 18 — shell only, 114 lines) |
-| `cosmos-dashboard/app/admin/shared.tsx` | ★ Verified-final (Session 18 — new) |
-| `cosmos-dashboard/app/admin/components/OverviewSection.tsx` | ★ Verified-final (Session 18 — new) |
-| `cosmos-dashboard/app/admin/components/CarriersSection.tsx` | ★ Verified-final (Session 18 — new) |
-| `cosmos-dashboard/app/admin/components/DoctorsSection.tsx` | ★ Verified-final (Session 18 — new) |
-| `cosmos-dashboard/app/admin/components/LawyersSection.tsx` | ★ Verified-final (Session 18 — new) |
-| `cosmos-dashboard/app/admin/components/CptCodesSection.tsx` | ★ Verified-final (Session 18 — new) |
-| `cosmos-dashboard/app/admin/components/Icd10Section.tsx` | ★ Verified-final (Session 18 — new) |
-| `cosmos-dashboard/app/admin/components/UsersSection.tsx` | ★ Verified-final (Session 18 — new) |
-| `cosmos-dashboard/app/admin/components/AuditLogSection.tsx` | ★ Verified-final (Session 18 — new) |
-| `cosmos-dashboard/app/lib/auditLogger.ts` | ★ Verified-final (Session 17 — new file) |
-| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 17 — PIN lockout + TOTP MFA + audit logging) |
-| `cosmos-dashboard/app/billing/BillerDashboard.tsx` | ★ Verified-final (Session 17 — audit logging added) |
-| `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (Session 17 — biller flag strip, audit logging) |
-| `cosmos-dashboard/app/patients/[patientId]/PatientProfile.tsx` | ★ Verified-final (Session 17 — NF-3 preflight, audit logging) |
-| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (Session 17 — biller flag alert card) |
-| `cosmos-dashboard/app/md/[patientId]/icd10/IcdReferral.tsx` | ★ Verified-final (Session 17 — Authorization header) |
-| `cosmos-dashboard/app/billing/page.tsx` | ★ Verified-final (Session 17 — biller flags with resolution columns) |
-| `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (Session 17 — queue subtitle updates) |
+| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (Session 19 — sidebar nav, ~160 lines) |
+| `cosmos-dashboard/app/admin/shared.tsx` | ★ Verified-final (Session 18 — unchanged Session 19) |
+| `cosmos-dashboard/app/admin/components/OverviewSection.tsx` | ★ Verified-final (Session 18) |
+| `cosmos-dashboard/app/admin/components/CarriersSection.tsx` | ★ Verified-final (Session 18) |
+| `cosmos-dashboard/app/admin/components/DoctorsSection.tsx` | ★ Verified-final (Session 18) |
+| `cosmos-dashboard/app/admin/components/LawyersSection.tsx` | ★ Verified-final (Session 18) |
+| `cosmos-dashboard/app/admin/components/CptCodesSection.tsx` | ★ Verified-final (Session 18) |
+| `cosmos-dashboard/app/admin/components/Icd10Section.tsx` | ★ Verified-final (Session 18) |
+| `cosmos-dashboard/app/admin/components/UsersSection.tsx` | ★ Verified-final (Session 18) |
+| `cosmos-dashboard/app/admin/components/AuditLogSection.tsx` | ★ Verified-final (Session 18) |
+| `cosmos-dashboard/app/lib/auditLogger.ts` | ★ Verified-final (Session 17) |
+| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 17) |
+| `cosmos-dashboard/app/billing/BillerDashboard.tsx` | ★ Verified-final (Session 17) |
+| `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (Session 17) |
+| `cosmos-dashboard/app/patients/[patientId]/PatientProfile.tsx` | ★ Verified-final (Session 17) |
+| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (Session 17) |
+| `cosmos-dashboard/app/md/[patientId]/icd10/IcdReferral.tsx` | ★ Verified-final (Session 17) |
+| `cosmos-dashboard/app/billing/page.tsx` | ★ Verified-final (Session 17) |
+| `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (Session 17) |
 | `cosmos-dashboard/app/dev/page.tsx` | ★ Verified-final (Session 15) |
 | `cosmos-dashboard/app/components/ui/CosmosUI.tsx` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/hooks/useSessionTimeout.ts` | ★ Verified-final (Session 13) |
@@ -227,7 +221,7 @@ before user is authenticated.
 | `cosmos-dashboard/middleware.ts` | ★ Verified-final (prior session) |
 | `cosmos-dashboard/app/md/page.tsx` | ★ Verified-final (prior session) |
 | `cosmos-dashboard/app/lib/fonts.ts` | Obtained-current (prior session) |
-| `cosmos-dashboard/app/api/admin/users/route.ts` | ★ Verified-final (Session 17 — reset_mfa handler) |
+| `cosmos-dashboard/app/api/admin/users/route.ts` | ★ Verified-final (Session 17) |
 | `cosmos-api/forms/ans.py`, `icd10.py`, `pce.py`, `pt.py`, `rx.py`, `vng.py` | Only TEMPLATE line confirmed |
 | `cosmos-api/forms/nf2.py` | Never obtained |
 
@@ -263,3 +257,5 @@ before user is authenticated.
 - **`~/storage/downloads/` writes can silently fail** — verify with `wc -l` or `ls`
 - **Large file refactors: read full source before splitting** — never reconstruct from changelog summaries
 - **`shared.tsx` pattern: all cross-section helpers in one file** — eliminates duplicate imports across component splits
+- **Sidebar `localStorage` persistence: initialize in `useEffect` to avoid SSR hydration mismatch**
+- **Sidebar hover states on plain `<button>` elements require inline handlers** — Tailwind `hover:` purged at build time for dynamically constructed class strings
