@@ -1,3 +1,62 @@
+## 2026-07-05 — Session 16
+
+### Documentation update only
+
+No code written or deployed this session.
+
+Updated documents:
+- `CHANGELOG.md` — Session 15 entries added (dev tools rebuild + W9 supervisor-chain fix)
+- `ARCHITECTURE.md` — Migrations 017–019 added to §3 migration list; §10 login flow updated to reflect Session 14 fix (location picker now always shown for MD/PA/NP regardless of location count)
+- `HANDOVER.md` — Session 15 → Session 16
+
+---
+
+## 2026-07-04 — Session 15
+
+### Dev Tools — full rebuild (`app/dev/page.tsx`)
+
+Complete rewrite of the dev data generator. All features confirmed
+working in production:
+
+- **Real doctors, carriers, lawyers** from live database tables
+- **Visit count selector** — None / 1 / 2 / 3 / 5 visits per patient;
+  each visit dated randomly across recent weeks
+- **DOI guard** — visit dates clamped to always be after the patient's DOI
+- **Live CPT codes** — fetched from `cpt_codes` table, random-sampled per
+  visit; fallback to hardcoded sets if table is empty
+- **Max MD mode** — samples up to 8 codes from the live pool instead of 3–6
+- **Individual referral selector** — None / All 9 shortcut chips plus
+  individual toggles for each of the 9 referral types (MRI, VNG, Rx, DME,
+  ANS, ICD-10, PT, Ortho, Pain Mgmt)
+- **Per-patient Render warm-up** — `/health` ping before each patient's
+  referral batch eliminates cold-start fetch failures between patients
+- **1.2s delay between referral calls** — prevents Render from dropping
+  sequential connections
+- **Chip component** — extracted as a proper React component with explicit
+  color/border/background on both active and inactive states (fixes
+  preflight-gap dark text bug)
+- **Results panel** — color-coded by indent level: patient (green), visit
+  (orange), referral OK (bright green), error (red), done (cyan)
+
+### Billing — W9 supervisor-chain fix (`BillerDashboard.tsx`, `billing/page.tsx`)
+
+**Root cause:** W9 badge used `patient.doctor_id → doctor.w9_url` join.
+Supervised providers (PA, NP) have no `w9_url` — their billing entity
+is the supervising MD. Join returned null, showing grey W9 badge even
+when the supervisor's W9 existed.
+
+**Fix:**
+- `billing/page.tsx` — `supervising_provider_id` added to doctors select
+- `BillerDashboard.tsx` — `Doctor` interface updated; `rows` useMemo
+  computes `resolvedW9` (`own w9_url → supervisor's w9_url` fallback),
+  exposes it as `doctorWithW9` on each `RowData` row; W9 `DocBadge`
+  reads `doctorWithW9?.w9_url`
+
+**Status:** Patch confirmed applied (all node script checks OK).
+`tsc --noEmit` + deploy chain pending — first task of Session 17.
+
+---
+
 ## 2026-07-04 — Session 14
 
 ### CosmosUI standard — PatientProfile.tsx complete

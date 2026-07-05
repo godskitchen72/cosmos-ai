@@ -97,6 +97,9 @@ live database unless noted otherwise in `HANDOVER.md`):
 - `014_doctor_mailing_address.sql` — dropped `street`/`city`/`state`/`zip`/`pc_street`/`pc_city`/`pc_state`/`pc_zip`; added `mailing_street`/`mailing_city`/`mailing_state`/`mailing_zip`
 - `015_office_locations_is_main_office.sql` — added `is_main_office boolean NOT NULL DEFAULT false` to `office_locations`
 - `016_patient_visits_location_id.sql` — added `location_id uuid REFERENCES office_locations(id)` to `patient_visits`
+- `017_rls_hardening.sql` — all `anon`/`public` policies removed; every table locked to `authenticated` only (Session 12)
+- `018_not_null_constraints.sql` — `doctors.license_number`, `doctors.npi`, `doctors.mailing_state`, `patient_forms.form_type` constrained NOT NULL (Session 12)
+- `019_session_timeout.sql` — `practice_settings.session_timeout_minutes int NOT NULL DEFAULT 15` (Session 13)
 
 Key tables referenced throughout the codebase: `patients`,
 `patient_visits` (visit-scoped data, including `cpt_codes`/`icd10_codes`,
@@ -353,9 +356,9 @@ Three stages: `login` → `location` (md/pa/np) → `dashboard` (superadmin pick
 - `admin` → `/admin`
 - `superadmin` → `/admin` (then 2×2 dashboard picker)
 
-Location picker shown for `['md', 'pa', 'np']` when `doctor_id` is set on
-the user profile and the doctor has more than one assigned location. Single-
-location doctors auto-navigate without showing the picker. `cosmos_location_id`
+Location picker always shown for `['md', 'pa', 'np']` when `doctor_id` is set on
+the user profile — regardless of how many locations the doctor has.
+(`locs.length > 1` bypass removed Session 14.) `cosmos_location_id`
 and `cosmos_location_name` stored in `sessionStorage` for use by
 `handleStartVisit` and manual visit INSERT in `PatientChart.tsx`.
 
