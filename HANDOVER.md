@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 5, 2026, Session 17 final)
+# Cosmos Medical Technologies — HANDOVER (July 5, 2026, Session 18)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -19,158 +19,112 @@ TypeScript errors.
 
 ---
 
-## Completed This Session
+## Completed This Session (Session 17 final continued)
 
-### MFA for admin/billing/superadmin (`app/page.tsx`, `app/admin/page.tsx`, `app/api/admin/users/route.ts`)
+### Audit Log — full implementation
 
-TOTP-based MFA via Supabase Auth. Roles enforced: `admin`, `billing`, `superadmin`.
+**Enterprise Hardening Stage 2 complete.**
 
-**Flow:** PIN login → check `practice_settings.mfa_required` → if enabled, check 30-day device trust token in `localStorage` → if not trusted, check TOTP enrollment → setup (QR + manual key) or challenge (6-digit code) → on verify, trust device 30 days.
+**Migration 023:** `audit_logs` table — `id`, `created_at`, `user_id`,
+`user_email`, `user_role`, `action`, `category`, `record_type`, `record_id`,
+`record_label`, `old_data` (jsonb), `new_data` (jsonb), `metadata` (jsonb).
+Indexes on `created_at DESC`, `user_id`, `category`. RLS: authenticated
+SELECT + INSERT.
 
-**Migration:** `practice_settings.mfa_required boolean DEFAULT false`.
+**DB triggers** on 7 tables — `log_audit_event()` PLPGSQL function fires
+AFTER INSERT/UPDATE/DELETE on: `patients`, `patient_visits`,
+`visit_line_items`, `doctors`, `insurance_carriers`, `user_profiles`,
+`practice_settings`. Captures old/new data automatically. User attribution
+is "System" for trigger-fired entries (no session context in DB).
 
-**Admin panel** — new **Security & Access** section on Overview tab (separated from Practice Info). Contains MFA toggle and Session Timeout selector, each with their own "Save Security Settings" button. Toast confirmation on save.
+**Frontend audit logging** (`app/lib/auditLogger.ts`) — shared
+`writeAuditLog()` helper fetches current session user + role from
+`user_profiles` and inserts into `audit_logs`. Called from:
+- `app/page.tsx` — login (success + failed), MFA verified
+- `app/patients/[patientId]/PatientProfile.tsx` — NF-2/AOB generated,
+  NF-3 preflight confirmed, visit submitted to billing
+- `app/billing/BillerDashboard.tsx` — NF-3 generated, claim status
+  changed, received amount updated, MD flagged
+- `app/md/[patientId]/PatientChart.tsx` — visit created/updated,
+  flag accepted, flag rejected
 
-**Reset MFA** — "Reset MFA" button on admin/billing/superadmin user cards in Users tab. Calls `/api/admin/users` PATCH with `reset_mfa: true` → unenrolls all TOTP factors via Supabase Admin API → user must re-enroll on next login.
+**Admin Audit Log tab** — new tab in Admin panel using shadcn/TanStack Table
+(same pattern as Biller dashboard). Shows last 500 entries, newest first.
+Category filter chips (patient/visit/billing/document/admin/user/system),
+search by user/record/action, pagination. Fixed: `useMemo` on filtered data
+to prevent freeze on filter chip tap.
 
-**30-day device trust** — after first successful MFA verify, stores expiry token in `localStorage`. Subsequent logins on same device skip MFA challenge for 30 days. Clearing localStorage or using a new device/browser forces re-challenge.
+---
 
-**MFA toggle** — `mfa_required` in `practice_settings`. When off: no MFA at all (testing mode). When on: 30-day device trust applies. Flip via Security & Access → Save Security Settings, no redeploy needed.
+## First Task — Session 18
 
-### PIN attempt lockout
+**Refactor `app/admin/page.tsx`** — the file is ~2600+ lines with all 8
+tab sections in one file. Split into separate component files:
 
-**Migration:** `login_attempts` table — `id`, `email`, `attempted_at`, `success`. Index on `email`. RLS: both `authenticated` and `anon` full access (anon required since lockout check runs before authentication).
+```
+app/admin/
+  page.tsx                    ← main shell, tab routing only
+  components/
+    OverviewSection.tsx
+    CarriersSection.tsx
+    DoctorsSection.tsx
+    LawyersSection.tsx
+    CptCodesSection.tsx
+    Icd10Section.tsx
+    UsersSection.tsx
+    AuditLogSection.tsx
+```
 
-**`app/page.tsx`** — `handleLogin` updated:
-- Before attempting sign-in: queries `login_attempts` for failures since last success (or last 15 minutes)
-- 5+ failures → shows lockout message with minutes remaining, blocks login
-- Failed sign-in → inserts failure row, re-fetches count, shows "X attempts remaining"
-- Successful sign-in → inserts success row (resets effective failure count)
-- Lockout auto-expires after 15 minutes — no admin action needed
-
-### W9 supervisor-chain deploy (carried from Session 15)
-
-`BillerDashboard.tsx` + `billing/page.tsx` W9 patch confirmed already
-committed before Session 17 started. `tsc --noEmit` passed clean.
-Working tree clean — no deploy action needed.
-
-### NF-3 workflow redesign — full implementation
-
-**Product decision:** NF-3 generation moves from FD to Biller. FD role
-becomes validation-only (preflight check). Biller generates NF-3 per visit
-directly from the billing queue.
-
-**Migration 020:** `patient_visits.nf3_preflight_passed boolean DEFAULT false`
-+ `biller_md_flags` table with RLS.
-
-**FD (`PatientProfile.tsx`):**
-- NF-3 card replaced with "NF-3 Preflight" card
-- Opens `PreflightModal` — checks 8 required fields (signature, carrier,
-  claim #, policy #, DOI, attorney, CPT codes, ICD-10 codes for selected visit)
-- Green = present, red = missing. "Confirm Ready" writes
-  `nf3_preflight_passed = true` on the visit
-- Submission gate updated: `hasNf3` replaced with `nf3_preflight_passed`
-- `handleGenerateNF3` / `handleRegenerateNF3` removed
-
-**Biller (`BillerDashboard.tsx`):**
-- `+ NF-3` badge in Docs column generates NF-3 when missing; flips to
-  tappable `NF-3` badge when generated
-- `⚑ Flag MD` button per row — opens `FlagMdModal`
-
-**Biller → MD flag system (`biller_md_flags` table):**
-- Flag reasons: Missing/Incorrect CPT Codes, Missing/Incorrect ICD-10 Codes
-- Full CPT and ICD-10 code library pickers in flag modal
-- Suggested codes stored as `suggested_cpt_codes text[]` and
-  `suggested_icd10_codes text[]`
-- Biller dashboard shows suggested codes in amber (⏳) alongside confirmed
-  cyan codes in CPT and ICD-10 columns
-- Flagged rows show ⚠️ Flagged button; rejected rows show ↩ MD Rejected
-  with Dismiss × button
-
-**MD (`MDClient.tsx`):**
-- Persistent amber alert card at top of dashboard for unresolved flags
-- Shows patient name, visit date, reason, note, suggested CPT and ICD-10 codes
-- Tapping flag navigates to `/md/[patientId]?visit_id=[flaggedVisitId]`
-
-**MD (`PatientChart.tsx`):**
-- Flag strip rendered when `visit_id` URL param matches an open flag
-- Shows suggested codes with Accept & Apply / Reject options
-- Accept: pre-fills code pickers with suggested codes (additive)
-- Reject: writes `resolved_at + resolution: rejected + rejection_note`
-- On visit save after accept: auto-resolves flag as `accepted`
-
-**Migrations run:**
-- `020`: `nf3_preflight_passed` + `biller_md_flags` table + RLS
-- `021`: `biller_md_flags.suggested_cpt_codes text[]`,
-  `suggested_icd10_codes text[]`
-- `022`: `biller_md_flags.resolution text`, `rejection_note text`,
-  `biller_dismissed_at timestamptz`
-
-### IcdReferral.tsx — Authorization header fix
-
-`app/md/[patientId]/icd10/IcdReferral.tsx` was missing `getAuthToken()`
-and the `Authorization: Bearer` header on its fetch call. Added both.
-All other referral screens confirmed already had the header — grep
-false-positive from multi-line fetch pattern.
-
-### Biller dashboard docs column
-
-Docs column (NF-3, AOB, PCE, W9, Flag MD) confirmed rendering in a single
-horizontal `nowrap` row. Multiple layout iterations required due to Tailwind
-purge — final fix uses inline `style={{ display:'flex', flexDirection:'row',
-flexWrap:'nowrap' }}` rather than Tailwind classes.
+Pure refactor — no functionality changes. Main risks: missing shared
+helpers/imports during split, and the `handlePracticeSave` / security
+settings state that spans Overview only. Read the full file before splitting.
 
 ---
 
 ## Open Items, Priority Order
 
-1. **Desktop sidebar nav** — confirmed product direction. No design or
+1. **Admin page refactor** — split `app/admin/page.tsx` into per-section
+   components. First task Session 18.
+
+2. **Desktop sidebar nav** — confirmed product direction. No design or
    implementation work started.
 
-2. **Signed URL caching** — `supabase.storage.createSignedUrl()` called
-   fresh on every "View" tap. Deferred by explicit product decision.
+3. **Signed URL caching** — deferred by explicit product decision.
 
-3. **Doctor mailing address data** — Gottesman and Kramer are independent
-   MDs with placeholder mailing addresses. Required for NF-3/W9 accuracy
-   in production.
+4. **Doctor mailing address data** — Gottesman and Kramer placeholders.
+   Required for NF-3/W9 accuracy in production.
 
-4. **`patients.doctor_id` NOT NULL** — deferred to pre-production. 3 test
-   patients have null `doctor_id`.
+5. **`patients.doctor_id` NOT NULL** — deferred to pre-production.
 
-5. **Render "always on"** — `cosmos-api` spins down on inactivity
-   (free/starter tier). First PDF generation after idle takes 5–10s.
-   Upgrading to a paid always-on tier is the single biggest real-world
-   speed improvement available.
-
-6. **Audit log table** — Enterprise Hardening Stage 2 remainder.
+6. **Render "always on"** — upgrade for PDF speed.
 
 ---
 
 ## Enterprise Hardening Checklist (running)
 
 ### Stage 1 — Data Integrity ✅ Complete
-- [x] FK constraints — all tables audited and complete (Session 10)
-- [x] Full RLS audit — every table, every command, both roles (Session 12)
-- [x] `NOT NULL` constraints on required columns (Session 12);
-      `patients.doctor_id` deferred to pre-production
+- [x] FK constraints (Session 10)
+- [x] Full RLS audit (Session 12)
+- [x] NOT NULL constraints (Session 12)
 
-### Stage 2 — Security
-- [x] API JWT authentication on all `cosmos-api` endpoints (Session 13)
-- [x] Session timeout / auto sign-out after inactivity (Session 13)
-- [x] Failed PIN attempt lockout (Session 17 — `login_attempts` table, 5 attempts / 15 min window)
-- [x] MFA for admin and billing roles (Session 17 — TOTP via Supabase Auth, 30-day device trust, toggle in Security & Access)
-- [ ] HIPAA BAA with Supabase
-- [ ] Audit log table (who changed what, when)
+### Stage 2 — Security ✅ Complete
+- [x] API JWT authentication (Session 13)
+- [x] Session timeout (Session 13)
+- [x] Failed PIN attempt lockout (Session 17)
+- [x] MFA for admin/billing/superadmin — TOTP, 30-day device trust (Session 17)
+- [x] Audit log table — DB triggers + frontend logging (Session 17)
+- [ ] HIPAA BAA with Supabase — administrative, sign in Supabase dashboard
 
 ### Stage 3 — Infrastructure
-- [ ] Staging environment (Vercel preview + Render staging)
-- [ ] GitHub Actions CI (auto `tsc --noEmit` + `py_compile` on push)
-- [ ] Database indexes on all FK and common filter columns
+- [ ] Staging environment
+- [ ] GitHub Actions CI
+- [ ] Database indexes on FK and common filter columns
 - [ ] Supabase point-in-time recovery confirmed enabled
 - [ ] Error monitoring (Sentry or equivalent)
 
 ### Stage 4 — Code Quality
-- [ ] Replace all `print()` in `cosmos-api` with structured Python `logging`
+- [ ] Admin page refactor (first task Session 18)
+- [ ] Replace all `print()` in `cosmos-api` with structured logging
 - [ ] Eliminate remaining `any` types — TypeScript strict mode
 - [ ] React error boundaries on all dashboard surfaces
 - [ ] Loading states on all data fetches
@@ -199,8 +153,7 @@ deferred. `?doctor_id=` URL param is the reliable doctor-scoping path.
 `patients.doctor_id` (one-doctor-per-patient assumption).
 
 **PA/NP users — `doctor_id` must be own record:** `user_profiles.doctor_id`
-must point to the user's own `doctors` row, not their supervisor. The
-supervisor relationship lives in `doctors.supervising_provider_id`.
+must point to the user's own `doctors` row, not their supervisor.
 
 **PostgREST join shape:** FK-joined tables return as arrays even for
 many-to-one. Always handle both:
@@ -210,32 +163,38 @@ many-to-one. Always handle both:
 `doctor_id`. Constraint deferred to pre-production go-live pass.
 
 **`cosmos_license_type` in sessionStorage:** CPT filter depends on this
-value being set at login. NP and PA now map to MD codes via
-`effectiveLicenseType` in `PatientChart.tsx`. If a provider logs in
-without a `license_type` in the `doctors` table, all codes show (safe
-fallback).
+value being set at login. NP and PA map to MD codes via `effectiveLicenseType`.
 
 **Session timeout SSR:** `useSessionTimeout` reads sessionStorage inside
-`useEffect` to avoid SSR crash. If hook is mounted on a server-rendered
-page without `'use client'`, it will silently no-op (safe).
+`useEffect` to avoid SSR crash.
 
 **Superadmin timeout exemption:** Superadmin gets `cosmos_session_timeout_minutes = '0'`
-written at login. Hook treats `0` as disabled. If superadmin navigates to
-a role dashboard (FD, MD, etc.) the exemption persists for that session.
+at login. Hook treats `0` as disabled.
 
-**Biller W9 resolution:** W9 on the biller dashboard walks the supervisor
-chain (`doctor.w9_url → supervisor.w9_url`). The `doctors` prop fetched in
-`billing/page.tsx` must include `supervising_provider_id` for this to work.
+**Biller W9 resolution:** `billing/page.tsx` must include
+`supervising_provider_id` in doctors select for W9 chain to work.
 
-**`nf3_preflight_passed` gate:** FD submission now requires preflight check
-instead of NF-3 generation. `PatientProfile.tsx` reads this from
-`patient_visits` via `select('*')` — no explicit column selection needed.
+**`nf3_preflight_passed` gate:** FD submission requires preflight check.
+`PatientProfile.tsx` reads from `patient_visits` via `select('*')`.
 
 **`biller_md_flags` fetch condition:** `billing/page.tsx` fetches both
-`resolved_at IS NULL` (pending) and `resolution = rejected AND
-biller_dismissed_at IS NULL` (rejected, not yet dismissed by biller).
-Uses PostgREST `.or()` filter — confirm RLS covers authenticated role
-for all commands if flag queries ever return unexpectedly empty.
+pending and rejected-undismissed flags via PostgREST `.or()`.
+
+**Audit log user attribution:** DB trigger entries show "System" for user —
+no session context available in PostgreSQL trigger functions. Only
+frontend-written entries have real user attribution.
+
+**`audit_logs` anon RLS:** Table has authenticated INSERT only — frontend
+`writeAuditLog()` works because users are authenticated when actions fire.
+Login failure logging works because the attempt insert happens after
+Supabase auth is called (which creates an anon session context).
+
+**MFA `localStorage` device trust:** Key format:
+`cosmos_mfa_trusted_{email_normalized}`. 30-day expiry as Unix timestamp.
+Clearing localStorage or new browser forces re-challenge.
+
+**`login_attempts` RLS:** Must include `anon` role — lockout check runs
+before user is authenticated.
 
 ---
 
@@ -245,17 +204,17 @@ for all commands if flag queries ever return unexpectedly empty.
 
 | File | Confidence |
 |---|---|
-| `cosmos-dashboard/app/billing/BillerDashboard.tsx` | ★ Verified-final (Session 17 — NF-3 generation, Flag MD with code pickers, suggested codes amber display, reject/dismiss flow) |
-| `cosmos-dashboard/app/billing/page.tsx` | ★ Verified-final (Session 17 — CPT/ICD-10 fetches, biller_md_flags with resolution columns) |
-| `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (Session 17 — biller flag strip, Accept & Apply, Reject with note, auto-resolve on save) |
-| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (Session 17 — persistent biller flag alert card with suggested codes, visit_id in nav URL) |
-| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (Session 17 — Security & Access section, MFA toggle, session timeout, Reset MFA button) |
-| `cosmos-dashboard/app/api/admin/users/route.ts` | ★ Verified-final (Session 17 — reset_mfa PATCH handler) |
-| `cosmos-dashboard/app/patients/[patientId]/PatientProfile.tsx` | ★ Verified-final (Session 17 — NF-3 preflight modal, updated submission gate) |
-| `cosmos-dashboard/app/md/[patientId]/icd10/IcdReferral.tsx` | ★ Verified-final (Session 17 — Authorization header added) |
+| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (Session 17 — Audit Log tab, Security & Access section, MFA toggle, useMemo filter fix) — **refactor target Session 18** |
+| `cosmos-dashboard/app/lib/auditLogger.ts` | ★ Verified-final (Session 17 — new file) |
+| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 17 — PIN lockout + TOTP MFA + audit logging) |
+| `cosmos-dashboard/app/billing/BillerDashboard.tsx` | ★ Verified-final (Session 17 — audit logging added) |
+| `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (Session 17 — biller flag strip, audit logging) |
+| `cosmos-dashboard/app/patients/[patientId]/PatientProfile.tsx` | ★ Verified-final (Session 17 — NF-3 preflight, audit logging) |
+| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (Session 17 — biller flag alert card) |
+| `cosmos-dashboard/app/md/[patientId]/icd10/IcdReferral.tsx` | ★ Verified-final (Session 17 — Authorization header) |
+| `cosmos-dashboard/app/billing/page.tsx` | ★ Verified-final (Session 17 — biller flags with resolution columns) |
+| `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (Session 17 — queue subtitle updates) |
 | `cosmos-dashboard/app/dev/page.tsx` | ★ Verified-final (Session 15) |
-| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (Session 14) |
-| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 17 — PIN lockout + TOTP MFA with 30-day device trust) |
 | `cosmos-dashboard/app/components/ui/CosmosUI.tsx` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/hooks/useSessionTimeout.ts` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/md/[patientId]/mri/MriReferral.tsx` | ★ Verified-final (Session 13) |
@@ -282,6 +241,7 @@ for all commands if flag queries ever return unexpectedly empty.
 | `cosmos-dashboard/middleware.ts` | ★ Verified-final (prior session) |
 | `cosmos-dashboard/app/md/page.tsx` | ★ Verified-final (prior session) |
 | `cosmos-dashboard/app/lib/fonts.ts` | Obtained-current (prior session) |
+| `cosmos-dashboard/app/api/admin/users/route.ts` | ★ Verified-final (Session 17 — reset_mfa handler) |
 | `cosmos-api/forms/ans.py`, `icd10.py`, `pce.py`, `pt.py`, `rx.py`, `vng.py` | Only TEMPLATE line confirmed |
 | `cosmos-api/forms/nf2.py` | Never obtained |
 
@@ -289,57 +249,29 @@ for all commands if flag queries ever return unexpectedly empty.
 
 ## Lessons Learned (carried forward)
 
-- **`cat > file << 'ENDOFFILE'` heredoc is the reliable full-file write
-  method** — single-quoted delimiter prevents all bash expansion. `node -e`
-  inline and `sed` both break on `!` characters (bash history expansion).
-  Use `.js` patch script files written via heredoc and run via `node ~/patch.js`
-  for all structural replacements.
-- **Chrome silently saves re-downloads as `filename-1.ext`** — always run
-  `ls -lt ~/storage/downloads/filename*` before `cp` to confirm which copy
-  is newest. Or clear old copies with `rm -f` first.
-- **MFA `localStorage` device trust uses email-derived key** — key format: `cosmos_mfa_trusted_{email_normalized}`. Clearing localStorage or switching browsers forces re-challenge. 30-day expiry stored as Unix timestamp.
-- **Supabase `mfa.listFactors()` returns `factors.totp` array** — filter by `status === 'verified'` to find active factors. Unverified factors from incomplete enrollment still appear.
-- **`login_attempts` RLS must include `anon` role** — lockout tracking runs before the user is authenticated. An `authenticated`-only policy causes all inserts/selects to silently fail (RLS returns empty, no error), making the counter always show MAX attempts. Always add an `anon` policy for any table written to before login.
-- **Tailwind purge eliminates classes not present at build time** — when a
-  new Tailwind class is added to a component that previously didn't use it,
-  it may not appear in the generated CSS bundle. Use inline `style={{}}` as
-  the reliable fallback for one-off layout fixes on the Biller dashboard.
-- **`grep` multi-line fetch pattern gives false positives** — `grep "fetch("
-  | grep -v "Authorization"` misses auth headers on the next line. Always
-  verify by viewing the actual lines around the match before concluding a
-  header is missing.
-- **Biller W9 badge requires supervisor-chain resolution** — a simple
-  `doctor.w9_url` join is insufficient for supervised providers. Walk
-  `doctor → supervising_provider_id → supervisor.w9_url`.
-- **Dev generator Render cold-start pattern** — warm-up ping must fire before
-  each patient's referral batch, not just once at session start.
-- **`/tmp` does not persist in Termux** — patch scripts must always write
-  to `~/`, never `/tmp/`.
-- **`pathlib.Path.home()` returns `/root` in this environment** — use
-  `os.path.expanduser('~')` instead.
-- **React fragments (`<>`) inside a CSS grid don't create grid items** —
-  render message strips outside the grid container.
-- **`database.py` prefixes all doctor fields** — `license_number` becomes
-  `doctor_license_number` in `patient_data`.
-- **W9 is a billing entity document, not a provider document.**
-- **AOB assigns benefits to the billing entity, never the treating provider.**
-- **NF-3 Section 16 LICENSE field is not NPI.**
-- **`patients` primary key is `patient_id` (text)** — not `id`. Format: `PT457696`.
-- **Supervised providers legitimately have null mailing addresses** —
-  `database.py` resolves to supervisor at PDF time.
+- **`cat > file << 'ENDOFFILE'` heredoc is the reliable full-file write method**
+- **Chrome silently saves re-downloads as `filename-1.ext`** — always `ls -lt` before `cp`
+- **Tailwind purge eliminates classes not present at build time** — use inline `style={{}}` as fallback
+- **`grep` multi-line fetch pattern gives false positives** — view actual lines before concluding header is missing
+- **MFA `localStorage` device trust uses email-derived key** — clearing localStorage forces re-challenge
+- **Supabase `mfa.listFactors()` returns `factors.totp` array** — filter by `status === 'verified'`
+- **`login_attempts` RLS must include `anon` role** — lockout check runs before authentication
+- **Audit log DB triggers show "System" for user** — no PostgreSQL session context; use frontend `writeAuditLog()` for user-attributed events
+- **TanStack Table data prop must be memoized** — passing a non-memoized filtered array causes infinite re-renders and freezes; always wrap in `useMemo`
+- **Biller W9 badge requires supervisor-chain resolution**
+- **Dev generator Render cold-start pattern** — warm-up ping before each patient's referral batch
+- **`/tmp` does not persist in Termux** — use `~/`
+- **`pathlib.Path.home()` returns `/root`** — use `os.path.expanduser('~')`
+- **React fragments inside CSS grid don't create grid items**
+- **`database.py` prefixes all doctor fields** — `license_number` → `doctor_license_number`
+- **W9 is a billing entity document, not a provider document**
+- **AOB assigns benefits to the billing entity, never the treating provider**
+- **NF-3 Section 16 LICENSE field is not NPI**
+- **`patients` primary key is `patient_id` (text)** — format: `PT457696`
+- **Supervised providers legitimately have null mailing addresses**
 - **CosmosUI `toastSuccess`/`toastError` both route through `AlertModal`**
-  — the `ToastContainer` is mounted but all exported helpers use `_openAlert`.
-- **New screens must mount `<AlertModal />` and `<ConfirmModal />`** —
-  singleton global overlays; if not mounted, notifications silently fall
-  back to native `window.confirm`.
-- **`sessionStorage` reads must be in `useEffect`** — server-side renders
-  always return `''`.
-- **Bash history expansion breaks inline `python3 -c` with `!`** — always
-  use a patch script file for anchors containing `!`.
-- **Render env var changes trigger an automatic redeploy** — coordinate
-  backend and frontend deploys; backend must have `verify_jwt` before
-  frontend sends JWT headers.
-- **`~/storage/downloads/` writes can silently fail** — `git show HEAD:path
-  > ~/storage/downloads/file && echo "OK"` prints OK even when the write
-  fails. Always verify with `wc -l` or `ls`. Writing to `~/` directly is
-  the reliable fallback.
+- **New screens must mount `<AlertModal />` and `<ConfirmModal />`**
+- **`sessionStorage` reads must be in `useEffect`**
+- **Bash history expansion breaks inline `python3 -c` with `!`**
+- **Render env var changes trigger automatic redeploy**
+- **`~/storage/downloads/` writes can silently fail** — verify with `wc -l` or `ls`

@@ -1,3 +1,43 @@
+## 2026-07-05 — Session 18 prep / Session 17 final
+
+### Audit Log — full implementation (Enterprise Hardening Stage 2 complete)
+
+**Migration 023:** `audit_logs` table with indexes and RLS (authenticated
+SELECT + INSERT).
+
+**DB triggers** — `log_audit_event()` PLPGSQL function on 7 tables:
+`patients`, `patient_visits`, `visit_line_items`, `doctors`,
+`insurance_carriers`, `user_profiles`, `practice_settings`. Captures
+old/new data as jsonb. User attribution shows "System" — no PostgreSQL
+session context available in trigger functions.
+
+**`app/lib/auditLogger.ts`** — new shared helper. `writeAuditLog()` reads
+current session user + role from `user_profiles`, inserts attributed entry
+into `audit_logs`. Never throws — audit failures must not break main flow.
+
+**Frontend audit calls added to:**
+- `app/page.tsx` — login success, login failed (with attempts remaining),
+  MFA verified
+- `app/patients/[patientId]/PatientProfile.tsx` — NF-2/AOB generated,
+  NF-3 preflight confirmed, submitted to billing
+- `app/billing/BillerDashboard.tsx` — NF-3 generated, claim status changed,
+  received amount updated, MD flagged
+- `app/md/[patientId]/PatientChart.tsx` — visit created/updated, flag
+  accepted, flag rejected
+
+**Admin Audit Log tab** — new tab in Admin panel. shadcn/TanStack Table,
+last 500 entries newest-first, category filter chips, search, pagination.
+Fixed freeze: `useMemo` on filtered data (non-memoized array passed to
+`useReactTable` caused infinite re-render on filter chip tap).
+
+### Next session — Admin page refactor
+
+`app/admin/page.tsx` is ~2600 lines. First task Session 18: split into
+per-section components under `app/admin/components/`. Pure refactor,
+no functionality changes.
+
+---
+
 ## 2026-07-05 — Session 17 (final)
 
 ### MFA for admin/billing/superadmin
