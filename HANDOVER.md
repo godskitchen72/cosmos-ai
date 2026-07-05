@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 5, 2026, Session 17)
+# Cosmos Medical Technologies — HANDOVER (July 5, 2026, Session 17 continued)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -20,6 +20,17 @@ TypeScript errors.
 ---
 
 ## Completed This Session
+
+### PIN attempt lockout
+
+**Migration:** `login_attempts` table — `id`, `email`, `attempted_at`, `success`. Index on `email`. RLS: both `authenticated` and `anon` full access (anon required since lockout check runs before authentication).
+
+**`app/page.tsx`** — `handleLogin` updated:
+- Before attempting sign-in: queries `login_attempts` for failures since last success (or last 15 minutes)
+- 5+ failures → shows lockout message with minutes remaining, blocks login
+- Failed sign-in → inserts failure row, re-fetches count, shows "X attempts remaining"
+- Successful sign-in → inserts success row (resets effective failure count)
+- Lockout auto-expires after 15 minutes — no admin action needed
 
 ### W9 supervisor-chain deploy (carried from Session 15)
 
@@ -115,9 +126,7 @@ flexWrap:'nowrap' }}` rather than Tailwind classes.
    Upgrading to a paid always-on tier is the single biggest real-world
    speed improvement available.
 
-6. **Failed PIN attempt lockout** — Enterprise Hardening Stage 2 remainder.
-
-7. **MFA for admin and billing roles** — Enterprise Hardening Stage 2.
+6. **MFA for admin and billing roles** — Enterprise Hardening Stage 2 remainder.
 
 ---
 
@@ -132,7 +141,7 @@ flexWrap:'nowrap' }}` rather than Tailwind classes.
 ### Stage 2 — Security
 - [x] API JWT authentication on all `cosmos-api` endpoints (Session 13)
 - [x] Session timeout / auto sign-out after inactivity (Session 13)
-- [ ] Failed PIN attempt lockout
+- [x] Failed PIN attempt lockout (Session 17 — `login_attempts` table, 5 attempts / 15 min window)
 - [ ] MFA for admin and billing roles
 - [ ] HIPAA BAA with Supabase
 - [ ] Audit log table (who changed what, when)
@@ -228,7 +237,7 @@ for all commands if flag queries ever return unexpectedly empty.
 | `cosmos-dashboard/app/md/[patientId]/icd10/IcdReferral.tsx` | ★ Verified-final (Session 17 — Authorization header added) |
 | `cosmos-dashboard/app/dev/page.tsx` | ★ Verified-final (Session 15) |
 | `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (Session 14) |
-| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 14) |
+| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 17 — PIN lockout, 5 attempts / 15 min window) |
 | `cosmos-dashboard/app/components/ui/CosmosUI.tsx` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/hooks/useSessionTimeout.ts` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/md/[patientId]/mri/MriReferral.tsx` | ★ Verified-final (Session 13) |
@@ -270,6 +279,7 @@ for all commands if flag queries ever return unexpectedly empty.
 - **Chrome silently saves re-downloads as `filename-1.ext`** — always run
   `ls -lt ~/storage/downloads/filename*` before `cp` to confirm which copy
   is newest. Or clear old copies with `rm -f` first.
+- **`login_attempts` RLS must include `anon` role** — lockout tracking runs before the user is authenticated. An `authenticated`-only policy causes all inserts/selects to silently fail (RLS returns empty, no error), making the counter always show MAX attempts. Always add an `anon` policy for any table written to before login.
 - **Tailwind purge eliminates classes not present at build time** — when a
   new Tailwind class is added to a component that previously didn't use it,
   it may not appear in the generated CSS bundle. Use inline `style={{}}` as
