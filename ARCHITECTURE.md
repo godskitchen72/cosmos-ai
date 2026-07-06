@@ -80,7 +80,10 @@ trusting any read/write path "just works," especially for newly-added
 columns.
 
 `sql/` migration history (numbered, sequential, already run against the
-live database unless noted otherwise in `HANDOVER.md`):
+live database unless noted otherwise in `HANDOVER.md`). **Migrations
+001–019 exist as `.sql` files on disk. Migrations 020+ were run directly
+in the Supabase dashboard SQL editor — no corresponding on-disk files
+exist for these.**
 - `001_rls_policy_fixes.sql`
 - `002_cleanup_duplicate_line_items.sql`
 - `003_rls_audit_query.sql` — verification query, safe to re-run anytime
@@ -100,6 +103,10 @@ live database unless noted otherwise in `HANDOVER.md`):
 - `017_rls_hardening.sql` — all `anon`/`public` policies removed; every table locked to `authenticated` only (Session 12)
 - `018_not_null_constraints.sql` — `doctors.license_number`, `doctors.npi`, `doctors.mailing_state`, `patient_forms.form_type` constrained NOT NULL (Session 12)
 - `019_session_timeout.sql` — `practice_settings.session_timeout_minutes int NOT NULL DEFAULT 15` (Session 13)
+- 020 — `login_attempts` table (`id`, `email`, `attempted_at`, `success`); index on `email`; RLS `authenticated` + `anon` full access (anon required — lockout check runs pre-auth) (Session 17)
+- 021 — `practice_settings.mfa_required boolean DEFAULT false` (Session 17)
+- 022 — `patient_visits.nf3_preflight_passed boolean DEFAULT false`; NF-3 workflow preflight columns (Session 17)
+- 023 — `audit_logs` table (`id`, `created_at`, `user_id`, `user_role`, `action`, `entity_type`, `entity_id`, `old_data jsonb`, `new_data jsonb`, `ip_address`); indexes; RLS `authenticated` SELECT + INSERT; DB triggers on 7 tables (Session 17/18)
 
 Key tables referenced throughout the codebase: `patients`,
 `patient_visits` (visit-scoped data, including `cpt_codes`/`icd10_codes`,
