@@ -1,4 +1,82 @@
+## 2026-07-06 — Session 20
+
+### PatientChart.tsx refactor
+
+`app/md/[patientId]/PatientChart.tsx` (1328 lines) split into 6 files.
+New `components/` directory created under `app/md/[patientId]/`.
+
+- `PatientChart.tsx` — shell: tab router, header, visits/tx state (~120 lines)
+- `chart-shared.tsx` — shared types, `getAuthToken`, `getTx`, `CustomCombo`, `CodeMultiPicker`, `QuickNotePicker`, style constants
+- `components/VisitTab.tsx` — visit/PCE/CPT/ICD-10/flag/billing logic
+- `components/ReferralGrid.tsx` — referral type cards + psych referral
+- `components/VisitHistoryTab.tsx` — history list + visit sheet drawer
+- `components/PatientInfoTab.tsx` — DOA/insurance/pain scores
+
+**Bug fixes in VisitTab:**
+- `pceData` now hydrates from existing `v.pce_data` when `visit_id` in URL
+- `visitDate` hydrates from existing visit record
+- Patient status normalized on init (`'Active Treatment'` → `'Active'`)
+- All native `<select>` dropdowns replaced with `QuickNotePicker`
+- Update Status replaced with styled button group
+- ICD-10 description lookup fixed (case-insensitive trim)
+- DEV fill-all PCE test button added (remove before go-live)
+
+### ReferralGrid completion indicators
+
+`ReferralGrid.tsx` queries `patient_forms` on mount filtered by `visit_id`.
+Cards highlight cyan with `✓` when `form_type` matched. ICD-10 checks
+`icd10_codes` presence on visit record. Psych checks `patient_visits.psych_referral`.
+Psych state updates optimistically on toggle.
+
+### Admin CPT/ICD-10 data quality
+
+Warning badges (`⚠️ No description`, `⚠️ No fee`) added to both sections.
+Section-level banner shows count of affected codes.
+
+### CSV import Replace mode
+
+`＋ Append` / `⟳ Replace All` toggle added to both import preview cards.
+Red warning banner and red confirm button when Replace mode selected.
+
+**CPT import parser fix:** `icdKey`/`diagKey` no longer fall back to
+positional columns — Supabase backup exports were misread (fee values
+treated as ICD-10 codes). Fix: only auto-import ICD-10 if explicit
+`icd10_code` header present.
+
+**`null` fee_varies fix:** Supabase exports use literal `"null"` string —
+parser now treats `"null"` as `fee_varies = true`.
+
+### Admin action confirmations
+
+`toastSuccess`/`toastError` added to all save, delete, and import actions
+in `CptCodesSection.tsx` and `Icd10Section.tsx`.
+
+### DashboardClient.tsx CosmosUI migration
+
+Two bare `alert()` calls replaced with `toastError()`. `<AlertModal />` and
+`<ConfirmModal />` mounted. FD dashboard previously had no CosmosUI modals.
+
+### NF-2 signature injection fix
+
+`cosmos-api/forms/nf2.py`: Fixed key from `signature_url` →
+`patient_signature_url`. Patient signature was always in `patient_data`
+but never injected due to wrong key.
+
+`app/patients/[patientId]/PatientProfile.tsx`: `canGenerateNF2` now requires
+`patient_signature_url`. NF-2 blocked with `"Missing: Signature"` when
+no signature on file.
+
+### Documentation updates
+
+- `ARCHITECTURE.md §3`: Migrations 020–023 added; note on-disk files only
+  exist for 001–019
+- `AI_STYLE_GUIDE.md §2`: CosmosUI notification standard documented
+- `HANDOVER.md`: Session 20 lessons learned added
+
+---
+
 ## 2026-07-05 — Session 19 (final)
+
 
 ### FD submit button fix
 

@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 5, 2026, Session 19 — final)
+# Cosmos Medical Technologies — HANDOVER (July 6, 2026, Session 20 — final)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -13,115 +13,121 @@ self-contained.
 
 ## Current Status
 
-All `cosmos-dashboard` commits confirmed deployed via `tsc --noEmit` + full
-deploy chain. Live app confirmed healthy at session close. No outstanding
-TypeScript errors.
+All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed via
+`tsc --noEmit` + full deploy chain. Live app confirmed healthy at session
+close. No outstanding TypeScript errors.
 
 ---
 
-## Completed This Session (Session 19)
+## Completed This Session (Session 20)
 
-### Admin sidebar nav — complete
+### PatientChart.tsx refactor — complete
 
-`app/admin/page.tsx` updated to replace the horizontal tab strip with a
-collapsible left sidebar. All 8 section components and `shared.tsx`
-are unchanged — layout change only.
+`app/md/[patientId]/PatientChart.tsx` split from 1328 lines into 6 files:
 
-**Design decisions confirmed:**
-- Pattern: collapsible toggle (☰ / ✕ button in header)
-- Collapsed state: sidebar fully hidden — full content width
-- Expanded state: 200px left rail, labels only (no icons, emoji stripped)
-- Default: expanded on first load
-- Persistence: `localStorage` key `cosmos_admin_sidebar_open`
-- Scope this session: Admin only — FD, MD, Biller deferred to a future session
+- `PatientChart.tsx` — shell only (~120 lines): tab router, header, visits state
+- `chart-shared.tsx` — shared types, interfaces, `getAuthToken`, `getTx`, `CustomCombo`, `CodeMultiPicker`, `QuickNotePicker`, style constants
+- `components/VisitTab.tsx` — all visit/PCE/CPT/ICD-10/flag/billing logic
+- `components/ReferralGrid.tsx` — 9 referral type cards + psych referral
+- `components/VisitHistoryTab.tsx` — history list + visit sheet drawer
+- `components/PatientInfoTab.tsx` — DOA/insurance/pain scores display
 
 **Implementation notes:**
-- `stripEmoji()` helper strips Unicode emoji prefix from `NAV_TABS` labels
-  for sidebar display — `NAV_TABS` data itself is unchanged
-- Active tab: cyan left border (`2px solid #00cfff`) + cyan text
-- Hover state: inline `onMouseEnter`/`onMouseLeave` (Tailwind purge avoidance)
-- Sidebar is `sticky top-[52px]` with `height: calc(100vh - 52px)` —
-  scrolls independently of content
-- Body layout: `flex` row — sidebar + `flex-1 min-w-0` content area
-- `admin-tab` custom event listener preserved intact
-- Header button order corrected: ← Back before ⇄ Sign Out (was reversed)
+- `components/` directory created under `app/md/[patientId]/`
+- `pceData` now hydrates from `v.pce_data` when `visit_id` is in URL — existing visit data loads correctly on return
+- `visitDate` also hydrates from existing visit record
+- DEV fill-all PCE test button added to `VisitTab.tsx` — always visible, remove before go-live
+- All native `<select>` dropdowns replaced with `QuickNotePicker` (custom styled dropdown in `chart-shared.tsx`)
+- Update Status replaced with styled button group (color-coded per status)
+- Patient status normalized on init — `'Active Treatment'` maps to `'Active'`
 
-### CPT and ICD-10 section fixes — complete
+### ReferralGrid cyan completion indicators — complete
 
-**Edit form visibility** (`CptCodesSection.tsx`, `Icd10Section.tsx`):
-Edit form moved from bottom to top of section. `useRef` +
-`scrollIntoView({ behavior: 'smooth', block: 'start' })` fires on
-`editing` state change. Root cause: sidebar layout introduced an
-independent scroll context — bottom-rendered form appeared below
-the mobile viewport, making Edit appear to do nothing.
+`ReferralGrid.tsx` queries `patient_forms` on mount filtered by `visit_id`.
+Cards with matching `form_type` highlight cyan with `✓` checkmark. Psych
+referral and ICD-10 use separate DB queries (`patient_visits.psych_referral`
+and `icd10_codes` presence). Psych state updates optimistically on toggle.
 
-**CPT price layout** (`CptCodesSection.tsx`):
-Price moved inline after CPT code badge — `[98940] $68.15` on one row,
-description below. Eliminates one row per card.
+**form_type mapping:** `MRI`, `RX`, `DME`, `PT`, `VNG`, `ANS`, `ORTHO`,
+`PAIN-MGMT`. ICD-10 uses `icd10_codes` presence check (no `patient_forms`
+record). Psych uses `patient_visits.psych_referral` boolean.
 
-**Active/Inactive toggle** (both sections):
-`<input type="checkbox">` replaced with a styled pill button.
-`● Active` (green `#19a866`) / `○ Inactive` (red `#e74c3c`).
-Checkbox was visually ambiguous on dark theme.
+### Admin CPT/ICD-10 data quality warnings — complete
 
-**ICD-10 download template** (`Icd10Section.tsx`):
-`⬇ Download Import Template` link added matching the CPT section pattern.
-Template columns: `code, description, category`. Two format example rows
-(one Cervical, one Lumbar).
+`CptCodesSection.tsx`, `Icd10Section.tsx`: Warning badges added:
+- ICD-10: `⚠️ No description` if `description` blank or equals code
+- CPT: `⚠️ No fee` if fee is 0/null and `fee_varies = false`
+- CPT: `⚠️ No description` if description blank
+- Section-level banner shows count of affected codes
 
-**CPT download template updated** (`CptCodesSection.tsx`):
-Hardcoded blob updated from placeholder data to real NY No-Fault codes
-with accurate fee schedule amounts and linked ICD-10s.
+### CSV import Replace mode — complete
 
-### FD submit button fix — complete
+Both sections now show `＋ Append` / `⟳ Replace All` toggle in import
+preview. Replace mode deletes all existing codes before upserting.
+Red warning banner shown when Replace selected. Confirm button turns red.
 
-`PatientProfile.tsx`: After successful billing submission,
-`setLocalVisits` now stamps submitted visits with `submitted_to_billing_at`
-in local state immediately. `readyVisits` filters them out — button
-disappears instantly without waiting for `router.refresh()`. Success
-toast added confirming visit count submitted.
+**CPT import parser fix:** `icdKey` and `diagKey` no longer fall back to
+positional columns when no `icd10_code` header exists — Supabase backup
+exports were misread (fee values treated as ICD-10 codes). Fix: only
+auto-import ICD-10 if explicit `icd10_code` column present in CSV headers.
 
-### Login performance optimization — complete
+**`null` fee_varies fix:** Supabase exports use literal string `"null"` for
+null fees — parser now treats `"null"` as `fee_varies = true`.
 
-`app/page.tsx` — two changes:
+### Admin action confirmations — complete
 
-**Merged duplicate `practice_settings` fetch:** `checkAndHandleMfa` previously
-fetched `mfa_required`, then called `handlePostLogin` which fetched
-`session_timeout_minutes` separately — two round-trips to the same table.
-Now a single query fetches both columns. `handlePostLogin` accepts an optional
-`sessionTimeoutMinutes` parameter; when pre-fetched it skips the DB call.
-MD/PA/NP path unchanged — they are not in `MFA_ROLES` and still fetch
-`session_timeout_minutes` independently in `handlePostLogin`.
+`CptCodesSection.tsx`, `Icd10Section.tsx`: `toastSuccess`/`toastError` added
+to all save, delete, and import actions. Import success message includes count
+and mode (Imported/Replaced). All error paths covered.
 
-**Parallelized lockout pre-check:** Two sequential `login_attempts` queries
-(last success + recent fails) replaced with a single `Promise.all`. Saves
-one sequential round-trip on every login attempt.
+### DashboardClient.tsx CosmosUI migration — complete
 
-**Infrastructure analysis completed:** Supabase on `us-east-2` (Ohio),
-Vercel Hobby on `us-east-1` (Virginia) — ~50ms cross-region gap, not
-a meaningful bottleneck. Render on $7 Starter plan — always-on confirmed.
-Remaining latency is Vercel Hobby cold starts on first load after idle
-(unavoidable without Vercel Pro upgrade).
+`app/dashboard/DashboardClient.tsx`: Two bare `alert()` calls replaced with
+`toastError()`. `<AlertModal />` and `<ConfirmModal />` mounted. Previously
+FD dashboard had no CosmosUI modals mounted — `cosmosConfirm()` would have
+silently fallen back to native `window.confirm()`.
+
+### NF-2 signature injection fix — complete
+
+`cosmos-api/forms/nf2.py`: Signature key fixed from `signature_url` to
+`patient_signature_url` — the correct DB column name. Patient signature was
+always present in `patient_data` but never injected because the wrong key
+was read.
+
+`app/patients/[patientId]/PatientProfile.tsx`: `canGenerateNF2` now requires
+`patient_signature_url`. NF-2 generation blocked with `"Missing: Signature"`
+message when no patient signature on file.
+
+### ARCHITECTURE.md migration gap — resolved
+
+Migrations 020–023 added to `ARCHITECTURE.md §3`. Note added clarifying
+that 001–019 exist as `.sql` files on disk; 020+ were run directly in the
+Supabase dashboard SQL editor — no on-disk files exist for these.
+
+### CosmosUI notification standard — documented
+
+`AI_STYLE_GUIDE.md §2` updated with the notification standard:
+- Single-record CRUD → `toastSuccess`/`toastError`
+- Bulk operations, destructive completions, errors requiring acknowledgment → `AlertModal`
+- Note: `toastSuccess` internally routes through `AlertModal` (confirmed in `CosmosUI.tsx` line 21)
 
 ---
 
 ## Open Items, Priority Order
 
-1. **Sidebar rollout to FD, MD, Biller** — template proven in Admin. Mechanical
-   repetition of the same pattern. Product decision: do all three in one session
-   or one at a time.
+1. **Sidebar rollout to FD, MD, Biller** — Admin pattern proven. Mechanical
+   repetition. Product decision: all three in one session or one at a time.
 
-2. **Signed URL caching** — deferred by explicit product decision.
+2. **DEV fill-all PCE button** — remove from `VisitTab.tsx` before go-live.
 
-3. **Doctor mailing address data** — Gottesman and Kramer placeholders.
-   Required for NF-3/W9 accuracy in production.
+3. **Signed URL caching** — deferred by explicit product decision.
 
-4. **`patients.doctor_id` NOT NULL** — deferred to pre-production.
+4. **Doctor mailing address data** — Gottesman and Kramer placeholders.
+   Test environment only — not urgent until go-live.
 
-5. **Render "always on"** — confirmed on $7 plan, already resolved.
+5. **`patients.doctor_id` NOT NULL** — deferred to pre-production.
 
-6. **Vercel Pro upgrade** — eliminates cold starts, adds region control.
-   Worth doing at go-live. Not urgent now.
+6. **Vercel Pro upgrade** — eliminates cold starts. Worth doing at go-live.
 
 ---
 
@@ -223,8 +229,9 @@ before user is authenticated.
 **Admin sidebar `localStorage`:** Key `cosmos_admin_sidebar_open`. Defaults
 to expanded (`true`) on first load if key is absent.
 
-**`ARCHITECTURE.md` migration list gap:** Migrations 020–023 are missing
-from `ARCHITECTURE.md §3`. Should be added next time that document is updated.
+**`ARCHITECTURE.md` migration list gap:** Resolved Session 20 — migrations
+020–023 added. Note: 001–019 exist as `.sql` files on disk; 020+ were run
+directly in Supabase dashboard SQL editor — no on-disk files.
 
 **Edit form scroll context:** CPT and ICD-10 edit forms must render at top
 of section — sidebar layout makes bottom-rendered forms scroll out of mobile
@@ -243,12 +250,22 @@ separately in `handlePostLogin` (no MFA check for those roles).
 
 | File | Confidence |
 |---|---|
+| `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (Session 20 — refactored to shell) |
+| `cosmos-dashboard/app/md/[patientId]/chart-shared.tsx` | ★ Verified-final (Session 20 — new file) |
+| `cosmos-dashboard/app/md/[patientId]/components/VisitTab.tsx` | ★ Verified-final (Session 20 — new file) |
+| `cosmos-dashboard/app/md/[patientId]/components/ReferralGrid.tsx` | ★ Verified-final (Session 20 — new file) |
+| `cosmos-dashboard/app/md/[patientId]/components/VisitHistoryTab.tsx` | ★ Verified-final (Session 20 — new file) |
+| `cosmos-dashboard/app/md/[patientId]/components/PatientInfoTab.tsx` | ★ Verified-final (Session 20 — new file) |
+| `cosmos-dashboard/app/admin/components/CptCodesSection.tsx` | ★ Verified-final (Session 20 — warning badges, Replace mode, parser fix, toasts) |
+| `cosmos-dashboard/app/admin/components/Icd10Section.tsx` | ★ Verified-final (Session 20 — warning badges, Replace mode, toasts) |
+| `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (Session 20 — alert() replaced, AlertModal/ConfirmModal mounted) |
+| `cosmos-dashboard/app/patients/[patientId]/PatientProfile.tsx` | ★ Verified-final (Session 20 — NF-2 requires signature) |
+| `cosmos-api/forms/nf2.py` | ★ Verified-final (Session 20 — patient_signature_url key fix) |
+| `cosmos-ai/ARCHITECTURE.md` | ★ Verified-final (Session 20 — migrations 020–023 added) |
+| `cosmos-ai/AI_STYLE_GUIDE.md` | ★ Verified-final (Session 20 — CosmosUI notification standard added §2) |
 | `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 19 — merged practice_settings fetch, parallelized lockout queries) |
-| `cosmos-dashboard/app/patients/[patientId]/PatientProfile.tsx` | ★ Verified-final (Session 19 — submit button local state fix) |
 | `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (Session 19 — sidebar nav) |
-| `cosmos-dashboard/app/admin/components/CptCodesSection.tsx` | ★ Verified-final (Session 19 — edit top-mount, price inline, toggle pill, template updated) |
-| `cosmos-dashboard/app/admin/components/Icd10Section.tsx` | ★ Verified-final (Session 19 — edit top-mount, toggle pill, download template added) |
-| `cosmos-dashboard/app/admin/shared.tsx` | ★ Verified-final (Session 18 — unchanged Session 19) |
+| `cosmos-dashboard/app/admin/shared.tsx` | ★ Verified-final (Session 18 — unchanged Session 20) |
 | `cosmos-dashboard/app/admin/components/OverviewSection.tsx` | ★ Verified-final (Session 18) |
 | `cosmos-dashboard/app/admin/components/CarriersSection.tsx` | ★ Verified-final (Session 18) |
 | `cosmos-dashboard/app/admin/components/DoctorsSection.tsx` | ★ Verified-final (Session 18) |
@@ -257,11 +274,10 @@ separately in `handlePostLogin` (no MFA check for those roles).
 | `cosmos-dashboard/app/admin/components/AuditLogSection.tsx` | ★ Verified-final (Session 18) |
 | `cosmos-dashboard/app/lib/auditLogger.ts` | ★ Verified-final (Session 17) |
 | `cosmos-dashboard/app/billing/BillerDashboard.tsx` | ★ Verified-final (Session 17) |
-| `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (Session 17) |
 | `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (Session 17) |
 | `cosmos-dashboard/app/md/[patientId]/icd10/IcdReferral.tsx` | ★ Verified-final (Session 17) |
 | `cosmos-dashboard/app/billing/page.tsx` | ★ Verified-final (Session 17) |
-| `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (Session 17) |
+| `cosmos-dashboard/app/api/admin/users/route.ts` | ★ Verified-final (Session 17) |
 | `cosmos-dashboard/app/dev/page.tsx` | ★ Verified-final (Session 15) |
 | `cosmos-dashboard/app/components/ui/CosmosUI.tsx` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/hooks/useSessionTimeout.ts` | ★ Verified-final (Session 13) |
@@ -288,9 +304,7 @@ separately in `handlePostLogin` (no MFA check for those roles).
 | `cosmos-dashboard/middleware.ts` | ★ Verified-final (prior session) |
 | `cosmos-dashboard/app/md/page.tsx` | ★ Verified-final (prior session) |
 | `cosmos-dashboard/app/lib/fonts.ts` | Obtained-current (prior session) |
-| `cosmos-dashboard/app/api/admin/users/route.ts` | ★ Verified-final (Session 17) |
 | `cosmos-api/forms/ans.py`, `icd10.py`, `pce.py`, `pt.py`, `rx.py`, `vng.py` | Only TEMPLATE line confirmed |
-| `cosmos-api/forms/nf2.py` | Never obtained |
 
 ---
 
@@ -333,4 +347,10 @@ separately in `handlePostLogin` (no MFA check for those roles).
 - **Submit button persistence after action** — after any Supabase update that changes list membership, always update local state immediately; never rely on `router.refresh()` alone
 - **Login perf: merge parallel `practice_settings` reads** — when two functions call the same table sequentially, combine into one query and pass the result as a parameter
 - **CosmosUI notification standard (Session 20)**: single-record CRUD → `toastSuccess`/`toastError`; bulk operations, destructive completions, errors requiring acknowledgment → `AlertModal`. Rule documented in `AI_STYLE_GUIDE.md §2`.
+- **`toastSuccess` routes through `AlertModal`** — `CosmosUI.tsx` line 21: both `toastSuccess` and `toastError` call `_openAlert`. No separate toast UI for success — all notifications require acknowledgment.
+- **NF-2 signature key mismatch** — `nf2.py` read `signature_url`; DB column is `patient_signature_url`. Always verify field keys against DB column names, not assumed naming patterns.
+- **CPT CSV import parser fallback** — positional column fallback (`?? headers[N]`) causes silent misreads when column count differs from expected. Always require explicit header match; never fall back to position.
+- **Supabase CSV export uses `"null"` string** — not Python `None` or empty. Parser must treat literal `"null"` as null/missing value.
+- **`pceData` must hydrate from existing visit on load** — initialize `useState` from `initialVisits.find(v => v.id === visitIdParam)?.pce_data` when `visitIdParam` present; default `{}` only for new visits.
+- **`patient_signature_url` required for NF-2** — both frontend block and backend key corrected this session.
 - **Supabase region: `us-east-2` (Ohio) / Vercel: `us-east-1` (Virginia)** — ~50ms gap, not a meaningful bottleneck at current scale
