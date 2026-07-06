@@ -119,6 +119,26 @@ only:
 - Reuse existing components; read a component's actual source before
   assuming visual similarity implies implementation similarity.
 
+**CosmosUI Notification Standard** — established Session 20; applies to
+all roles and all screens:
+- **Single-record CRUD** (save, delete, add) → `toastSuccess()` /
+  `toastError()`. These are transient; they confirm an action worked
+  and dismiss automatically. No modal needed — the user acted, it
+  worked, they move on.
+- **Bulk operations** (CSV import, batch actions), **destructive
+  completions** (Replace All), and **errors requiring attention** →
+  `AlertModal` (cyan-bordered, requires acknowledgment). The user needs
+  to read and confirm the result — e.g. "Replaced with 34 CPT codes."
+- **The distinction**: does the user need to *acknowledge* this result,
+  or just be *informed* of it? Acknowledge → `AlertModal`. Informed →
+  toast.
+- `toastSuccess` and `toastError` both internally route through
+  `AlertModal` — they are not separate UI primitives, just convenience
+  wrappers (confirmed in `HANDOVER.md` Lessons Learned).
+- Every new screen must mount both `<AlertModal />` and
+  `<ConfirmModal />` at its root — without them, `cosmosConfirm()` and
+  toast calls silently fail.
+
 **Typography**: no app-wide font standard exists — default browser/
 system font everywhere except the Biller dashboard, which loads Oxanium
 (weights 300–800, default Light) via a shared module
