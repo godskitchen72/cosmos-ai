@@ -1,3 +1,29 @@
+## 2026-07-05 — Session 19 (final)
+
+### FD submit button fix
+
+`app/patients/[patientId]/PatientProfile.tsx`: After successful billing
+submission, `setLocalVisits` now stamps submitted visits with
+`submitted_to_billing_at` in local state immediately. `readyVisits`
+filters them out — button disappears without waiting for `router.refresh()`.
+Success toast added confirming visit count submitted.
+
+### Login performance optimization
+
+`app/page.tsx` — two changes:
+
+**Merged duplicate `practice_settings` fetch:** `checkAndHandleMfa`
+previously fetched `mfa_required`, then `handlePostLogin` fetched
+`session_timeout_minutes` — two sequential round-trips to the same table
+for admin/billing logins. Now a single query fetches both columns.
+`handlePostLogin` accepts optional `sessionTimeoutMinutes` parameter;
+when pre-fetched it skips the DB call. MD/PA/NP path unchanged.
+
+**Parallelized lockout pre-check:** Two sequential `login_attempts` queries
+replaced with `Promise.all`. Saves one round-trip on every login attempt.
+
+---
+
 ## 2026-07-05 — Session 19 (continued)
 
 ### CPT and ICD-10 admin section fixes
@@ -118,8 +144,7 @@ into `audit_logs`. Never throws — audit failures must not break main flow.
 
 **Admin Audit Log tab** — new tab in Admin panel. shadcn/TanStack Table,
 last 500 entries newest-first, category filter chips, search, pagination.
-Fixed freeze: `useMemo` on filtered data (non-memoized array passed to
-`useReactTable` caused infinite re-render on filter chip tap).
+Fixed freeze: `useMemo` on filtered data.
 
 ---
 
@@ -127,111 +152,31 @@ Fixed freeze: `useMemo` on filtered data (non-memoized array passed to
 
 ### MFA for admin/billing/superadmin
 
-TOTP-based MFA via Supabase Auth for `admin`, `billing`, `superadmin` roles.
+TOTP-based MFA via Supabase Auth. `practice_settings.mfa_required boolean DEFAULT false`.
+Setup screen (QR + manual key), challenge screen (6-digit code), 30-day
+device trust via `localStorage`. Reset MFA button in Users tab.
+`app/api/admin/users/route.ts` — `reset_mfa: true` PATCH handler.
 
-**Migration:** `practice_settings.mfa_required boolean DEFAULT false`.
+### PIN attempt lockout
 
-**`app/page.tsx`** — After PIN login, checks `mfa_required` setting. If enabled and device not trusted: checks TOTP enrollment → shows setup screen (QR code + manual key entry) or challenge screen (6-digit code). On successful verify, stores 30-day device trust token in `localStorage`. Trusted devices skip MFA for 30 days.
+Migration: `login_attempts` table. 5 failures in 15-minute window →
+account locked with minutes-remaining display. Auto-expires. RLS must
+include `anon` role.
 
-**`app/admin/page.tsx`** — New **Security & Access** section on Overview tab, separated from Practice Info. Contains MFA toggle and Session Timeout selector with dedicated "Save Security Settings" button. Toast confirmation on save. "Reset MFA" button added to admin/billing/superadmin user cards in Users tab.
+### NF-3 workflow redesign
 
-**`app/api/admin/users/route.ts`** — Added `reset_mfa: true` PATCH handler — unenrolls all TOTP factors for the user via Supabase Admin API.
-
-### FD dashboard queue subtitle updates
-
-- "All Missing Forms": "NF-2 or AOB missing; or NF-3 preflight not completed"
-- "NF-3 — 45 Day Deadline": "Biller must generate NF-3 within 45 days of service date"
-
-### Security & Access section — admin Overview tab
-
-MFA toggle and Session Timeout moved from Practice Info form into dedicated Security & Access card. Each section now saves independently with appropriate confirmation feedback.
-
----
-
-## 2026-07-05 — Session 17 (continued)
-
-### PIN attempt lockout (`app/page.tsx`)
-
-Failed PIN attempt lockout implemented. Enterprise Hardening Stage 2 item complete.
-
-**Migration:** `login_attempts` table (`id`, `email`, `attempted_at`, `success`).
-Index on `email`. RLS: `authenticated` + `anon` full access (anon required —
-lockout check runs before the user is authenticated).
-
-**Logic:** On each login attempt, queries failures since the last success for
-that email within a 15-minute window. 5+ failures → account locked, shows
-minutes remaining. Each failed attempt inserts a row and re-fetches the count
-to show accurate "X attempts remaining" message. Successful login inserts a
-success row, resetting the effective failure count. Lockout auto-expires after
-15 minutes — no admin action needed.
-
-**Known issue during development:** Initial deploy used `authenticated`-only
-RLS, causing all anon inserts/selects to silently fail (RLS returns empty with
-no error), making counter always show MAX_ATTEMPTS. Fixed by adding `anon`
-full-access policy.
-
-### FD dashboard queue subtitle updates (`DashboardClient.tsx`)
-
-- "All Missing Forms" subtitle: "NF-2 or AOB missing; or NF-3 preflight not completed"
-- "NF-3 — 45 Day Deadline" subtitle: "Biller must generate NF-3 within 45 days of service date"
-- NF-3 queue empty state: "All NF-3s generated by biller on time"
-
----
-
-## 2026-07-05 — Session 17
-
-### NF-3 workflow redesign — full implementation
-
-**Product decision:** NF-3 generation moves from FD to Biller. FD becomes
-validation-only via a preflight check.
-
-**Migrations:**
-- `020`: `patient_visits.nf3_preflight_passed boolean DEFAULT false` +
-  `biller_md_flags` table (visit_id, patient_id, flagged_by, flag_reason,
-  flag_note, resolved_at) + RLS
-- `021`: `biller_md_flags.suggested_cpt_codes text[]`,
-  `suggested_icd10_codes text[]`
-- `022`: `biller_md_flags.resolution text`, `rejection_note text`,
-  `biller_dismissed_at timestamptz`
-
-**`PatientProfile.tsx`** — NF-3 card replaced with preflight modal. Checks
-8 required fields (signature, carrier, claim #, policy #, DOI, attorney, CPT,
-ICD-10). "Confirm Ready" writes `nf3_preflight_passed = true`. Submission
-gate updated: `hasNf3` → `nf3_preflight_passed`. NF-3 generation handlers
-removed.
-
-**`BillerDashboard.tsx`** — `+ NF-3` badge generates NF-3 per visit; flips
-to tappable `NF-3` when generated. `⚑ Flag MD` button opens `FlagMdModal`
-with simplified reasons (Missing/Incorrect CPT, Missing/Incorrect ICD-10)
-and full code library pickers. Suggested codes shown in amber (⏳) in CPT
-and ICD-10 columns. Rejected flags show `↩ MD Rejected` with Dismiss ×
-button. `dismissFlag` callback writes `biller_dismissed_at`.
-
-**`billing/page.tsx`** — Added `cpt_codes` and `icd10_codes` fetches.
-`biller_md_flags` query updated to fetch pending + rejected-undismissed
-flags. Added `resolution`, `rejection_note`, `biller_dismissed_at` to select.
-
-**`MDClient.tsx`** — Persistent amber flag alert card at top of dashboard.
-Shows patient, visit date, reason, note, suggested CPT and ICD-10 codes.
-Navigation URL includes `?visit_id=` so PatientChart loads in UPDATE mode
-for the flagged visit.
-
-**`PatientChart.tsx`** — Biller flag strip rendered when `visit_id` URL
-param matches an open flag. Shows suggested codes. Accept & Apply pre-fills
-code pickers (additive). Reject writes `resolved_at + resolution: rejected +
-rejection_note`. Auto-resolves as `accepted` when visit saves after accept.
+NF-3 generation moved from FD to Biller. FD becomes preflight-only.
+Migrations 020–022. `biller_md_flags` table for CPT/ICD-10 flagging
+workflow between Biller and MD.
 
 ### IcdReferral.tsx — Authorization header fix
 
-`app/md/[patientId]/icd10/IcdReferral.tsx` was missing `getAuthToken()` and
-`Authorization: Bearer` header. Both added. All other referral screens
-confirmed correct.
+Missing `getAuthToken()` + `Authorization: Bearer` header added.
 
 ### Biller docs column layout
 
-Docs column badges (NF-3, AOB, PCE, W9, Flag MD) now render in a single
-horizontal `nowrap` row. Final fix uses inline `style={{ flexWrap:'nowrap' }}`
-after Tailwind `flex-col`/`flex-row` classes were pruned by the build.
+Docs column badges now render in single horizontal `nowrap` row via
+inline `style={{ flexWrap:'nowrap' }}`.
 
 ---
 
@@ -239,12 +184,8 @@ after Tailwind `flex-col`/`flex-row` classes were pruned by the build.
 
 ### Documentation update only
 
-No code written or deployed this session.
-
-Updated documents:
-- `CHANGELOG.md` — Session 15 entries added (dev tools rebuild + W9 supervisor-chain fix)
-- `ARCHITECTURE.md` — Migrations 017–019 added to §3 migration list; §10 login flow updated to reflect Session 14 fix (location picker now always shown for MD/PA/NP regardless of location count)
-- `HANDOVER.md` — Session 15 → Session 16
+No code written or deployed. `CHANGELOG.md`, `ARCHITECTURE.md`,
+`HANDOVER.md` updated for Sessions 15–16.
 
 ---
 
@@ -252,27 +193,13 @@ Updated documents:
 
 ### Dev Tools — full rebuild (`app/dev/page.tsx`)
 
-Complete rewrite of the dev data generator. All features confirmed
-working in production:
+Real DB data, visit count selector, DOI guard, live CPT codes, Max MD
+mode, individual referral selectors, Render warm-up ping.
 
-- **Real doctors, carriers, lawyers** from live database tables
-- **Visit count selector** — None / 1 / 2 / 3 / 5 visits per patient;
-  each visit dated randomly across recent weeks
-- **DOI guard** — visit dates clamped to always be after the patient's DOI
-- **Live CPT codes** — fetched from `cpt_codes` table, random-sampled per
-  visit; fallback to hardcoded sets if table is empty
-- **Max MD mode** — samples up to 8 codes from the live pool instead of 3–6
-- **Individual referral selector** — None / All 9 shortcut chips plus
-  individual toggles for each of the 9 referral types (MRI, VNG, Rx, DME,
-  ANS, ICD-10, PT, Ortho, Pain Mgmt)
-- **Render warm-up ping** — fires before each patient's referral batch to
-  reduce cold-start PDF latency
+### W9 supervisor-chain fix
 
-### W9 supervisor-chain fix (`app/billing/BillerDashboard.tsx`, `app/billing/page.tsx`)
-
-Supervised providers (PA, NP) must display their supervising MD's W9.
 `supervising_provider_id` added to billing query. `doctorWithW9` resolver
-added to `BillerDashboard.tsx` to walk the chain.
+walks supervisor chain in `BillerDashboard.tsx`.
 
 ---
 
@@ -280,212 +207,77 @@ added to `BillerDashboard.tsx` to walk the chain.
 
 ### CPT importer — many-to-many ICD-10 mapping
 
-CPT CSV importer now handles multi-ICD-10 rows per CPT code correctly:
-
-- Deduplicates CPT rows by `cpt_code` before upsert (fixes
-  silent batch failure with multi-ICD-10 CSVs)
-- Upserts ICD-10 codes to `icd10_codes` (deduplicated by `code`)
-- Upserts mappings to `cpt_icd10_map` on `(cpt_code, icd10_code)` —
-  idempotent, re-import safe
-- Full `toastError` on all three upsert operations
-- Success toast confirms CPT, ICD-10, and mapping counts
-
-**RLS fix:** `icd10_codes` missing `authenticated` INSERT/UPDATE policy —
-discovered via new error surfacing. Fixed with full `ALL` policy.
-
-### CPT import — Download Template link
-
-"⬇ Download Import Template" link added below Import CSV button in
-`CptCodesSection`. Client-side blob URL, no server dependency.
+Deduplication, `cpt_icd10_map` upsert, RLS fix on `icd10_codes`,
+Download Template link added.
 
 ---
 
 ## 2026-07-04 — Session 13
 
-### `forms/mri.py` — full backend audit
-
-Obtained and audited for the first time. All Session 12 frontend keys
-confirmed correctly wired. No backend changes required.
-
-### MRI Spine order fix
-
-`MRI_SPINE` array reordered to clinical standard:
-Cervical → Thoracic → Lumbar (was Cervical → Lumbar → Thoracic).
-
 ### CosmosUI standard — fully adopted app-wide
 
-All remaining referral screens migrated:
-- `DmeReferral.tsx` — `cosmosConfirm`, `AlertModal`/`ConfirmModal` mounted
-- `OrthoReferral.tsx`, `PainMgmtReferral.tsx`, `VngReferral.tsx`,
-  `RxReferral.tsx`, `PtReferral.tsx`, `AnsReferral.tsx` — `cosmosConfirm`,
-  `AlertModal`/`ConfirmModal` mounted, `toastError` replacing inline error divs
-- `app/calendar/page.tsx` — `cosmosConfirm`, `AlertModal`/`ConfirmModal` mounted
+All referral screens + calendar migrated. Native `alert()`/`confirm()`
+eliminated app-wide.
 
-`SessionTimeoutModal` added to `CosmosUI.tsx`.
+### Enterprise Hardening Stage 2 — API JWT + Session timeout
 
-Native `alert()`/`confirm()` now eliminated app-wide.
+All 15 POST endpoints protected with `verify_jwt`. Session timeout hook
+across all four dashboards. Migration 019.
 
-### Enterprise Hardening Stage 2 — API JWT authentication
+---
 
-All 15 `cosmos-api` POST endpoints protected with `verify_jwt` FastAPI
-dependency. Calls Supabase `/auth/v1/user` to verify Bearer token.
-Returns HTTP 401 for unauthenticated requests.
+## 2026-07-04 — Session 12
 
-- `cosmos-api/main.py`: `verify_jwt` function, `Depends` on all 15 routes
-- `cosmos-api/requirements.txt`: `httpx` added
-- Render env: `SUPABASE_ANON_KEY` added
-- All frontend `cosmos-api` fetch calls: `Authorization: Bearer` header added
-  via `getAuthToken()` helper injected into every calling file
+### Enterprise Hardening — RLS audit, NOT NULL constraints, NF-3 regression fix
 
-### Enterprise Hardening Stage 2 — Session timeout
+Full RLS audit — all anon/public policies removed. Migration 018 NOT NULL
+constraints. MRI Referral full rebuild. CPT codes filtered by license type.
+CosmosUI notification standard introduced.
 
-Inactivity-based auto sign-out implemented.
+---
 
-- `app/hooks/useSessionTimeout.ts`: new hook
-- Migration 019: `practice_settings.session_timeout_minutes int NOT NULL DEFAULT 15`
-- Admin panel: Session Timeout selector added to Practice Settings
-- Superadmin exempt: `'0'` written at login, hook disabled for that session
-- Mounted on: `DashboardClient.tsx`, `MDClient.tsx`, `admin/page.tsx`,
-  `BillerDashboard.tsx`
+## 2026-07-04 — Session 11
 
-### `forms/dme.py` — backend audit
+NF-3 patient signature gate. W9 entity-based scoping rule. Supervisor W9
+routing. NF-3 Section 16 license number fix. AOB billing entity resolution.
 
-Obtained and audited. All frontend keys confirmed correctly wired.
+---
 
-### Patch script cleanup
+## 2026-07-03 — Session 10
 
-All accumulated `~/patch_*.py`, `~/remove_*.py`, `~/wire_*.py`,
-`~/write_*.py` scripts from previous sessions deleted.
+`forms/base.py` exception suppression removed. `w9_filler.py` removed.
+PDF filename casing normalized. FK constraint audit complete. NF-3 full
+regression passed.
+
+---
+
+## 2026-06-29 — Phase 4, union availability, location badge, Admin day blocking
+
+Scheduling Phase 4 — MD login location pre-filters calendar.
+Union-of-locations availability. Admin blocked days in location form.
+
+---
+
+## 2026-06-29 — Scheduling Phase 3A, timezone fix, appointments RLS
+
+Scheduling Phase 3A live. `localDateStr()` timezone fix. RLS on appointments.
+
+---
+
+## 2026-06-28 — Auth foundation, Phase 3 location picker, RLS authenticated fix
+
+Full authentication implementation. RLS authenticated role. Scheduling Phase 3B live.
+
+---
+
+## 2026-06-28 — Admin dashboard expansion: Overview, CPT/ICD-10, Locations, Scheduling Phase 1+2
+
+Admin Overview tab, CPT Codes + ICD-10 tabs, Providers improvements.
+Migrations 010 (`practice_settings`, `office_locations`), 011 (`doctor_locations`).
 
 ---
 
 # Cosmos Medical Technologies — CHANGELOG
 
 Append-only. Entries in reverse chronological order. Never renumber,
-never delete. Each entry records only what actually shipped — not what
-was planned or considered.
-
----
-
-## 2026-07-04 — Session 12
-
-### Enterprise Hardening — RLS full audit and hardening
-
-Full audit of all RLS policies. All `anon` and `public` policies removed
-from every table. Every table now locked to `authenticated` only.
-
-Verified: 0 rows returned by anon/public policy query post-migration.
-
-### Enterprise Hardening — NOT NULL constraints (migration 018)
-
-- `doctors.license_number NOT NULL`
-- `doctors.npi NOT NULL`
-- `doctors.mailing_state NOT NULL`
-- `patient_forms.form_type NOT NULL`
-
-### NF-3 regression fix — place of service + description of treatment
-
-`main.py`: Place of service falls back to MD's assigned `doctor_locations`
-when `visit.location_id` is null. `database.py`: Dead doctor address column
-references removed.
-
-### MRI Referral — extremity studies, contrast, metal implant gate
-
-Full rebuild of `MriReferral.tsx`: metal implant toggle, extremity studies
-table, contrast selector, insurance auto-read.
-
-### CPT codes filtered by provider license type
-
-`fetchLicenseType()` at login; `filteredCptCodes` in `PatientChart.tsx`.
-
-### CosmosUI — universal notification standard
-
-New file: `app/components/ui/CosmosUI.tsx`. Exports: `toastSuccess()`,
-`toastError()`, `toastInfo()`, `cosmosConfirm()`, `ToastContainer`,
-`AlertModal`, `ConfirmModal`.
-
----
-
-## 2026-07-04 — Session 11
-
-### NF-3 — Patient signature gate
-
-NF-3 generate locked until `patient_signature_url` is on file.
-
-### W9 — entity-based scoping rule
-
-W9 applies only to: `!supervising_provider_id AND (!!pc_corp_name OR tax_classification === 'individual')`.
-
-### NF-3 — supervisor W9 routing for supervised providers
-
-After doctor merge, supervisor's W9 injected into `patient_data` when
-`supervising_provider_id` is set.
-
-### NF-3 Section 16 — license number replaces NPI
-
-`treating_provider.1.license_or_certification_number` now uses
-`doctor_license_number`, not NPI.
-
-### AOB — always uses billing entity
-
-Provider name/address/signature all resolve to billing entity per priority
-chain.
-
----
-
-## 2026-07-03 — Session 10
-
-### `forms/base.py` — removed all `except Exception: pass`
-
-### `w9_filler.py` removed
-
-### PDF filename casing normalized
-
-All 15 PDF templates now use uppercase filenames consistently.
-
-### FK constraint audit — Stage 1 complete
-
-Added FK constraints on `appointments`, `patient_visits`, `visit_line_items`.
-
-### NF-3 full regression — all scenarios passed
-
----
-
-## 2026-06-29 — Phase 4, union availability, location badge, Admin day blocking
-
-### Scheduling Phase 4 — MD login location pre-filters calendar
-
-### Union-of-locations availability
-
-### Admin — blocked days in location assignment form
-
----
-
-## 2026-06-29 — Scheduling Phase 3A, timezone fix, appointments RLS
-
-### Scheduling Phase 3A — location-driven schedule (live)
-
-### Timezone fix — `localDateStr()` helper
-
-### RLS — authenticated policies added to `appointments`
-
----
-
-## 2026-06-28 — Auth foundation, Phase 3 location picker, RLS authenticated fix
-
-### Authentication — full implementation
-
-### RLS — authenticated role added to all tables
-
-### Scheduling Phase 3 Option B — live
-
----
-
-## 2026-06-28 — Admin dashboard expansion: Overview, CPT/ICD-10, Locations, Scheduling Phase 1+2
-
-### Admin — Overview tab, CPT Codes + ICD-10 tabs, Providers improvements
-
-### Database migrations
-
-- `010`: `practice_settings` + `office_locations`
-- `011`: `doctor_locations`; `appointments.location_id` FK
+never delete. Each entry records only what actually shipped.

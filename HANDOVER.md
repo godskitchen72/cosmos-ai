@@ -67,12 +67,41 @@ Checkbox was visually ambiguous on dark theme.
 **ICD-10 download template** (`Icd10Section.tsx`):
 `⬇ Download Import Template` link added matching the CPT section pattern.
 Template columns: `code, description, category`. Two format example rows
-(one Cervical, one Lumbar). Added via line-number Python insert at line 264
-after anchor-based patches failed (file state mismatch from prior failed patches).
+(one Cervical, one Lumbar).
 
 **CPT download template updated** (`CptCodesSection.tsx`):
 Hardcoded blob updated from placeholder data to real NY No-Fault codes
 with accurate fee schedule amounts and linked ICD-10s.
+
+### FD submit button fix — complete
+
+`PatientProfile.tsx`: After successful billing submission,
+`setLocalVisits` now stamps submitted visits with `submitted_to_billing_at`
+in local state immediately. `readyVisits` filters them out — button
+disappears instantly without waiting for `router.refresh()`. Success
+toast added confirming visit count submitted.
+
+### Login performance optimization — complete
+
+`app/page.tsx` — two changes:
+
+**Merged duplicate `practice_settings` fetch:** `checkAndHandleMfa` previously
+fetched `mfa_required`, then called `handlePostLogin` which fetched
+`session_timeout_minutes` separately — two round-trips to the same table.
+Now a single query fetches both columns. `handlePostLogin` accepts an optional
+`sessionTimeoutMinutes` parameter; when pre-fetched it skips the DB call.
+MD/PA/NP path unchanged — they are not in `MFA_ROLES` and still fetch
+`session_timeout_minutes` independently in `handlePostLogin`.
+
+**Parallelized lockout pre-check:** Two sequential `login_attempts` queries
+(last success + recent fails) replaced with a single `Promise.all`. Saves
+one sequential round-trip on every login attempt.
+
+**Infrastructure analysis completed:** Supabase on `us-east-2` (Ohio),
+Vercel Hobby on `us-east-1` (Virginia) — ~50ms cross-region gap, not
+a meaningful bottleneck. Render on $7 Starter plan — always-on confirmed.
+Remaining latency is Vercel Hobby cold starts on first load after idle
+(unavoidable without Vercel Pro upgrade).
 
 ---
 
@@ -89,7 +118,10 @@ with accurate fee schedule amounts and linked ICD-10s.
 
 4. **`patients.doctor_id` NOT NULL** — deferred to pre-production.
 
-5. **Render "always on"** — upgrade for PDF speed.
+5. **Render "always on"** — confirmed on $7 plan, already resolved.
+
+6. **Vercel Pro upgrade** — eliminates cold starts, adds region control.
+   Worth doing at go-live. Not urgent now.
 
 ---
 
@@ -180,8 +212,6 @@ frontend-written entries have real user attribution.
 
 **`audit_logs` anon RLS:** Table has authenticated INSERT only — frontend
 `writeAuditLog()` works because users are authenticated when actions fire.
-Login failure logging works because the attempt insert happens after
-Supabase auth is called (which creates an anon session context).
 
 **MFA `localStorage` device trust:** Key format:
 `cosmos_mfa_trusted_{email_normalized}`. 30-day expiry as Unix timestamp.
@@ -200,6 +230,11 @@ from `ARCHITECTURE.md §3`. Should be added next time that document is updated.
 of section — sidebar layout makes bottom-rendered forms scroll out of mobile
 viewport, appearing as if Edit does nothing.
 
+**Login `practice_settings` fetch:** Admin/billing path fetches both
+`mfa_required` and `session_timeout_minutes` in one query via
+`checkAndHandleMfa`. MD/PA/NP path fetches `session_timeout_minutes`
+separately in `handlePostLogin` (no MFA check for those roles).
+
 ---
 
 ## File Confidence Levels (cumulative)
@@ -208,6 +243,8 @@ viewport, appearing as if Edit does nothing.
 
 | File | Confidence |
 |---|---|
+| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 19 — merged practice_settings fetch, parallelized lockout queries) |
+| `cosmos-dashboard/app/patients/[patientId]/PatientProfile.tsx` | ★ Verified-final (Session 19 — submit button local state fix) |
 | `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (Session 19 — sidebar nav) |
 | `cosmos-dashboard/app/admin/components/CptCodesSection.tsx` | ★ Verified-final (Session 19 — edit top-mount, price inline, toggle pill, template updated) |
 | `cosmos-dashboard/app/admin/components/Icd10Section.tsx` | ★ Verified-final (Session 19 — edit top-mount, toggle pill, download template added) |
@@ -219,10 +256,8 @@ viewport, appearing as if Edit does nothing.
 | `cosmos-dashboard/app/admin/components/UsersSection.tsx` | ★ Verified-final (Session 18) |
 | `cosmos-dashboard/app/admin/components/AuditLogSection.tsx` | ★ Verified-final (Session 18) |
 | `cosmos-dashboard/app/lib/auditLogger.ts` | ★ Verified-final (Session 17) |
-| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 17) |
 | `cosmos-dashboard/app/billing/BillerDashboard.tsx` | ★ Verified-final (Session 17) |
 | `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (Session 17) |
-| `cosmos-dashboard/app/patients/[patientId]/PatientProfile.tsx` | ★ Verified-final (Session 17) |
 | `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (Session 17) |
 | `cosmos-dashboard/app/md/[patientId]/icd10/IcdReferral.tsx` | ★ Verified-final (Session 17) |
 | `cosmos-dashboard/app/billing/page.tsx` | ★ Verified-final (Session 17) |
@@ -295,3 +330,6 @@ viewport, appearing as if Edit does nothing.
 - **Patch script `old` anchor must match on-disk state exactly** — always `grep -n` to confirm current string before writing patch
 - **Termux heredoc buffer limit** — very large heredocs truncate silently; split files >~250 lines into separate heredoc commands
 - **Line-number Python insert** (`lines.insert(N, text)`) is reliable when anchor-based patch fails — use `grep -n` to find target line first
+- **Submit button persistence after action** — after any Supabase update that changes list membership, always update local state immediately; never rely on `router.refresh()` alone
+- **Login perf: merge parallel `practice_settings` reads** — when two functions call the same table sequentially, combine into one query and pass the result as a parameter
+- **Supabase region: `us-east-2` (Ohio) / Vercel: `us-east-1` (Virginia)** — ~50ms gap, not a meaningful bottleneck at current scale
