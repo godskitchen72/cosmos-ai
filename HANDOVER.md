@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 5, 2026, Session 19 — continued)
+# Cosmos Medical Technologies — HANDOVER (July 5, 2026, Session 19 — final)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -48,25 +48,31 @@ are unchanged — layout change only.
 
 ### CPT and ICD-10 section fixes — complete
 
-**Edit form visibility fix (both sections):** Edit form moved to top of
-section and scrolls into view on open via `useRef` + `scrollIntoView`.
-Previously the form rendered at the bottom of a long list and appeared
-invisible on mobile (scroll context issue introduced by sidebar layout).
+**Edit form visibility** (`CptCodesSection.tsx`, `Icd10Section.tsx`):
+Edit form moved from bottom to top of section. `useRef` +
+`scrollIntoView({ behavior: 'smooth', block: 'start' })` fires on
+`editing` state change. Root cause: sidebar layout introduced an
+independent scroll context — bottom-rendered form appeared below
+the mobile viewport, making Edit appear to do nothing.
 
-**CPT price layout:** Price moved inline after the CPT code badge on the
-same row (`[98940] $68.15`), description on the line below. Eliminates
-one row per card.
+**CPT price layout** (`CptCodesSection.tsx`):
+Price moved inline after CPT code badge — `[98940] $68.15` on one row,
+description below. Eliminates one row per card.
 
-**Active/Inactive toggle:** Replaced ambiguous `<input type="checkbox">`
-with a styled pill toggle button. Shows `● Active` (green) or `○ Inactive`
-(red) — unambiguous on dark theme.
+**Active/Inactive toggle** (both sections):
+`<input type="checkbox">` replaced with a styled pill button.
+`● Active` (green `#19a866`) / `○ Inactive` (red `#e74c3c`).
+Checkbox was visually ambiguous on dark theme.
 
-**ICD-10 download template added:** `⬇ Download Import Template` link added
-to `Icd10Section` matching the existing CPT pattern. Template has 3 columns
-(`code, description, category`) with 2 format example rows.
+**ICD-10 download template** (`Icd10Section.tsx`):
+`⬇ Download Import Template` link added matching the CPT section pattern.
+Template columns: `code, description, category`. Two format example rows
+(one Cervical, one Lumbar). Added via line-number Python insert at line 264
+after anchor-based patches failed (file state mismatch from prior failed patches).
 
-**CPT download template updated:** Hardcoded blob updated to real NY No-Fault
-codes with accurate fee schedule amounts and linked ICD-10s.
+**CPT download template updated** (`CptCodesSection.tsx`):
+Hardcoded blob updated from placeholder data to real NY No-Fault codes
+with accurate fee schedule amounts and linked ICD-10s.
 
 ---
 
@@ -191,8 +197,8 @@ to expanded (`true`) on first load if key is absent.
 from `ARCHITECTURE.md §3`. Should be added next time that document is updated.
 
 **Edit form scroll context:** CPT and ICD-10 edit forms must render at top
-of section (not bottom) — sidebar layout makes bottom-rendered forms scroll
-out of view on mobile, appearing as if Edit does nothing.
+of section — sidebar layout makes bottom-rendered forms scroll out of mobile
+viewport, appearing as if Edit does nothing.
 
 ---
 
@@ -286,6 +292,6 @@ out of view on mobile, appearing as if Edit does nothing.
 - **Sidebar `localStorage` persistence: initialize in `useEffect` to avoid SSR hydration mismatch**
 - **Sidebar hover states on plain `<button>` elements require inline handlers** — Tailwind `hover:` purged at build time for dynamically constructed class strings
 - **Edit forms in sidebar layout must render at top of section** — bottom-rendered forms scroll out of mobile viewport, appearing as no-ops
-- **Patch script `old` anchor must match on-disk state exactly** — always `grep` to confirm current string before writing patch; prior failed patches may leave file in unexpected state
+- **Patch script `old` anchor must match on-disk state exactly** — always `grep -n` to confirm current string before writing patch
 - **Termux heredoc buffer limit** — very large heredocs truncate silently; split files >~250 lines into separate heredoc commands
-- **Line-number Python insert** (`lines.insert(N, text)`) is reliable when anchor-based patch fails — use `grep -n` to find the target line first
+- **Line-number Python insert** (`lines.insert(N, text)`) is reliable when anchor-based patch fails — use `grep -n` to find target line first
