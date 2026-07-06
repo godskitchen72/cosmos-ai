@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 5, 2026, Session 19)
+# Cosmos Medical Technologies — HANDOVER (July 5, 2026, Session 19 — continued)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -45,6 +45,28 @@ are unchanged — layout change only.
 - Body layout: `flex` row — sidebar + `flex-1 min-w-0` content area
 - `admin-tab` custom event listener preserved intact
 - Header button order corrected: ← Back before ⇄ Sign Out (was reversed)
+
+### CPT and ICD-10 section fixes — complete
+
+**Edit form visibility fix (both sections):** Edit form moved to top of
+section and scrolls into view on open via `useRef` + `scrollIntoView`.
+Previously the form rendered at the bottom of a long list and appeared
+invisible on mobile (scroll context issue introduced by sidebar layout).
+
+**CPT price layout:** Price moved inline after the CPT code badge on the
+same row (`[98940] $68.15`), description on the line below. Eliminates
+one row per card.
+
+**Active/Inactive toggle:** Replaced ambiguous `<input type="checkbox">`
+with a styled pill toggle button. Shows `● Active` (green) or `○ Inactive`
+(red) — unambiguous on dark theme.
+
+**ICD-10 download template added:** `⬇ Download Import Template` link added
+to `Icd10Section` matching the existing CPT pattern. Template has 3 columns
+(`code, description, category`) with 2 format example rows.
+
+**CPT download template updated:** Hardcoded blob updated to real NY No-Fault
+codes with accurate fee schedule amounts and linked ICD-10s.
 
 ---
 
@@ -168,6 +190,10 @@ to expanded (`true`) on first load if key is absent.
 **`ARCHITECTURE.md` migration list gap:** Migrations 020–023 are missing
 from `ARCHITECTURE.md §3`. Should be added next time that document is updated.
 
+**Edit form scroll context:** CPT and ICD-10 edit forms must render at top
+of section (not bottom) — sidebar layout makes bottom-rendered forms scroll
+out of view on mobile, appearing as if Edit does nothing.
+
 ---
 
 ## File Confidence Levels (cumulative)
@@ -176,14 +202,14 @@ from `ARCHITECTURE.md §3`. Should be added next time that document is updated.
 
 | File | Confidence |
 |---|---|
-| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (Session 19 — sidebar nav, ~160 lines) |
+| `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (Session 19 — sidebar nav) |
+| `cosmos-dashboard/app/admin/components/CptCodesSection.tsx` | ★ Verified-final (Session 19 — edit top-mount, price inline, toggle pill, template updated) |
+| `cosmos-dashboard/app/admin/components/Icd10Section.tsx` | ★ Verified-final (Session 19 — edit top-mount, toggle pill, download template added) |
 | `cosmos-dashboard/app/admin/shared.tsx` | ★ Verified-final (Session 18 — unchanged Session 19) |
 | `cosmos-dashboard/app/admin/components/OverviewSection.tsx` | ★ Verified-final (Session 18) |
 | `cosmos-dashboard/app/admin/components/CarriersSection.tsx` | ★ Verified-final (Session 18) |
 | `cosmos-dashboard/app/admin/components/DoctorsSection.tsx` | ★ Verified-final (Session 18) |
 | `cosmos-dashboard/app/admin/components/LawyersSection.tsx` | ★ Verified-final (Session 18) |
-| `cosmos-dashboard/app/admin/components/CptCodesSection.tsx` | ★ Verified-final (Session 18) |
-| `cosmos-dashboard/app/admin/components/Icd10Section.tsx` | ★ Verified-final (Session 18) |
 | `cosmos-dashboard/app/admin/components/UsersSection.tsx` | ★ Verified-final (Session 18) |
 | `cosmos-dashboard/app/admin/components/AuditLogSection.tsx` | ★ Verified-final (Session 18) |
 | `cosmos-dashboard/app/lib/auditLogger.ts` | ★ Verified-final (Session 17) |
@@ -259,3 +285,7 @@ from `ARCHITECTURE.md §3`. Should be added next time that document is updated.
 - **`shared.tsx` pattern: all cross-section helpers in one file** — eliminates duplicate imports across component splits
 - **Sidebar `localStorage` persistence: initialize in `useEffect` to avoid SSR hydration mismatch**
 - **Sidebar hover states on plain `<button>` elements require inline handlers** — Tailwind `hover:` purged at build time for dynamically constructed class strings
+- **Edit forms in sidebar layout must render at top of section** — bottom-rendered forms scroll out of mobile viewport, appearing as no-ops
+- **Patch script `old` anchor must match on-disk state exactly** — always `grep` to confirm current string before writing patch; prior failed patches may leave file in unexpected state
+- **Termux heredoc buffer limit** — very large heredocs truncate silently; split files >~250 lines into separate heredoc commands
+- **Line-number Python insert** (`lines.insert(N, text)`) is reliable when anchor-based patch fails — use `grep -n` to find the target line first
