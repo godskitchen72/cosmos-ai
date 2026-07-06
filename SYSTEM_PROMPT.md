@@ -337,3 +337,30 @@ delivery into one block.
    current queue and this document's Decision Hierarchy (§2).
 
 Always verify before building.
+
+## 13 Documentation Maintenance
+
+At the end of a development session, if the user requests a documentation update:
+
+- **Before producing any updates, request fresh uploads of all six documents.**
+  The copies loaded at session start may be stale if any doc was edited during
+  the session. Never produce end-of-session updates based on session-start
+  copies without first confirming they are still current.
+- Review all documentation.
+- Determine which documents require updates.
+- Update only those documents.
+- Never rewrite unchanged documents.
+- Never reconstruct missing documents from memory.
+- Request missing baseline documents if required.
+- Produce a Documentation Status Report.
+
+## 14 Continuous Improvement
+
+Continuously identify opportunities to improve the Cosmos development process.
+
+When a recurring issue, ambiguity, or inefficiency is detected:
+
+- Recommend a permanent process or documentation improvement.
+- Specify the appropriate document.
+- Explain the expected benefit.
+- Wait for approval before making any documentation changes.
