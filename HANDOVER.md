@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 6, 2026, Session 20 — final)
+# Cosmos Medical Technologies — HANDOVER (July 6, 2026, Session 21 — final)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -13,103 +13,30 @@ self-contained.
 
 ## Current Status
 
-All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed via
-`tsc --noEmit` + full deploy chain. Live app confirmed healthy at session
-close. No outstanding TypeScript errors.
+All `cosmos-api` commits confirmed deployed via `python3 -m py_compile` +
+full deploy chain. Live app confirmed healthy at session close. No
+outstanding errors.
 
 ---
 
-## Completed This Session (Session 20)
+## Completed This Session (Session 21)
 
-### PatientChart.tsx refactor — complete
+### PDF filename convention — complete
 
-`app/md/[patientId]/PatientChart.tsx` split from 1328 lines into 6 files:
+All generated PDFs now use the structured naming convention defined in
+`PRODUCT_SPEC.md §12`. Implemented entirely in `cosmos-api/main.py`.
 
-- `PatientChart.tsx` — shell only (~120 lines): tab router, header, visits state
-- `chart-shared.tsx` — shared types, interfaces, `getAuthToken`, `getTx`, `CustomCombo`, `CodeMultiPicker`, `QuickNotePicker`, style constants
-- `components/VisitTab.tsx` — all visit/PCE/CPT/ICD-10/flag/billing logic
-- `components/ReferralGrid.tsx` — 9 referral type cards + psych referral
-- `components/VisitHistoryTab.tsx` — history list + visit sheet drawer
-- `components/PatientInfoTab.tsx` — DOA/insurance/pain scores display
-
-**Implementation notes:**
-- `components/` directory created under `app/md/[patientId]/`
-- `pceData` now hydrates from `v.pce_data` when `visit_id` is in URL — existing visit data loads correctly on return
-- `visitDate` also hydrates from existing visit record
-- DEV fill-all PCE test button added to `VisitTab.tsx` — always visible, remove before go-live
-- All native `<select>` dropdowns replaced with `QuickNotePicker` (custom styled dropdown in `chart-shared.tsx`)
-- Update Status replaced with styled button group (color-coded per status)
-- Patient status normalized on init — `'Active Treatment'` maps to `'Active'`
-
-### ReferralGrid cyan completion indicators — complete
-
-`ReferralGrid.tsx` queries `patient_forms` on mount filtered by `visit_id`.
-Cards with matching `form_type` highlight cyan with `✓` checkmark. Psych
-referral and ICD-10 use separate DB queries (`patient_visits.psych_referral`
-and `icd10_codes` presence). Psych state updates optimistically on toggle.
-
-**form_type mapping:** `MRI`, `RX`, `DME`, `PT`, `VNG`, `ANS`, `ORTHO`,
-`PAIN-MGMT`. ICD-10 uses `icd10_codes` presence check (no `patient_forms`
-record). Psych uses `patient_visits.psych_referral` boolean.
-
-### Admin CPT/ICD-10 data quality warnings — complete
-
-`CptCodesSection.tsx`, `Icd10Section.tsx`: Warning badges added:
-- ICD-10: `⚠️ No description` if `description` blank or equals code
-- CPT: `⚠️ No fee` if fee is 0/null and `fee_varies = false`
-- CPT: `⚠️ No description` if description blank
-- Section-level banner shows count of affected codes
-
-### CSV import Replace mode — complete
-
-Both sections now show `＋ Append` / `⟳ Replace All` toggle in import
-preview. Replace mode deletes all existing codes before upserting.
-Red warning banner shown when Replace selected. Confirm button turns red.
-
-**CPT import parser fix:** `icdKey` and `diagKey` no longer fall back to
-positional columns when no `icd10_code` header exists — Supabase backup
-exports were misread (fee values treated as ICD-10 codes). Fix: only
-auto-import ICD-10 if explicit `icd10_code` column present in CSV headers.
-
-**`null` fee_varies fix:** Supabase exports use literal string `"null"` for
-null fees — parser now treats `"null"` as `fee_varies = true`.
-
-### Admin action confirmations — complete
-
-`CptCodesSection.tsx`, `Icd10Section.tsx`: `toastSuccess`/`toastError` added
-to all save, delete, and import actions. Import success message includes count
-and mode (Imported/Replaced). All error paths covered.
-
-### DashboardClient.tsx CosmosUI migration — complete
-
-`app/dashboard/DashboardClient.tsx`: Two bare `alert()` calls replaced with
-`toastError()`. `<AlertModal />` and `<ConfirmModal />` mounted. Previously
-FD dashboard had no CosmosUI modals mounted — `cosmosConfirm()` would have
-silently fallen back to native `window.confirm()`.
-
-### NF-2 signature injection fix — complete
-
-`cosmos-api/forms/nf2.py`: Signature key fixed from `signature_url` to
-`patient_signature_url` — the correct DB column name. Patient signature was
-always present in `patient_data` but never injected because the wrong key
-was read.
-
-`app/patients/[patientId]/PatientProfile.tsx`: `canGenerateNF2` now requires
-`patient_signature_url`. NF-2 generation blocked with `"Missing: Signature"`
-message when no patient signature on file.
-
-### ARCHITECTURE.md migration gap — resolved
-
-Migrations 020–023 added to `ARCHITECTURE.md §3`. Note added clarifying
-that 001–019 exist as `.sql` files on disk; 020+ were run directly in the
-Supabase dashboard SQL editor — no on-disk files exist for these.
-
-### CosmosUI notification standard — documented
-
-`AI_STYLE_GUIDE.md §2` updated with the notification standard:
-- Single-record CRUD → `toastSuccess`/`toastError`
-- Bulk operations, destructive completions, errors requiring acknowledgment → `AlertModal`
-- Note: `toastSuccess` internally routes through `AlertModal` (confirmed in `CosmosUI.tsx` line 21)
+**Changes:**
+- `_fmt_date(raw) -> str` helper added — converts ISO DB date to `YYYYMMDD`
+- NF-2: `{patient_id}_{doi}_nf2.pdf`
+- AOB: `{patient_id}_{doi}_aob.pdf`
+- NF-3: `{patient_id}_{doi}_{visit_date}_nf3.pdf`
+- PCE: `{patient_id}_{doi}_{visit_date}_init_rpt.pdf`
+- All referrals: `{patient_id}_{doi}_{visit_date}_{fn_type}.pdf`
+- `REFERRAL_FORM_CONFIG` updated with `fn_type` key per entry (lowercase
+  filename token, separate from `tag` which is the `patient_forms.form_type`
+  DB value — kept unchanged to avoid breaking `ReferralGrid.tsx`)
+- Existing test data wiped via Dev Tools before convention applied
 
 ---
 
@@ -237,10 +164,21 @@ directly in Supabase dashboard SQL editor — no on-disk files.
 of section — sidebar layout makes bottom-rendered forms scroll out of mobile
 viewport, appearing as if Edit does nothing.
 
+**`_fmt_date` fallback:** Returns `"00000000"` when `doi` or `visit_date`
+is null/missing. This produces a valid but obviously-wrong filename rather
+than crashing. A `"00000000"` in a filename is a signal that the patient
+record is missing a date — treat as a data quality issue, not a code bug.
+
 **Login `practice_settings` fetch:** Admin/billing path fetches both
 `mfa_required` and `session_timeout_minutes` in one query via
 `checkAndHandleMfa`. MD/PA/NP path fetches `session_timeout_minutes`
 separately in `handlePostLogin` (no MFA check for those roles).
+
+**`REFERRAL_FORM_CONFIG` dual keys:** `tag` = DB `form_type` value stored
+in `patient_forms` (e.g. `"MRI"`, `"PAIN-MGMT"`) — never change these
+without also updating `ReferralGrid.tsx` completion checks. `fn_type` =
+lowercase filename token (e.g. `"mri"`, `"pm"`) — filename only, no DB
+usage.
 
 ---
 
@@ -250,6 +188,7 @@ separately in `handlePostLogin` (no MFA check for those roles).
 
 | File | Confidence |
 |---|---|
+| `cosmos-api/main.py` | ★ Verified-final (Session 21 — PDF filename convention) |
 | `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (Session 20 — refactored to shell) |
 | `cosmos-dashboard/app/md/[patientId]/chart-shared.tsx` | ★ Verified-final (Session 20 — new file) |
 | `cosmos-dashboard/app/md/[patientId]/components/VisitTab.tsx` | ★ Verified-final (Session 20 — new file) |
@@ -290,7 +229,6 @@ separately in `handlePostLogin` (no MFA check for those roles).
 | `cosmos-dashboard/app/md/[patientId]/pt/PtReferral.tsx` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/md/[patientId]/ans/AnsReferral.tsx` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (Session 13) |
-| `cosmos-api/main.py` | ★ Verified-final (Session 13) |
 | `cosmos-api/forms/mri.py` | ★ Verified-final (Session 13) |
 | `cosmos-api/forms/dme.py` | ★ Verified-final (Session 13) |
 | `cosmos-api/database.py` | ★ Verified-final (Session 12) |
@@ -354,3 +292,5 @@ separately in `handlePostLogin` (no MFA check for those roles).
 - **`pceData` must hydrate from existing visit on load** — initialize `useState` from `initialVisits.find(v => v.id === visitIdParam)?.pce_data` when `visitIdParam` present; default `{}` only for new visits.
 - **`patient_signature_url` required for NF-2** — both frontend block and backend key corrected this session.
 - **Supabase region: `us-east-2` (Ohio) / Vercel: `us-east-1` (Virginia)** — ~50ms gap, not a meaningful bottleneck at current scale
+- **PDF filename convention (Session 21)** — all filenames follow `patid_doa_dos_type.pdf` (per-visit) or `patid_doa_type.pdf` (patient-level). Dates are `YYYYMMDD`. Type tokens are lowercase. `REFERRAL_FORM_CONFIG.tag` is the DB value; `fn_type` is the filename token — never conflate them.
+- **`_fmt_date` fallback is `"00000000"`** — a filename containing this string signals a missing date on the patient record, not a code bug. Treat as a data quality issue.

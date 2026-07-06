@@ -22,7 +22,7 @@ reliably fetchable via web tools** — `robots.txt` blocks direct fetch of
 repo pages even with a user-pasted URL, and the repos are too small to
 reliably surface in web search results. File transfer is direct
 upload/paste from the product owner's device (`cp ~/cosmos-dashboard/app/
-<path> ~/storage/downloads/<name>` then attach is the standing preferred
+<path> ~/storage/downloads/<n>` then attach is the standing preferred
 method — `SYSTEM_PROMPT.md` §3), or "Copy raw contents" from GitHub's
 mobile web UI.
 
@@ -189,7 +189,11 @@ with service role key), never via SQL.
 ## 4. Backend API (`cosmos-api`)
 
 FastAPI on Render. File ownership:
-- `main.py` — route definitions + shared dispatcher
+- `main.py` — route definitions + shared dispatcher. Also owns all PDF
+  filename construction — see `PRODUCT_SPEC.md §12` for the naming
+  convention. `_fmt_date(raw) -> str` helper (line 16) converts any ISO
+  DB date string (`YYYY-MM-DD`) to `YYYYMMDD` for use in filenames;
+  returns `"00000000"` as a safe fallback for null/missing values.
 - `database.py` — builds request-specific data dicts for PDF generators.
   Exports prefixed doctor fields: `doctor_name`, `doctor_npi`,
   `doctor_license_number`, `doctor_phone`, `doctor_fax`, `doctor_tax_id`,
@@ -212,9 +216,13 @@ FastAPI on Render. File ownership:
 
 Referral-type documents share one generic dispatch path: a
 `REFERRAL_FORM_CONFIG` entry maps a type to its generator function name +
-tag + labels. Adding a new referral type means touching `forms/<type>.py`,
-the config entry + route in `main.py`, and the import/`__all__` entry in
-`pdf_engine.py` — all three, every time.
+`tag` (DB `form_type` value) + `fn_type` (filename token) + labels.
+Adding a new referral type means touching `forms/<type>.py`, the config
+entry + route in `main.py`, and the import/`__all__` entry in
+`pdf_engine.py` — all three, every time. **`tag` and `fn_type` are
+separate keys** — `tag` is stored in `patient_forms.form_type` and read
+by `ReferralGrid.tsx`; `fn_type` is used only in the filename. Never
+conflate them.
 
 Non-referral documents (NF-2, NF-3, AOB, W-9, PCE) are routed individually;
 not all import through `pdf_engine.py` (`/generate-w9` imports `forms.w9`

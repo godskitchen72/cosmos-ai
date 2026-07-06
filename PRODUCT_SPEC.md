@@ -383,3 +383,64 @@ hand-rolled inline-style pattern every other dashboard listed here uses.
   to the billing entity (pay-to entity), not the treating provider.
   For supervised providers, this is the supervising MD's W-9. Cosmos
   automatically routes the correct W-9 at NF-3 generation time.
+
+---
+
+## 12. PDF File Naming Convention
+
+All patient-related PDFs use the following structured naming convention.
+Established Session 21 — applies to all generations going forward.
+
+**Pattern:**
+
+```
+Per-visit documents:   {patient_id}_{doa}_{dos}_{type}.pdf
+Patient-level docs:    {patient_id}_{doa}_{type}.pdf
+```
+
+- `patient_id` — e.g. `PT457696`
+- `doa` — date of accident in `YYYYMMDD` format (sorts lexicographically)
+- `dos` — date of service in `YYYYMMDD` format (unique per visit)
+- `type` — lowercase document type token (see table below)
+
+**Type token reference:**
+
+| Document | Token | Scope |
+|---|---|---|
+| NF-2 | `nf2` | patient-level (no DOS) |
+| AOB | `aob` | patient-level (no DOS) |
+| NF-3 | `nf3` | per-visit |
+| PCE (Initial Report) | `init_rpt` | per-visit |
+| ICD-10 Diagnosis PDF | `icd` | per-visit |
+| MRI | `mri` | per-visit |
+| Rx | `rx` | per-visit |
+| DME | `dme` | per-visit |
+| Sono | `sono` | per-visit |
+| ANS | `ans` | per-visit |
+| VNG | `vng` | per-visit |
+| PT | `pt` | per-visit |
+| Ortho | `ortho` | per-visit |
+| Pain Mgmt | `pm` | per-visit |
+
+**Example filenames:**
+
+```
+PT457696_20260115_nf2.pdf
+PT457696_20260115_aob.pdf
+PT457696_20260115_20260704_nf3.pdf
+PT457696_20260115_20260704_init_rpt.pdf
+PT457696_20260115_20260704_icd.pdf
+PT457696_20260115_20260704_mri.pdf
+PT457696_20260115_20260704_pm.pdf
+```
+
+**Implementation:** `cosmos-api/main.py` — `_fmt_date()` helper converts
+DB ISO date strings to `YYYYMMDD`. The `fn_type` key in
+`REFERRAL_FORM_CONFIG` holds the filename token; `tag` holds the DB
+`form_type` value stored in `patient_forms` — these are separate and
+must not be conflated (`HANDOVER.md` Known Architecture Gaps).
+
+**Date format rationale:** `YYYYMMDD` was chosen over `MMDDYYYY` because
+it sorts lexicographically in chronological order — files for the same
+patient naturally sequence by visit date in any filesystem, storage
+browser, or directory listing.
