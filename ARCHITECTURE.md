@@ -229,6 +229,17 @@ not all import through `pdf_engine.py` (`/generate-w9` imports `forms.w9`
 directly) — confirm the actual import path per document rather than assuming
 the referral pattern applies.
 
+**`patient_forms` insert rule — required for zip inclusion:** every
+per-visit document type must insert a `patient_forms` row with `visit_id`
+explicitly set after generating the PDF. This is the mechanism the
+billing packet zip (`PatientProfile.tsx` `handleDownloadZip`) uses to
+collect all files for a visit — it queries `patient_forms` filtered by
+`visit_id`. A document stored anywhere else, or inserted with
+`visit_id = null`, is silently excluded from the zip. NF-2 and AOB are
+the only intentional exceptions — they are patient-level documents stored
+on `patients.nf2_url` / `patients.aob_url` and are added to the zip
+separately via those fields.
+
 **W9 generation rules (`/generate-w9`):**
 - Requires `!supervising_provider_id AND (!!pc_corp_name OR tax_classification === 'individual')`
 - Returns HTTP 400 for supervised providers or providers without billing

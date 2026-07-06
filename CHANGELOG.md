@@ -1,3 +1,60 @@
+## 2026-07-06 — Session 21 (continued)
+
+### Billing packet ZIP download — complete
+
+`app/patients/[patientId]/PatientProfile.tsx`: 📦 zip icon added to each
+Recent Visits row. Appears only when the visit has a complete billing
+packet (same four-condition gate as Submit to Billing: billing finalized +
+PCE generated + NF-3 preflight passed + AOB on file).
+
+**Zip contents:**
+- All `patient_forms` rows for that `visit_id` (dynamic — future document
+  types included automatically, no code change required, provided they
+  store their PDF as a `patient_forms` row with `visit_id` set)
+- `patients.nf2_url` (patient-level, included in every visit zip)
+- `patients.aob_url` (patient-level, included in every visit zip)
+
+**Zip filename:** `{patient_id}_{doa}_{dos}.zip` — same date convention
+as PDF filenames (`YYYYMMDD`).
+
+**Implementation notes:**
+- JSZip loaded from CDN (`cdnjs.cloudflare.com`) inline on first render —
+  no npm dependency added
+- All PDFs fetched in parallel via `Promise.all` with signed URLs (300s TTL)
+- Individual file fetch failures are silently skipped — zip proceeds with
+  whatever files successfully download rather than aborting entirely
+- `zippingVisit` state tracks which visit is being zipped; button shows
+  ⏳ during generation, 📦 when idle
+- `isVisitComplete(v)` helper mirrors `readyVisits` logic exactly
+
+**Known open item:** some legacy `patient_forms` rows may have
+`visit_id = null` (generated before visit linkage was reliable). These
+are silently excluded from the zip. A data backfill is needed for affected
+patients — deferred pending Supabase incident resolution (Jul 6, 2026
+Americas region 500 errors). See Open Items.
+
+**`patient_forms` visit_id rule:** all per-visit document types must store
+their generated PDF as a `patient_forms` row with `visit_id` set. This is
+the mechanism that makes them automatically included in the zip. See
+`PRODUCT_SPEC.md §12`.
+
+### SYSTEM_PROMPT.md §13 — fresh doc upload rule added
+
+Before producing any end-of-session documentation updates, fresh uploads
+of all six documents are now required. Prevents updates based on
+session-start copies that may have been edited mid-session.
+
+---
+
+## 2026-07-06 — Session 21
+
+### PDF filename convention — complete
+
+All generated PDFs now follow a structured naming convention.
+Implemented in `cosmos-api/main.py` only — no changes to any
+`forms/*.py` or `database.py`.
+
+**Convention:**
 ## 2026-07-06 — Session 21
 
 ### PDF filename convention — complete

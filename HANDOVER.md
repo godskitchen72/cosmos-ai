@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 6, 2026, Session 21 — final)
+# Cosmos Medical Technologies — HANDOVER (July 6, 2026, Session 21 — continued)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -13,13 +13,31 @@ self-contained.
 
 ## Current Status
 
-All `cosmos-api` commits confirmed deployed via `python3 -m py_compile` +
-full deploy chain. Live app confirmed healthy at session close. No
-outstanding errors.
+All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed.
+Live app confirmed healthy. Supabase experiencing active incident
+(Americas region 500 errors, Jul 6 2026) — dashboard SQL editor
+unreliable; REST API queries also affected. No Cosmos code issues.
 
 ---
 
 ## Completed This Session (Session 21)
+
+### Billing packet ZIP download — complete
+
+📦 zip icon on Recent Visits rows in `PatientProfile.tsx`. Visible only
+when visit has a complete billing packet (same four-condition gate as
+Submit to Billing). Zip contains all `patient_forms` rows for that
+`visit_id` plus `patients.nf2_url` and `patients.aob_url`. Filename:
+`{patient_id}_{doa}_{dos}.zip`. JSZip loaded from CDN — no npm dependency.
+Future document types included automatically if they store as
+`patient_forms` row with `visit_id` set (see `PRODUCT_SPEC.md §12`).
+
+### SYSTEM_PROMPT.md §13 updated
+
+Fresh doc upload rule added: before producing end-of-session doc updates,
+always request fresh uploads of all six documents.
+
+---
 
 ### PDF filename convention — complete
 
@@ -42,19 +60,25 @@ All generated PDFs now use the structured naming convention defined in
 
 ## Open Items, Priority Order
 
-1. **Sidebar rollout to FD, MD, Biller** — Admin pattern proven. Mechanical
+1. **`patient_forms` visit_id backfill** — some legacy rows have
+   `visit_id = null`, silently excluding them from the zip. Needs a SQL
+   UPDATE to backfill correct `visit_id` on affected rows. Deferred
+   pending Supabase incident resolution. Query to run once Supabase
+   recovers: `SELECT form_type, visit_id, filename FROM patient_forms WHERE patient_id = 'PT331111'` — then backfill any null `visit_id` rows with the correct visit UUID.
+
+3. **Sidebar rollout to FD, MD, Biller** — Admin pattern proven. Mechanical
    repetition. Product decision: all three in one session or one at a time.
 
-2. **DEV fill-all PCE button** — remove from `VisitTab.tsx` before go-live.
+4. **DEV fill-all PCE button** — remove from `VisitTab.tsx` before go-live.
 
-3. **Signed URL caching** — deferred by explicit product decision.
+5. **Signed URL caching** — deferred by explicit product decision.
 
-4. **Doctor mailing address data** — Gottesman and Kramer placeholders.
+6. **Doctor mailing address data** — Gottesman and Kramer placeholders.
    Test environment only — not urgent until go-live.
 
-5. **`patients.doctor_id` NOT NULL** — deferred to pre-production.
+7. **`patients.doctor_id` NOT NULL** — deferred to pre-production.
 
-6. **Vercel Pro upgrade** — eliminates cold starts. Worth doing at go-live.
+8. **Vercel Pro upgrade** — eliminates cold starts. Worth doing at go-live.
 
 ---
 
@@ -180,6 +204,13 @@ without also updating `ReferralGrid.tsx` completion checks. `fn_type` =
 lowercase filename token (e.g. `"mri"`, `"pm"`) — filename only, no DB
 usage.
 
+**Zip `patient_forms` visit_id gap:** legacy `patient_forms` rows generated
+before reliable visit linkage may have `visit_id = null`. These are
+silently excluded from the billing packet zip. Backfill needed — deferred
+pending Supabase incident resolution (Jul 6, 2026). After Supabase
+recovers, query `patient_forms` for any rows with `visit_id = null` and
+update with correct visit UUID from `patient_visits`.
+
 ---
 
 ## File Confidence Levels (cumulative)
@@ -189,6 +220,7 @@ usage.
 | File | Confidence |
 |---|---|
 | `cosmos-api/main.py` | ★ Verified-final (Session 21 — PDF filename convention) |
+| `cosmos-dashboard/app/patients/[patientId]/PatientProfile.tsx` | ★ Verified-final (Session 21 — billing packet zip) |
 | `cosmos-dashboard/app/md/[patientId]/PatientChart.tsx` | ★ Verified-final (Session 20 — refactored to shell) |
 | `cosmos-dashboard/app/md/[patientId]/chart-shared.tsx` | ★ Verified-final (Session 20 — new file) |
 | `cosmos-dashboard/app/md/[patientId]/components/VisitTab.tsx` | ★ Verified-final (Session 20 — new file) |
@@ -294,3 +326,7 @@ usage.
 - **Supabase region: `us-east-2` (Ohio) / Vercel: `us-east-1` (Virginia)** — ~50ms gap, not a meaningful bottleneck at current scale
 - **PDF filename convention (Session 21)** — all filenames follow `patid_doa_dos_type.pdf` (per-visit) or `patid_doa_type.pdf` (patient-level). Dates are `YYYYMMDD`. Type tokens are lowercase. `REFERRAL_FORM_CONFIG.tag` is the DB value; `fn_type` is the filename token — never conflate them.
 - **`_fmt_date` fallback is `"00000000"`** — a filename containing this string signals a missing date on the patient record, not a code bug. Treat as a data quality issue.
+- **Zip requires `patient_forms.visit_id`** — zip collects all `patient_forms` rows matching `visit_id`. Any per-visit document type that stores its file outside `patient_forms` (or with `visit_id = null`) is silently excluded from the zip. Always set `visit_id` on insert.
+- **JSZip CDN timing** — JSZip is loaded inline on first render via a script tag. On first tap the zip icon shows ⏳ briefly while the library loads. Subsequent taps are instant. This is expected behavior, not a bug.
+- **Supabase service key not in Termux env** — `SUPABASE_SERVICE_KEY` is only set on Render. Direct DB queries from Termux require either a local `.env` file or hardcoding the URL/key. Neither is present by default — use the Supabase dashboard SQL editor for ad-hoc queries instead.
+- **Fresh doc uploads required before end-of-session updates** — session-start copies may be stale. Always request fresh uploads before producing documentation. Rule now in `SYSTEM_PROMPT.md §13`.

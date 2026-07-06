@@ -444,3 +444,21 @@ must not be conflated (`HANDOVER.md` Known Architecture Gaps).
 it sorts lexicographically in chronological order — files for the same
 patient naturally sequence by visit date in any filesystem, storage
 browser, or directory listing.
+
+**Billing packet ZIP** — the FD dashboard shows a 📦 zip icon on each
+Recent Visits row once the visit has a complete billing packet (same
+four-condition gate as Submit to Billing: billing finalized + PCE
+generated + NF-3 preflight passed + AOB on file). The zip filename
+follows `{patient_id}_{doa}_{dos}.zip`.
+
+Zip contents are collected dynamically — all `patient_forms` rows
+matching that `visit_id`, plus `patients.nf2_url` and `patients.aob_url`
+(patient-level docs included in every visit zip).
+
+**Standing rule for new document types:** any new per-visit document type
+must store its generated PDF as a `patient_forms` row with `visit_id`
+explicitly set. This is the sole mechanism that makes it automatically
+included in the billing packet zip. A document type that stores its file
+anywhere else (directly on `patients`, `patient_visits`, or in
+`patient_forms` with `visit_id = null`) will be silently excluded from
+the zip with no error.
