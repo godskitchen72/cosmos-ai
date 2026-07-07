@@ -1,3 +1,64 @@
+## 2026-07-06 — Session 22
+
+### Backend billing packet ZIP — complete
+
+Replaced client-side JSZip with server-side `/generate-zip` endpoint on
+`cosmos-api`. Backend fetches all storage files directly using the
+Supabase service key, zips in memory with Python `zipfile`, returns
+binary `Response`.
+
+**`cosmos-api/main.py`:** `/generate-zip` endpoint appended. `ZipRequest`
+model (`patient_id`, `visit_id`). Zip filename fixed to
+`{patient_id}_{doa}_{dos}_billing_packet.zip`.
+
+**`PatientProfile.tsx`:** `handleDownloadZip` rewritten to call backend
+endpoint; JSZip CDN loader block removed; `fmtDateForFilename` helper
+removed.
+
+**Why backend:** Server is on same network as Supabase Storage — no
+signed URL round-trips, no browser memory constraint, no CDN dependency,
+works reliably on low-end mobile.
+
+---
+
+### Email billing packet to attorney — complete
+
+New `/send-billing-packet` endpoint generates one ZIP per selected visit
+and emails it to the patient's attorney via TurboSMTP. Confirmed
+delivered end-to-end.
+
+**New file — `cosmos-api/send_billing_endpoint.py`:** Endpoint extracted
+to separate file to avoid heredoc string literal corruption in Termux.
+Wired into `main.py` via `register(app, get_db, verify_jwt, Depends, ...)`.
+
+**`cosmos-api/main.py`:** Imports and registers `send_billing_endpoint`.
+
+**`PatientProfile.tsx`:**
+- `selectedVisits: Set<string>` state + `sendingEmail` state
+- `toggleVisitSelect(visitId)` — toggles visit in/out of selection set
+- `handleEmailAttorney()` — calls `/send-billing-packet` with selected visit IDs
+- Checkboxes appear on complete visit rows (left side)
+- "📧 Email X Billing Packet(s) to Attorney" button appears below list when any visits selected; disappears after successful send
+
+**`PatientForm.tsx`:**
+- `attorney_email` field added to Attorney section (after Attorney Phone)
+- `attorney_email` added to form state (initialized from `patient?.attorney_email`)
+- `handleLawyerChange` now auto-fills `attorney_email` from `lawyers.email`
+- `Lawyer` interface updated: `email?: string`
+
+**Migration 024:** `ALTER TABLE patients ADD COLUMN IF NOT EXISTS attorney_email text` — run in Supabase SQL editor; no on-disk file.
+
+**Render env vars added:** `TURBOSMTP_HOST`, `TURBOSMTP_PORT`, `TURBOSMTP_USER` (Consumer Key), `TURBOSMTP_PASS` (Consumer Secret), `TURBOSMTP_FROM`.
+
+**Email provider:** TurboSMTP via `smtplib` (Python stdlib — no new
+dependency in `requirements.txt`). Dev/testing only — switch to
+SendGrid with HIPAA BAA before go-live.
+
+**Confirmed delivered:** TurboSMTP Analytics shows `Delivered` to
+`kompaniaadvokat@gmail.com` at 2026-07-06 21:59:56.
+
+---
+
 ## 2026-07-06 — Session 21 (continued)
 
 ### Billing packet ZIP download — complete

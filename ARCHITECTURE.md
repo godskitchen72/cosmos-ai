@@ -107,6 +107,7 @@ exist for these.**
 - 021 — `practice_settings.mfa_required boolean DEFAULT false` (Session 17)
 - 022 — `patient_visits.nf3_preflight_passed boolean DEFAULT false`; NF-3 workflow preflight columns (Session 17)
 - 023 — `audit_logs` table (`id`, `created_at`, `user_id`, `user_role`, `action`, `entity_type`, `entity_id`, `old_data jsonb`, `new_data jsonb`, `ip_address`); indexes; RLS `authenticated` SELECT + INSERT; DB triggers on 7 tables (Session 17/18)
+- 024 — `patients.attorney_email text` — stores attorney email auto-filled from `lawyers.email`; used by `/send-billing-packet` endpoint (Session 22)
 
 Key tables referenced throughout the codebase: `patients`,
 `patient_visits` (visit-scoped data, including `cpt_codes`/`icd10_codes`,
