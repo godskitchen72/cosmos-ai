@@ -1,3 +1,61 @@
+## 2026-07-07 -- Session 23
+
+### PC NPI full-stack implementation
+
+Migration 025: ALTER TABLE doctors ADD COLUMN IF NOT EXISTS pc_npi text
+
+cosmos-api/database.py complete rewrite with _resolve_billing_npi resolver:
+- Supervised provider uses supervisor pc_npi
+- PC corp provider uses own pc_npi
+- Sole proprietor uses own individual npi
+
+All 11 forms/*.py patched: doctor_npi replaced with billing_npi.
+nf3.py internal resolver block removed (moved to database.py).
+
+DoctorsSection.tsx: pc_npi field in Billing tab (hidden for sole proprietors).
+Card display: PC corp shows PC NPI, sole prop shows NPI, supervised shows Lic.
+shared.tsx: pc_npi added to BLANK_DOCTOR.
+
+### Dev generator attorney_email fix
+
+app/dev/page.tsx: lawyers select includes email; patient insert includes
+attorney_email populated from atty.email.
+
+### MD V2 dashboard (new primary MD patient chart)
+
+New route /md-v2/[patientId] using shadcn components.
+V2 is now the primary MD patient chart.
+/md/[patientId] remains the clinical visit entry point via Start Visit button.
+
+New files:
+- app/md-v2/[patientId]/page.tsx
+- app/md-v2/[patientId]/PatientChartV2.tsx (Pat Profile / History / New Visit tabs)
+- app/md-v2/[patientId]/InfoTabV2.tsx (shadcn patient profile)
+- app/md-v2/[patientId]/HistoryTabV2.tsx (shadcn history)
+- app/md-v2/page.tsx (redirect to /md)
+
+Pat Profile: one-line cyan header (PTID DOB DOA Carrier) + claim/pol line;
+collapsible Attorney card; pain scores grid; visit summary.
+History: shadcn Card per visit, bottom drawer, PCE generation.
+New Visit: Start Visit button to /md/{patientId}.
+
+MDClient.tsx: full shadcn rewrite; cards route to /md-v2/; colored left border.
+
+### Login page improvements
+
+app/page.tsx: shadcn Card role selector with descriptions; cyan location picker;
+autoComplete off on login fields; sessionStorage.clear on all Sign Out buttons.
+Pre-login signOut removed from handleLogin (was causing hang).
+
+DashboardClient.tsx MDClient.tsx BillerDashboard.tsx: sessionStorage.clear added.
+
+Open bug: re-login hang when switching users not fully resolved.
+
+### TurboSMTP account closure
+
+Account closed by TurboSMTP (spam detection). /send-billing-packet broken.
+SendGrid setup required before go-live.
+
 ## 2026-07-06 — Session 22
 
 ### Backend billing packet ZIP — complete
