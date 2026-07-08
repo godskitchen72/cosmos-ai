@@ -1,3 +1,81 @@
+## 2026-07-08 — Session 26
+
+### Referral Management Module — Phase 1 Route Deployment
+
+Five /referrals route files written to repo and deployed via split heredoc
+method (designed Session 25, not yet on disk):
+
+app/referrals/types.ts (293 lines) — ReferralStatus type, ALL_STATUSES,
+TERMINAL_STATUSES, REFERRAL_STATUS_META (15 statuses, badge colors/icons),
+VALID_TRANSITIONS, ReferralUrgency, URGENCY_META, UserRole, ROLE_PERMISSIONS,
+CATEGORY_COLOR, categoryColor(), all DB row interfaces, ReferralSummary,
+ReferralDetail, ReferralMetrics, form input types, ReferralFilters.
+
+app/referrals/actions.ts (314 lines) — Server Actions: createReferral,
+updateReferralStatus (validates VALID_TRANSITIONS), scheduleAppointment
+(auto-advances to scheduled), uploadReferralResult (auto-chains to
+needs_review), addReferralNote, getReferralMetrics (8 KPIs parallel),
+listReferrals (filters + PostgREST join shape), getReferralTypes,
+getReferralProviders. Uses createServerClient with async cookie wrapper.
+
+app/referrals/page.tsx — server-side auth removed (middleware handles it);
+parallel fetch; userRole hardcoded 'md' pending role-aware pattern.
+
+app/referrals/ReferralDashboard.tsx (356 lines) — 8 metric cards (clickable
+filter), TanStack Table (sort/pagination), filter bar, Sheet trigger, Refresh.
+
+app/referrals/ReferralSheet.tsx (303 lines) — 5-tab detail panel (Overview,
+Appointment, Documents, Notes, Timeline) + status action buttons per
+VALID_TRANSITIONS + note entry with live Supabase fetch.
+
+TSC errors resolved:
+- createServerComponentClient → createServerClient
+- Next.js 15 async cookies: await cookies() + get/set/remove wrapper
+- async getClient() + await at all call sites
+
+Confirmed working: dashboard renders, metric cards clickable, table sortable,
+Sheet opens on row tap, Notes tab functional.
+
+Commit b97e812..ed56af5 — Vercel Ready in 38s.
+
+### MD Dashboard — Referrals Nav Button
+
+app/md/MDClient.tsx — 🔗 Referrals button added to header alongside Schedule
+and Sign Out. router.push('/referrals'). Always visible (not gated on doctorId).
+Restored from git checkout HEAD after multiple patch corruptions before final
+clean Python patch applied.
+
+Lesson: git checkout HEAD -- <file> before patching a file with 3+ prior
+patches. Never patch a corrupted working-tree file.
+
+### Referral Dual-Write Bridge — PT, Ortho, Pain Mgmt, VNG, ANS
+
+Five referral screens patched via ~/patch_dualwrite.py (deleted post-commit).
+Each file receives createLifecycleRecord(filename) — fire-and-forget after
+PDF success. Writes referrals + referral_status_history + referral_timeline +
+referral_notifications rows. ✓ TRACKED badge in header on success.
+
+Files patched:
+- app/md/[patientId]/pt/PtReferral.tsx (code: PT)
+- app/md/[patientId]/ortho/OrthoReferral.tsx (code: ORTHO)
+- app/md/[patientId]/pain-mgmt/PainMgmtReferral.tsx (code: PAIN-MGMT)
+- app/md/[patientId]/vng/VngReferral.tsx (code: VNG)
+- app/md/[patientId]/ans/AnsReferral.tsx (code: ANS)
+
+RX and DME deferred — referral_types has no RX or DME code rows. Seed SQL
+recorded in HANDOVER.md Open Items #11.
+
+Confirmed working: Pain Management, VNG, Orthopedic, ANS all appear in MD V2
+Referrals tab with New status and correct category colors after generation.
+
+referral_types.code confirmed present. All bridges use .eq('code', ...) lookup.
+Codes: MRI, CT, MRA, ULTRASOUND, PT, ORTHO, PAIN-MGMT, EMG, VNG, ANS.
+
+Lesson: Python os.path in Termux uses /data/data/com.termux/files/home/ not /root/.
+Lesson: createServerClient cookie wrapper required — await cookies() returns
+Promise<ReadonlyRequestCookies> in Next.js 15; wrap with get/set/remove methods.
+Lesson: Vercel preview URL domain isolation — cookies scoped per domain; always
+test on cosmos-dashboard-nu.vercel.app aliased domain.
 ## 2026-07-07 — Session 25
 
 ### Referral Management Module — Phase 1: Foundation

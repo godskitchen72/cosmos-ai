@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 7, 2026, Session 25)
+# Cosmos Medical Technologies — HANDOVER (July 8, 2026, Session 26)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -14,112 +14,116 @@ self-contained.
 ## Current Status
 
 All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed and live.
-Referral Management Module Phase 1 + 2 complete and live.
-Migration 026 confirmed deployed (9 tables, 9 rows in `referral_types`).
+Referral Management Module Phase 1 + 2 + partial Phase 3 complete and live.
+Migration 026 confirmed deployed (9 tables, 11 rows in `referral_types` after
+RX and DME deferred — 9 seeded rows confirmed; PT and ORTHO codes confirmed).
 TurboSMTP account closed (spam detection). SendGrid is the target provider.
 
 ---
 
-## Completed This Session (Session 25)
+## Completed This Session (Session 26)
 
-### Referral Management Module — Phase 1: Foundation
+### Referral Management Module — Phase 1 Route Deployment
 
-New route `/referrals` — dedicated referral management dashboard.
-shadcn/ui scoped exception approved for this surface (same CSS-variable
-bridge pattern as Biller and Admin dashboards).
+Five `/referrals` route files written to repo and deployed (designed Session 25,
+deployed this session via split heredoc method):
 
-**Migration 026** — 9 new tables, all RLS-enabled, `authenticated` role only:
-`referral_providers`, `referral_types` (seeded with 10 types), `referrals`,
-`referral_appointments`, `referral_documents`, `referral_status_history`,
-`referral_timeline`, `referral_notes`, `referral_notifications`.
-Run in Supabase SQL editor in 3 blocks. Confirmed: 9 rows in `referral_types`.
+**`app/referrals/types.ts`** (293 lines) — exports `ReferralStatus`, `ALL_STATUSES`,
+`TERMINAL_STATUSES`, `REFERRAL_STATUS_META` (15 statuses, badge colors/icons),
+`VALID_TRANSITIONS` map, `ReferralUrgency`, `URGENCY_META`, `UserRole`,
+`ROLE_PERMISSIONS`, `CATEGORY_COLOR`, `categoryColor()`, all DB row interfaces,
+`ReferralSummary`, `ReferralDetail`, `ReferralMetrics`, form input types,
+`ReferralFilters`.
 
-**`app/referrals/types.ts`** — complete TypeScript types: 15 statuses with
-badge colors/icons, valid transition map, urgency metadata, role permission
-matrix, all DB row types, joined query types, form input types, metrics type.
-
-**`app/referrals/actions.ts`** — Server Actions: `createReferral`,
-`updateReferralStatus` (validates against transition map), `scheduleAppointment`
-(auto-advances status), `uploadReferralResult` (auto-chains to needs_review),
-`addReferralNote`, `getReferralMetrics` (8 KPIs parallel), `listReferrals`
-(with filters, PostgREST join shape handled), `getReferralTypes`,
+**`app/referrals/actions.ts`** (314 lines) — Server Actions using `createServerClient`
+with cookie wrapper pattern (Next.js 15 async cookies fix applied):
+`createReferral`, `updateReferralStatus` (validates VALID_TRANSITIONS),
+`scheduleAppointment` (auto-advances to scheduled), `uploadReferralResult`
+(auto-chains to needs_review), `addReferralNote`, `getReferralMetrics` (8 KPIs
+parallel), `listReferrals` (filters + PostgREST join shape), `getReferralTypes`,
 `getReferralProviders`.
 
-**`app/referrals/page.tsx`** — server component, auth gate (all roles except
-none), initial parallel data fetch (metrics + referrals + types).
+**`app/referrals/page.tsx`** — server-side auth removed (middleware handles it);
+parallel fetch of metrics + referrals + types + providers; passes to
+`ReferralDashboard`. `userRole` hardcoded `'md'` pending role-aware server
+component pattern.
 
-**`app/referrals/ReferralDashboard.tsx`** — client: 8 metric cards (clickable
-to filter table), TanStack table (sort/filter/pagination/search), filter bar
-(status/type/urgency/global search), row click opens Sheet, Refresh button.
+**`app/referrals/ReferralDashboard.tsx`** (356 lines) — client component:
+8 metric cards (clickable to filter table), TanStack Table (sort/pagination),
+filter bar (status/urgency/type/search), row click opens Sheet, Refresh button.
+Uses shadcn Card/Table/Badge/Button/Input. Oxanium font. Palette-matched inline
+styles per project standard.
 
-**`app/referrals/ReferralSheet.tsx`** — right-side detail Sheet: 7 tabs
-(Overview, Patient, Provider, Appointment, Documents, Notes, Timeline) +
-status action buttons per role + note entry.
+**`app/referrals/ReferralSheet.tsx`** (303 lines) — right-side detail Sheet:
+5 tabs (Overview, Appointment, Documents, Notes, Timeline), status action
+buttons per VALID_TRANSITIONS, note entry with live Supabase fetch.
 
-**Key design decisions:**
-- `referral_providers` is explicitly separate from `doctors` table —
-  external specialists ≠ treating/billing providers. Never conflate.
-- `referral_notifications` stubs at `delivery_status = 'queued'`,
-  `sent_at = null` — no schema change needed when SendGrid is wired.
-- `referral_timeline` is append-only — no DELETE policy. Nothing ever removed.
-- `referral_appointments.is_current` preserves full reschedule history.
-- 15-status engine with explicit transition map enforced in server actions.
-- Dual-write is fire-and-forget — PDF generation always primary path.
+**TSC errors resolved this session:**
+- `createServerComponentClient` → `createServerClient` (not exported by this
+  package version)
+- Cookie wrapper pattern: `await cookies()` + `get/set/remove` object (Next.js
+  15 async cookies)
+- `async function getClient()` + `await getClient()` at all call sites
 
-### Referral Management Module — Phase 2: MRI Dual-Write Bridge + V2 Tab
+**Deployment:** commit `b97e812..ed56af5` — Vercel ✓ Ready in 38s.
 
-**`app/md/[patientId]/mri/MriReferral.tsx`** — dual-write bridge added.
-After successful PDF generation, `createLifecycleRecord()` fires
-asynchronously (non-blocking, non-awaited). Derives modality from selected
-keys: `ct.*` → CT, `mri.mra.*` → MRA, all other `mri.*` → MRI. Writes to
-`referrals`, `referral_status_history`, `referral_timeline`,
-`referral_notifications`. Failure logged to console only — never shown to MD,
-never rolls back PDF. `✓ TRACKED` badge appears in header on success.
+### MD Dashboard — Referrals Nav Button
 
-**`app/md-v2/[patientId]/ReferralsTabV2.tsx`** — new component. Queries
-`referrals` table directly for patient. Shows lifecycle status cards with
-status badges, overdue highlighting, appointment dates, provider name.
-Filter pills: All / Open / Closed. "Full Dashboard →" routes to `/referrals`.
-Status metadata inlined (not imported from `/referrals/types`) to avoid
-module resolution issues before Phase 1 files are fully wired.
+`app/md/MDClient.tsx` — `🔗 Referrals` button added to header button row
+(alongside Schedule and Sign Out). `router.push('/referrals')` — always visible,
+not gated on `doctorId`. Commit `ed56af5..` — Vercel ✓ Ready in 38s.
 
-**`app/md-v2/[patientId]/PatientChartV2.tsx`** — Referrals tab added as
-fourth tab. Tab strip font reduced to 10px to fit four tabs on mobile.
+### Referral Dual-Write Bridge — PT, Ortho, Pain Mgmt, VNG, ANS
 
-**TSC error resolved:** `ReferralsTabV2.tsx` initially imported from
-`'@/app/referrals/types'` which doesn't exist in repo yet (Phase 1 files
-designed but not deployed as live route). Fixed by inlining
-`REFERRAL_STATUS_META` and `URGENCY_META` constants directly in the component
-via Python patch script. Lesson: types shared between a new module and
-existing components must either be deployed together or inlined until the
-module route is live.
+Five referral screens patched via `~/patch_dualwrite.py` (deleted post-commit):
 
-**Commit:** `df0341e..c2428f8` — deployed Vercel production in 41s.
+- `app/md/[patientId]/pt/PtReferral.tsx` — code `PT`
+- `app/md/[patientId]/ortho/OrthoReferral.tsx` — code `ORTHO`
+- `app/md/[patientId]/pain-mgmt/PainMgmtReferral.tsx` — code `PAIN-MGMT`
+- `app/md/[patientId]/vng/VngReferral.tsx` — code `VNG`
+- `app/md/[patientId]/ans/AnsReferral.tsx` — code `ANS`
+
+Each receives identical bridge: `createLifecycleRecord(filename)` fires
+fire-and-forget after PDF success. Writes `referrals` + `referral_status_history`
++ `referral_timeline` + `referral_notifications`. `✓ TRACKED` badge in header
+on success. Failure console-logged only — never shown to MD, never rolls back PDF.
+Same pattern as `MriReferral.tsx` (Session 25).
+
+**Confirmed working:** Pain Management, VNG, Orthopedic, ANS all appear in MD V2
+Referrals tab with "New" status and correct category colors after generation.
+
+**RX and DME deferred** — `referral_types` has no `RX` or `DME` code rows.
+Seeding deferred by product decision this session.
+
+**Commit:** `ed56af5..` — Vercel ✓ Ready.
+
+### Known Architecture Gap Resolved
+
+`referral_types.code` column confirmed present (Migration 026). Existing
+`fetchReferralTypeId(code)` pattern in `MriReferral.tsx` is correct.
+All new bridges use the same `.eq('code', ...)` lookup.
 
 ---
 
 ## Completed Prior Sessions (carried forward)
 
+### Session 25
+
+Referral Management Module Phase 1 + 2 designed and partially deployed.
+Five `/referrals` route files designed (deployed Session 26 above).
+MRI dual-write bridge deployed. `ReferralsTabV2.tsx` + Referrals tab in
+`PatientChartV2.tsx` deployed. Migration 026 (9 tables) deployed.
+shadcn/ui approved as fifth scoped exception for `/referrals` surface.
+
 ### Session 24
 
-**Re-login hang — fully resolved.** Root cause: `setLoading(false)` never
-called on success path. `cosmos_login_marker` sessionStorage guard added.
-Direct `localStorage.removeItem` before `signIn`. All Sign Out buttons reset
-full state. `autoComplete` restored.
+Re-login hang fully resolved. `setLoading(false)` on success path.
+`cosmos_login_marker` sessionStorage guard. Direct localStorage token removal.
 
 ### Session 23
 
-**PC NPI full-stack:** Migration 025 (`pc_npi` on `doctors`), `_resolve_billing_npi`
-in `database.py`, all 11 `forms/*.py` patched to `billing_npi`, `DoctorsSection.tsx`
-UI, `shared.tsx` `BLANK_DOCTOR` updated.
-
-**Dev generator:** `attorney_email` null gap fixed in `app/dev/page.tsx`.
-
-**MD V2 dashboard:** `/md-v2/[patientId]` is now the primary MD patient chart.
-`/md/[patientId]` remains the clinical visit entry point via Start Visit.
-`MDClient.tsx` full shadcn rewrite routes to `/md-v2/`.
-
-**TurboSMTP account closed:** `/send-billing-packet` broken. SendGrid required.
+PC NPI full-stack (Migration 025, `_resolve_billing_npi`, all 11 `forms/*.py`).
+MD V2 dashboard as primary MD chart. TurboSMTP closed.
 
 ---
 
@@ -144,32 +148,41 @@ UI, `shared.tsx` `BLANK_DOCTOR` updated.
 
 5. **DEV fill-all PCE button** — remove from `VisitTab.tsx` before go-live.
 
-6. **`ARCHITECTURE.md` updates:** shadcn exceptions (MD V2, MDClient, login,
-   `/referrals`), Migration 025, Migration 026. **Updated this session.**
+6. **Sidebar rollout to FD, MD, Biller.** Deferred.
 
-7. **Sidebar rollout to FD, MD, Biller.** Deferred.
-
-8. **Doctor mailing address data.** Gottesman and Kramer placeholders.
+7. **Doctor mailing address data.** Gottesman and Kramer placeholders.
    Test only.
 
-9. **`patients.doctor_id` NOT NULL.** Deferred to pre-production.
+8. **`patients.doctor_id` NOT NULL.** Deferred to pre-production.
 
-10. **Vercel Pro upgrade.** Eliminates cold starts. Do at go-live.
+9. **Vercel Pro upgrade.** Eliminates cold starts. Do at go-live.
 
-11. **Referral Module Phase 3** — FD scheduling workflow: schedule appointment
-    form inside ReferralSheet Appointment tab, confirmation number entry,
-    patient confirmation toggle, appointment outcome recording, Provider
-    Directory management UI (CRUD for `referral_providers`), overdue detection.
+10. **Referral Module Phase 3 (remaining):**
+    - FD scheduling workflow: schedule appointment form inside ReferralSheet
+      Appointment tab, confirmation number entry, patient confirmation toggle,
+      appointment outcome recording
+    - Provider Directory management UI (CRUD for `referral_providers`)
+    - Overdue detection (metric card exists; no automated flagging yet)
 
-12. **Deploy `/referrals` route files to repo.** `app/referrals/types.ts`,
-    `actions.ts`, `page.tsx`, `ReferralDashboard.tsx`, `ReferralSheet.tsx`
-    were designed this session but not yet written to the repo via heredoc.
-    Required before Phase 3 and before `ReferralsTabV2.tsx` can import from
-    `@/app/referrals/types` instead of inlining constants.
+11. **Dual-write bridge for RX and DME.** Deferred — `referral_types` needs
+    `RX` and `DME` rows seeded first. Seed SQL:
+    ```sql
+    INSERT INTO referral_types (code, label, category, is_active, sort_order, legacy_form_tag)
+    VALUES ('RX', 'Prescription', 'specialist', true, 10, 'RX'),
+           ('DME', 'Durable Medical Equipment', 'specialist', true, 11, 'DME');
+    ```
+    Then patch `RxReferral.tsx` and `DmeReferral.tsx` with the same bridge
+    pattern used for PT/Ortho/Pain Mgmt/VNG/ANS this session.
 
-13. **Dual-write bridge for remaining referral types.** Only `MriReferral.tsx`
-    has the lifecycle dual-write so far. PT, VNG, ANS, Ortho, Pain Mgmt, Rx,
-    DME all need the same pattern in Phase 3.
+12. **`ReferralsTabV2.tsx` import cleanup.** Still inlines `REFERRAL_STATUS_META`
+    and `URGENCY_META`. Now that `/referrals/types.ts` is deployed, update to
+    import from `@/app/referrals/types` and remove inlined constants.
+
+13. **`/referrals` nav from Admin/FD dashboards.** Only MD dashboard has the
+    🔗 Referrals button. Admin and FD have no path to `/referrals` yet.
+
+14. **`userRole` in `page.tsx`.** Currently hardcoded `'md'`. Should resolve
+    from session for role-aware Sheet action buttons.
 
 ---
 
@@ -209,7 +222,11 @@ UI, `shared.tsx` `BLANK_DOCTOR` updated.
 - [x] Login shadcn (Session 23)
 - [x] Re-login hang fixed (Session 24)
 - [x] Referral Management Module Phase 1 + 2 (Session 25)
-- [ ] Referral Module Phase 3-5 (scheduling, results, notifications, providers)
+- [x] Referral Module Phase 1 route deployed (Session 26)
+- [x] Referral dual-write: PT, Ortho, Pain Mgmt, VNG, ANS (Session 26)
+- [x] MD dashboard Referrals nav button (Session 26)
+- [ ] Referral Module Phase 3 (scheduling, results, notifications, providers)
+- [ ] RX + DME dual-write bridge (seed referral_types first)
 - [ ] Sidebar rollout — FD, MD, Biller dashboards
 - [ ] Holistic UX audit
 - [ ] Accessibility (ARIA, keyboard nav)
@@ -225,27 +242,28 @@ UI, `shared.tsx` `BLANK_DOCTOR` updated.
 
 ## Known Architecture Gaps
 
-**Referral module `/referrals/types.ts` not yet in repo as live file.**
-`ReferralsTabV2.tsx` inlines `REFERRAL_STATUS_META` and `URGENCY_META`
-to avoid import failure. When Phase 3 deploys the full `/referrals` route
-files, update `ReferralsTabV2.tsx` to import from `@/app/referrals/types`
-and remove the inlined constants.
+**`ReferralsTabV2.tsx` inlines status constants.** Still inlines
+`REFERRAL_STATUS_META` and `URGENCY_META` from Session 25 workaround.
+Update to `import from '@/app/referrals/types'` now that Phase 1 is live.
 
-**Referral dual-write bridge: MRI only.** Only `MriReferral.tsx` creates
-lifecycle records. All other referral screens (PT, VNG, ANS, Ortho, Pain
-Mgmt, Rx, DME) still only write PDFs to `patient_forms`. Phase 3 adds
-the bridge to remaining screens.
+**`/referrals/page.tsx` userRole hardcoded.** `userRole="md"` passed to
+`ReferralDashboard`. Role-aware server component pattern not yet implemented
+for this surface. Sheet action buttons will show MD-role transitions regardless
+of actual logged-in role.
+
+**`/referrals` nav missing from Admin and FD.** Only MD dashboard has the
+🔗 Referrals button. Phase 3 item.
+
+**Referral dual-write bridge: MRI + PT + Ortho + Pain Mgmt + VNG + ANS only.**
+RX and DME still only write PDFs. Seed `referral_types` then patch.
 
 **MD V2 as primary route:** `/md-v2/[patientId]` is the primary MD chart.
 `/md/[patientId]` is the clinical visit entry point.
-`/md` patient list routes to `/md-v2/` for all patient taps.
-Biller flag taps route to `/md/` with `visit_id` for flag resolution.
 
-**shadcn exception extended Session 23 + 25:** MD V2 route, MDClient,
-login page, `/referrals` dashboard. `ARCHITECTURE.md` updated this session.
+**shadcn exception extended Sessions 23 + 25:** MD V2, MDClient, login,
+`/referrals`. `ARCHITECTURE.md` updated Session 25.
 
-**`billing_npi` is the only NPI used in PDF forms.** `doctor_npi` retained in
-`database.py` output dict for internal reference only. All `forms/*.py` confirmed.
+**`billing_npi` is the only NPI used in PDF forms.** All `forms/*.py` confirmed.
 
 **`pc_npi` column:** Migration 025. No on-disk SQL file.
 
@@ -254,8 +272,11 @@ login page, `/referrals` dashboard. `ARCHITECTURE.md` updated this session.
 **`patient_forms` RLS disabled:** Supabase security advisor flagged this table
 as publicly accessible. Known gap — must be resolved before go-live.
 
-**Auth server-component gap:** `createServerComponentClient` not exported.
-`doctor_id` URL param is the reliable doctor-scoping path.
+**Auth server-component gap:** `createServerClient` (not `createServerComponentClient`)
+is the correct export from `@supabase/auth-helpers-nextjs` in this project's
+package version. Cookie wrapper required: `await cookies()` + `get/set/remove`
+object pattern. Confirmed needed in `/referrals/actions.ts` and `page.tsx`
+this session.
 
 **`patient_visits.doctor_id` missing:** relies on `patients.doctor_id`.
 
@@ -268,7 +289,7 @@ many-to-one. Always handle both:
 **`patients.doctor_id` NOT NULL deferred:** 3 test patients have null `doctor_id`.
 
 **`cosmos_license_type` in sessionStorage:** CPT filter depends on this
-value being set at login. NP and PA map to MD codes via `effectiveLicenseType`.
+value being set at login.
 
 **Session timeout SSR:** `useSessionTimeout` reads sessionStorage inside
 `useEffect` to avoid SSR crash.
@@ -276,69 +297,57 @@ value being set at login. NP and PA map to MD codes via `effectiveLicenseType`.
 **Superadmin timeout exemption:** Superadmin gets `cosmos_session_timeout_minutes = '0'`
 at login. Hook treats `0` as disabled.
 
-**Biller W9 resolution:** `billing/page.tsx` must include
-`supervising_provider_id` in doctors select for W9 chain to work.
-
 **`nf3_preflight_passed` gate:** FD submission requires preflight check.
-`PatientProfile.tsx` reads from `patient_visits` via `select('*')`.
 
 **`biller_md_flags` fetch condition:** `billing/page.tsx` fetches both
 pending and rejected-undismissed flags via PostgREST `.or()`.
 
-**Audit log user attribution:** DB trigger entries show "System" — no
-PostgreSQL session context. Only frontend-written entries have real user
-attribution.
-
-**`audit_logs` anon RLS:** Table has authenticated INSERT only — frontend
-`writeAuditLog()` works because users are authenticated when actions fire.
+**Audit log user attribution:** DB trigger entries show "System".
 
 **MFA `localStorage` device trust:** Key format:
 `cosmos_mfa_trusted_{email_normalized}`. 30-day expiry as Unix timestamp.
-Clearing localStorage or new browser forces re-challenge.
 
-**`login_attempts` RLS:** Must include `anon` role — lockout check runs
-before user is authenticated.
+**`login_attempts` RLS:** Must include `anon` role.
 
-**Admin sidebar `localStorage`:** Key `cosmos_admin_sidebar_open`. Defaults
-to expanded (`true`) on first load if key is absent.
+**Admin sidebar `localStorage`:** Key `cosmos_admin_sidebar_open`.
 
-**`ARCHITECTURE.md` migration list gap:** Migrations 020-025 added in prior
-sessions. Migration 026 added this session.
+**`ARCHITECTURE.md` migration list gap:** Migrations 020-026 added in prior
+sessions. No migrations this session.
 
-**Edit form scroll context:** CPT and ICD-10 edit forms must render at top
-of section — sidebar layout makes bottom-rendered forms scroll out of mobile
-viewport, appearing as if Edit does nothing.
+**`_fmt_date` fallback:** Returns `"00000000"` when null/missing.
 
-**`_fmt_date` fallback:** Returns `"00000000"` when `doi` or `visit_date`
-is null/missing. Data quality issue, not a code bug.
+**`REFERRAL_FORM_CONFIG` dual keys:** `tag` = DB value, `fn_type` = filename.
 
-**Login `practice_settings` fetch:** Admin/billing path fetches both
-`mfa_required` and `session_timeout_minutes` in one query via
-`checkAndHandleMfa`. MD/PA/NP path fetches `session_timeout_minutes`
-separately in `handlePostLogin`.
+**Zip `patient_forms` visit_id gap:** legacy null rows silently excluded.
 
-**`REFERRAL_FORM_CONFIG` dual keys:** `tag` = DB `form_type` value stored
-in `patient_forms` — never change without also updating `ReferralGrid.tsx`.
-`fn_type` = lowercase filename token — filename only, no DB usage.
+**`send_billing_endpoint.py` register pattern:** Extracted to separate file.
 
-**Zip `patient_forms` visit_id gap:** legacy rows with `visit_id = null`
-silently excluded from billing packet zip. Backfill needed — see Open Items #3.
+**TurboSMTP dev-only:** Account closed Session 23.
 
-**`send_billing_endpoint.py` register pattern:** Extracted to separate file,
-wired into `main.py` via `register()` receiving `app`, `get_db`,
-`verify_jwt`, `Depends`, `SUPABASE_URL`, `SUPABASE_KEY`, `BUCKET`, `_fmt_date`.
-
-**TurboSMTP dev-only:** Account closed Session 23. Must switch to SendGrid
-before go-live with real patient data.
-
-**`attorney_email` auto-fill:** Populated from `lawyers.email` when FD
-selects an attorney in PatientForm. Backend returns HTTP 400 if null at send time.
+**`attorney_email` auto-fill:** Populated from `lawyers.email` at FD intake.
 
 **Login `cosmos_login_marker`:** Set in sessionStorage after successful login.
-Cleared by `sessionStorage.clear()` on every Sign Out button.
 
 **Supabase auth token localStorage key:**
-`sb-ttudxnzmybcwrtqlbtta-auth-token` — cleared directly before `signIn`.
+`sb-ttudxnzmybcwrtqlbtta-auth-token`.
+
+**Referral dual-write is fire-and-forget** — `createLifecycleRecord()` never
+awaited; failure console-logged only; never surfaces to MD or rolls back PDF.
+
+**Referral modality derived from selected keys (MRI only)** — CT: `ct.*`;
+MRA: `mri.mra.*`; MRI: all other `mri.*`. PT/Ortho/Pain Mgmt/VNG/ANS use
+static type code lookup only.
+
+**`referral_types` code column confirmed** — `.eq('code', ...)` is the correct
+lookup. Codes: MRI, CT, MRA, ULTRASOUND, PT, ORTHO, PAIN-MGMT, EMG, VNG, ANS.
+RX and DME not yet seeded.
+
+**Vercel preview URL domain isolation** — session cookies are scoped to the
+aliased domain (`cosmos-dashboard-nu.vercel.app`). Preview deployment URLs
+(`*-godskitchen72s-projects.vercel.app`) have separate cookie scope. Always
+test on the aliased domain. The 🔗 Referrals button and "Full Dashboard →" link
+both use `router.push` (same-domain navigation) so they work correctly once
+the user is logged in on the aliased domain.
 
 ---
 
@@ -348,6 +357,17 @@ Cleared by `sessionStorage.clear()` on every Sign Out button.
 
 | File | Confidence |
 |---|---|
+| `cosmos-dashboard/app/referrals/types.ts` | ★ Verified-final (Session 26 — new file) |
+| `cosmos-dashboard/app/referrals/actions.ts` | ★ Verified-final (Session 26 — new file) |
+| `cosmos-dashboard/app/referrals/page.tsx` | ★ Verified-final (Session 26 — new file) |
+| `cosmos-dashboard/app/referrals/ReferralDashboard.tsx` | ★ Verified-final (Session 26 — new file) |
+| `cosmos-dashboard/app/referrals/ReferralSheet.tsx` | ★ Verified-final (Session 26 — new file) |
+| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (Session 26 — Referrals button) |
+| `cosmos-dashboard/app/md/[patientId]/pt/PtReferral.tsx` | ★ Verified-final (Session 26 — dual-write bridge) |
+| `cosmos-dashboard/app/md/[patientId]/ortho/OrthoReferral.tsx` | ★ Verified-final (Session 26 — dual-write bridge) |
+| `cosmos-dashboard/app/md/[patientId]/pain-mgmt/PainMgmtReferral.tsx` | ★ Verified-final (Session 26 — dual-write bridge) |
+| `cosmos-dashboard/app/md/[patientId]/vng/VngReferral.tsx` | ★ Verified-final (Session 26 — dual-write bridge) |
+| `cosmos-dashboard/app/md/[patientId]/ans/AnsReferral.tsx` | ★ Verified-final (Session 26 — dual-write bridge) |
 | `cosmos-dashboard/app/md/[patientId]/mri/MriReferral.tsx` | ★ Verified-final (Session 25 — dual-write bridge) |
 | `cosmos-dashboard/app/md-v2/[patientId]/PatientChartV2.tsx` | ★ Verified-final (Session 25 — Referrals tab) |
 | `cosmos-dashboard/app/md-v2/[patientId]/ReferralsTabV2.tsx` | ★ Verified-final (Session 25 — new file) |
@@ -368,7 +388,7 @@ Cleared by `sessionStorage.clear()` on every Sign Out button.
 | `cosmos-dashboard/app/admin/components/DoctorsSection.tsx` | ★ Verified-final (Session 23 — `pc_npi`) |
 | `cosmos-dashboard/app/admin/shared.tsx` | ★ Verified-final (Session 23 — `pc_npi` in `BLANK_DOCTOR`) |
 | `cosmos-dashboard/app/dev/page.tsx` | ★ Verified-final (Session 23 — `attorney_email` fix) |
-| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (Session 23 — shadcn, `/md-v2/`) |
+| `cosmos-dashboard/app/md/MDClient.tsx` | ★ Verified-final (Session 26 — Referrals button) |
 | `cosmos-dashboard/app/md-v2/[patientId]/page.tsx` | ★ Verified-final (Session 23) |
 | `cosmos-dashboard/app/md-v2/[patientId]/InfoTabV2.tsx` | ★ Verified-final (Session 23) |
 | `cosmos-dashboard/app/md-v2/[patientId]/HistoryTabV2.tsx` | ★ Verified-final (Session 23) |
@@ -395,12 +415,12 @@ Cleared by `sessionStorage.clear()` on every Sign Out button.
 | `cosmos-dashboard/app/components/ui/CosmosUI.tsx` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/hooks/useSessionTimeout.ts` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/md/[patientId]/dme/DmeReferral.tsx` | ★ Verified-final (Session 13) |
-| `cosmos-dashboard/app/md/[patientId]/ortho/OrthoReferral.tsx` | ★ Verified-final (Session 13) |
-| `cosmos-dashboard/app/md/[patientId]/pain-mgmt/PainMgmtReferral.tsx` | ★ Verified-final (Session 13) |
-| `cosmos-dashboard/app/md/[patientId]/vng/VngReferral.tsx` | ★ Verified-final (Session 13) |
+| `cosmos-dashboard/app/md/[patientId]/ortho/OrthoReferral.tsx` | ★ Verified-final (Session 26 — dual-write bridge) |
+| `cosmos-dashboard/app/md/[patientId]/pain-mgmt/PainMgmtReferral.tsx` | ★ Verified-final (Session 26 — dual-write bridge) |
+| `cosmos-dashboard/app/md/[patientId]/vng/VngReferral.tsx` | ★ Verified-final (Session 26 — dual-write bridge) |
 | `cosmos-dashboard/app/md/[patientId]/rx/RxReferral.tsx` | ★ Verified-final (Session 13) |
-| `cosmos-dashboard/app/md/[patientId]/pt/PtReferral.tsx` | ★ Verified-final (Session 13) |
-| `cosmos-dashboard/app/md/[patientId]/ans/AnsReferral.tsx` | ★ Verified-final (Session 13) |
+| `cosmos-dashboard/app/md/[patientId]/pt/PtReferral.tsx` | ★ Verified-final (Session 26 — dual-write bridge) |
+| `cosmos-dashboard/app/md/[patientId]/ans/AnsReferral.tsx` | ★ Verified-final (Session 26 — dual-write bridge) |
 | `cosmos-dashboard/app/calendar/page.tsx` | ★ Verified-final (Session 13) |
 | `cosmos-dashboard/app/dashboard/page.tsx` | ★ Verified-final (Session 10) |
 | `cosmos-api/forms/base.py` | ★ Verified-final (Session 10) |
@@ -421,8 +441,8 @@ Cleared by `sessionStorage.clear()` on every Sign Out button.
 - **MFA `localStorage` device trust uses email-derived key** — clearing localStorage forces re-challenge
 - **Supabase `mfa.listFactors()` returns `factors.totp` array** — filter by `status === 'verified'`
 - **`login_attempts` RLS must include `anon` role** — lockout check runs before authentication
-- **Audit log DB triggers show "System" for user** — no PostgreSQL session context; use frontend `writeAuditLog()` for user-attributed events
-- **TanStack Table data prop must be memoized** — passing a non-memoized filtered array causes infinite re-renders and freezes; always wrap in `useMemo`
+- **Audit log DB triggers show "System" for user** — no PostgreSQL session context
+- **TanStack Table data prop must be memoized** — passing a non-memoized filtered array causes infinite re-renders
 - **Biller W9 badge requires supervisor-chain resolution**
 - **Dev generator Render cold-start pattern** — warm-up ping before each patient's referral batch
 - **`/tmp` does not persist in Termux** — use `~/`
@@ -434,49 +454,54 @@ Cleared by `sessionStorage.clear()` on every Sign Out button.
 - **NF-3 Section 16 LICENSE field is not NPI**
 - **`patients` primary key is `patient_id` (text)** — format: `PT457696`
 - **Supervised providers legitimately have null mailing addresses**
-- **CosmosUI `toastSuccess`/`toastError` both route through `AlertModal`** — no separate toast UI; all notifications require acknowledgment
+- **CosmosUI `toastSuccess`/`toastError` both route through `AlertModal`**
 - **New screens must mount `<AlertModal />` and `<ConfirmModal />`**
 - **`sessionStorage` reads must be in `useEffect`**
 - **Bash history expansion breaks inline `python3 -c` with `!`**
 - **Render env var changes trigger automatic redeploy**
 - **`~/storage/downloads/` writes can silently fail** — verify with `wc -l` or `ls`
-- **Large file refactors: read full source before splitting** — never reconstruct from changelog summaries
-- **`shared.tsx` pattern: all cross-section helpers in one file** — eliminates duplicate imports across component splits
+- **Large file refactors: read full source before splitting**
+- **`shared.tsx` pattern: all cross-section helpers in one file**
 - **Sidebar `localStorage` persistence: initialize in `useEffect` to avoid SSR hydration mismatch**
-- **Sidebar hover states on plain `<button>` elements require inline handlers** — Tailwind `hover:` purged at build time for dynamically constructed class strings
-- **Edit forms in sidebar layout must render at top of section** — bottom-rendered forms scroll out of mobile viewport, appearing as no-ops
-- **Patch script `old` anchor must match on-disk state exactly** — always `grep -n` to confirm current string before writing patch
-- **Termux heredoc buffer limit ~250 lines** — large heredocs truncate silently; split files >~250 lines into separate heredoc commands
-- **Line-number Python insert** (`lines.insert(N, text)`) is reliable when anchor-based patch fails — use `grep -n` to find target line first
-- **Submit button persistence after action** — after any Supabase update that changes list membership, always update local state immediately; never rely on `router.refresh()` alone
-- **Login perf: merge parallel `practice_settings` reads** — when two functions call the same table sequentially, combine into one query and pass the result as a parameter
-- **CosmosUI notification standard (Session 20):** single-record CRUD → `toastSuccess`/`toastError`; bulk operations, destructive completions, errors requiring acknowledgment → `AlertModal`. Rule documented in `AI_STYLE_GUIDE.md §2`
-- **NF-2 signature key mismatch** — `nf2.py` read `signature_url`; DB column is `patient_signature_url`. Always verify field keys against DB column names, not assumed naming patterns
-- **CPT CSV import parser fallback** — positional column fallback causes silent misreads when column count differs from expected. Always require explicit header match; never fall back to position
-- **Supabase CSV export uses `"null"` string** — not Python `None` or empty. Parser must treat literal `"null"` as null/missing value
-- **`pceData` must hydrate from existing visit on load** — initialize `useState` from `initialVisits.find(v => v.id === visitIdParam)?.pce_data` when `visitIdParam` present; default `{}` only for new visits
-- **PDF filename convention (Session 21)** — all filenames follow `patid_doa_dos_type.pdf` (per-visit) or `patid_doa_type.pdf` (patient-level). Dates are `YYYYMMDD`. Type tokens are lowercase. `REFERRAL_FORM_CONFIG.tag` is the DB value; `fn_type` is the filename token — never conflate them
-- **`_fmt_date` fallback is `"00000000"`** — signals a missing date on the patient record, not a code bug. Treat as a data quality issue
-- **Zip requires `patient_forms.visit_id`** — always set `visit_id` on insert; rows with `visit_id = null` are silently excluded from billing packet zip
-- **Supabase service key not in Termux env** — `SUPABASE_SERVICE_KEY` is only set on Render. Use Supabase dashboard SQL editor for ad-hoc queries
-- **Fresh doc uploads required before end-of-session updates** — session-start copies may be stale. Rule now in `SYSTEM_PROMPT.md §13`
-- **`send_billing_endpoint.py` register pattern (Session 22)** — when a FastAPI endpoint contains multi-line f-strings or complex string concatenation, extract it to a separate `.py` file and wire via a `register(app, ...)` function. Avoids heredoc string literal truncation/corruption in Termux
-- **TurboSMTP SMTP credentials are API key pairs** — Consumer Key = SMTP username, Consumer Secret = SMTP password. Not email/password. `starttls()` required on port 587
-- **`lawyers.email` is the attorney email source** — not a field on `patients` directly. `patients.attorney_email` is populated at intake/edit time from the selected lawyer record. Backend reads `patients.attorney_email` — ensure it is saved before testing email send
-- **Zip filename convention (Session 22):** `patid_doa_dos_billing_packet.zip` — includes `_billing_packet` suffix for clarity
+- **Sidebar hover states on plain `<button>` elements require inline handlers**
+- **Edit forms in sidebar layout must render at top of section**
+- **Patch script `old` anchor must match on-disk state exactly** — always `grep -n` to confirm
+- **Termux heredoc buffer limit ~250 lines** — large heredocs truncate silently; split files >~250 lines
+- **Line-number Python insert** (`lines.insert(N, text)`) is reliable when anchor-based patch fails
+- **Submit button persistence after action** — after any Supabase update that changes list membership, update local state immediately
+- **Login perf: merge parallel `practice_settings` reads**
+- **CosmosUI notification standard (Session 20):** single-record CRUD → toast; bulk/destructive → AlertModal
+- **NF-2 signature key mismatch** — always verify field keys against DB column names
+- **CPT CSV import parser fallback** — always require explicit header match; never fall back to position
+- **Supabase CSV export uses `"null"` string** — not Python `None` or empty
+- **`pceData` must hydrate from existing visit on load**
+- **PDF filename convention (Session 21)** — `patid_doa_dos_type.pdf`
+- **`_fmt_date` fallback is `"00000000"`** — signals missing date, not a code bug
+- **Zip requires `patient_forms.visit_id`** — rows with `visit_id = null` silently excluded
+- **Supabase service key not in Termux env** — use Supabase dashboard SQL editor for ad-hoc queries
+- **Fresh doc uploads required before end-of-session updates**
+- **`send_billing_endpoint.py` register pattern (Session 22)**
+- **TurboSMTP SMTP credentials are API key pairs**
+- **`lawyers.email` is the attorney email source**
+- **Zip filename convention (Session 22):** `patid_doa_dos_billing_packet.zip`
 - **Next.js 15 async params** — server components must use Promise params and `await params`
-- **Dynamic route folder naming in Termux** — use Python `os.makedirs` not `mkdir` for bracket folders; git tracks quoted folder names
-- **`billing_npi` is the only NPI key used in PDF forms** — `doctor_npi` retained in `database.py` output dict for internal reference only
-- **PC NPI field only shown for providers with PC corp** — sole proprietors excluded (`tax_classification === 'individual'`)
-- **Re-login hang root cause (Session 24)** — missing `setLoading(false)` on success path in `handleLogin`. All login steps completed but `loading` state never cleared, causing frozen "Signing in…" UI. `setLoading(false)` must be called in every `handlePostLogin` branch before stage transition.
-- **`supabase.auth.signOut()` inside `handleLogin` causes hang** — do not await `signOut()` before `signIn()` on the same singleton Supabase client; clear the session token directly via `localStorage.removeItem('sb-<project-ref>-auth-token')` instead
-- **Supabase localStorage token key** — `sb-ttudxnzmybcwrtqlbtta-auth-token`. Remove directly before `signIn` to avoid singleton client state race.
-- **`cosmos_login_marker` sessionStorage pattern** — set `'1'` after successful login in all `handlePostLogin` branches; `useEffect` on page mount skips session restore if marker is absent; `sessionStorage.clear()` on Sign Out removes it
-- **Patch anchor drift** — after multiple iterative patches to the same file, anchors become unreliable. Prefer full clean rewrite from known-good source when more than ~4 patches have accumulated on one file
-- **On-screen debug log pattern** — when DevTools are unavailable, add a `debugLog` state array, a `dlog(msg)` helper, and render a monospace cyan panel above the Submit button. Remove completely before final deploy via clean rewrite
-- **`autoComplete="new-password"` suppresses browser saved credentials entirely** — use only as a temporary diagnostic measure; restore `"email"` / `"current-password"` for production
-- **Referral dual-write is fire-and-forget** — `createLifecycleRecord()` is never awaited after PDF success; lifecycle failure is console-logged only and never surfaces to the MD or rolls back the PDF. This is by design — PDF generation is always the primary path.
-- **Referral modality derived from selected keys** — CT: `ct.*` prefix; MRA: `mri.mra.*` prefix; MRI: all other `mri.*` keys. No new UI needed; the existing metal-implant gate already enforces mutual exclusion.
-- **Shared types between new module and existing components** — if the module route files are not yet deployed to the repo, importing from `@/app/<module>/types` will fail TSC. Either deploy module files together or inline the needed constants in the consuming component until the module is live.
-- **Supabase SQL editor RLS prompt** — when creating tables, editor shows "Run and enable RLS" / "Run without RLS" dialog. Always choose "Run without RLS" when the migration SQL includes explicit `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` and `CREATE POLICY` statements — letting the editor auto-enable RLS skips the policy creation.
-- **Migration 026 run in 3 blocks** — Block 1: providers + types + seed. Block 2: referrals + appointments + documents + status_history + timeline + notes + notifications + indexes. Block 3: RLS + triggers. Each block confirmed "Success" before next.
+- **Dynamic route folder naming in Termux** — use Python `os.makedirs` not `mkdir` for bracket folders
+- **`billing_npi` is the only NPI key used in PDF forms**
+- **PC NPI field only shown for providers with PC corp**
+- **Re-login hang root cause (Session 24)** — missing `setLoading(false)` on success path
+- **`supabase.auth.signOut()` inside `handleLogin` causes hang**
+- **Supabase localStorage token key** — `sb-ttudxnzmybcwrtqlbtta-auth-token`
+- **`cosmos_login_marker` sessionStorage pattern**
+- **Patch anchor drift** — after multiple iterative patches to the same file, prefer full clean rewrite
+- **On-screen debug log pattern** — `debugLog` state + `dlog()` helper + monospace cyan panel
+- **`autoComplete="new-password"` suppresses browser saved credentials entirely**
+- **Referral dual-write is fire-and-forget**
+- **Referral modality derived from selected keys (MRI only)**
+- **Shared types between new module and existing components** — deploy module files together or inline until live
+- **Supabase SQL editor RLS prompt** — always choose "Run without RLS" when migration SQL includes explicit ENABLE ROW LEVEL SECURITY
+- **Migration 026 run in 3 blocks**
+- **`createServerComponentClient` not exported** — use `createServerClient` from `@supabase/auth-helpers-nextjs` with explicit cookie wrapper: `await cookies()` + `{ get, set, remove }` object. `cookies()` returns a Promise in Next.js 15 and must be awaited. `getClient()` must be `async` and called with `await`.
+- **Vercel preview URL domain isolation** — session cookies are scoped per domain. Always test on aliased domain (`cosmos-dashboard-nu.vercel.app`), not preview URLs. `router.push()` navigates within the same domain correctly.
+- **File repeated patch corruption** — after 3+ patches to the same file, restore from `git checkout HEAD -- <file>` before applying further changes. Never patch a corrupted working-tree file.
+- **Python `os.path` in Termux** — use `/data/data/com.termux/files/home/` not `/root/` as the home path in Python scripts.
+- **`referral_types.code` column** — confirmed present in Migration 026 schema. Codes: MRI, CT, MRA, ULTRASOUND, PT, ORTHO, PAIN-MGMT, EMG, VNG, ANS. RX and DME not seeded.
