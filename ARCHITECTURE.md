@@ -33,12 +33,20 @@ Supabase project URL: `https://ttudxnzmybcwrtqlbtta.supabase.co` — never
 change without explicit instruction (`SYSTEM_PROMPT.md` §3).
 
 **Styling note**: Tailwind CSS is present in `package.json` but was
-unused until the Biller dashboard. Two deliberate, scoped exceptions
-now exist — both approved explicitly after the tradeoff was presented:
+unused until the Biller dashboard. Five deliberate, scoped exceptions
+now exist — all approved explicitly after the tradeoff was presented:
 1. **Biller dashboard** (`/billing`, §8) — the first exception.
 2. **Admin page** (`/admin`, `app/admin/page.tsx`) — full shadcn/ui
    rebuild; same CSS-variable bridge and Oxanium font as the Biller
-   dashboard. Every other screen remains hand-rolled inline `style={{...}}`.
+   dashboard.
+3. **MD V2 patient chart** (`/md-v2/[patientId]`, `app/md-v2/`) —
+   shadcn Cards, Badge, Tabs; Oxanium font via shared module (Session 23).
+4. **MDClient patient list** (`/md`, `app/md/MDClient.tsx`) — shadcn
+   Cards with colored left borders; routes to `/md-v2/` (Session 23).
+5. **Referral Management dashboard** (`/referrals`, `app/referrals/`) —
+   shadcn Cards, Sheet, TanStack Table; same CSS-variable bridge pattern
+   as Biller and Admin (Session 25).
+Every other screen remains hand-rolled inline `style={{...}}`.
 
 ---
 
@@ -108,15 +116,17 @@ exist for these.**
 - 022 — `patient_visits.nf3_preflight_passed boolean DEFAULT false`; NF-3 workflow preflight columns (Session 17)
 - 023 — `audit_logs` table (`id`, `created_at`, `user_id`, `user_role`, `action`, `entity_type`, `entity_id`, `old_data jsonb`, `new_data jsonb`, `ip_address`); indexes; RLS `authenticated` SELECT + INSERT; DB triggers on 7 tables (Session 17/18)
 - 024 — `patients.attorney_email text` — stores attorney email auto-filled from `lawyers.email`; used by `/send-billing-packet` endpoint (Session 22)
+- 025 — `doctors.pc_npi text` — PC corporation NPI; resolved by `_resolve_billing_npi()` in `database.py`; used in all `forms/*.py` as `billing_npi` (Session 23)
+- 026 — `referral_providers`, `referral_types` (seeded: MRI/CT/MRA/Ultrasound/PT/Ortho/Pain Mgmt/EMG/VNG/ANS), `referrals`, `referral_appointments`, `referral_documents`, `referral_status_history`, `referral_timeline`, `referral_notes`, `referral_notifications` — full Referral Management Module schema; all tables RLS-enabled `authenticated` only; `updated_at` triggers on 4 tables (Session 25)
 
 Key tables referenced throughout the codebase: `patients`,
 `patient_visits` (visit-scoped data, including `cpt_codes`/`icd10_codes`,
 `received_amount`, `claim_status`, `payment_status`, `location_id` FK →
-`office_locations` — see §8 for how the billing fields are used on the
+`office_locations` — see §11 for how the billing fields are used on the
 Biller dashboard), `visit_line_items` (billing), `patient_forms`
 (generated-document tracking — `form_type`, `visit_id`, `filename`, used
 to find/replace a patient's generated PDFs per visit, and now also Denial
-Docs uploads/deletes — see §8), `cpt_codes` (fee schedule — the *only*
+Docs uploads/deletes — see §11), `cpt_codes` (fee schedule — the *only*
 source of fee data; there is no separate "fee schedule" concept anywhere
 in the codebase; unique constraint on `cpt_code` added migration 011),
 `doctors` (PC/tax fields per §5 of `PRODUCT_SPEC.md`, `w9_url`,
@@ -360,7 +370,7 @@ was dark-on-dark unreadable.
 **SelectTrigger color fix** — all `SelectTrigger` elements in Admin have
 `style={{color:'#f0f4f8'}}` explicitly set. Shadcn's `SelectValue` renders
 its selected value in the trigger's own color context, which is not
-reliably inherited on this project (preflight gap, §10).
+reliably inherited on this project (preflight gap, §11).
 
 **Users tab** shows: user cards (name, email, role badge with color,
 active/inactive state). Role dropdown: Front Desk / MD / PA / NP / Billing

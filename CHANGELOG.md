@@ -1,3 +1,66 @@
+## 2026-07-07 — Session 25
+
+### Referral Management Module — Phase 1: Foundation
+
+New route /referrals — dedicated referral management dashboard.
+shadcn/ui approved as fifth scoped exception (same CSS-variable bridge
+as Biller and Admin dashboards).
+
+Migration 026 — 9 new tables run in Supabase SQL editor (3 blocks):
+- referral_providers (external specialists — distinct from doctors table)
+- referral_types (seeded: MRI, CT, MRA, Ultrasound, PT, Ortho, Pain Mgmt,
+  EMG, VNG, ANS; legacy_form_tag bridge column for patient_forms migration)
+- referrals (core lifecycle entity; 15-status engine with CHECK constraint)
+- referral_appointments (is_current flag preserves reschedule history)
+- referral_documents (soft-delete only; doc_type CHECK constraint)
+- referral_status_history (immutable — no DELETE policy)
+- referral_timeline (immutable append-only event log)
+- referral_notes (soft-delete; is_internal flag)
+- referral_notifications (delivery stub; queued status; wires to SendGrid)
+All tables: RLS enabled, authenticated role only, updated_at triggers
+on providers/referrals/appointments/notes.
+
+New files (designed; not yet written to repo as live route — Phase 3):
+- app/referrals/types.ts — 15 statuses + badge metadata + transition map
+  + urgency metadata + role permission matrix + all DB/query/input types
+- app/referrals/actions.ts — Server Actions: createReferral,
+  updateReferralStatus (validates transition map), scheduleAppointment,
+  uploadReferralResult (auto-chains to needs_review), addReferralNote,
+  getReferralMetrics (8 KPIs parallel), listReferrals, getReferralTypes,
+  getReferralProviders
+- app/referrals/page.tsx — server component; auth gate; parallel data fetch
+- app/referrals/ReferralDashboard.tsx — 8 metric cards (clickable filter),
+  TanStack table (sort/filter/search/pagination), filter bar, Sheet trigger
+- app/referrals/ReferralSheet.tsx — 7-tab detail panel + status actions
+
+### Referral Management Module — Phase 2: MRI Dual-Write Bridge + V2 Tab
+
+app/md/[patientId]/mri/MriReferral.tsx — dual-write bridge added.
+createLifecycleRecord() fires after PDF success (fire-and-forget, non-blocking).
+Modality derived from selected keys: ct.* → CT, mri.mra.* → MRA, else MRI.
+Writes referrals + referral_status_history + referral_timeline +
+referral_notifications rows. Failure console-logged only — never shown to MD,
+never rolls back PDF. TRACKED badge in header on success.
+
+app/md-v2/[patientId]/ReferralsTabV2.tsx — new component. Queries referrals
+table for patient. Status cards with badges, overdue highlighting, appointment
+dates, provider. Filter pills: All / Open / Closed. Full Dashboard link.
+REFERRAL_STATUS_META and URGENCY_META inlined (not imported) to avoid TSC
+failure before /referrals route files are deployed to repo.
+
+app/md-v2/[patientId]/PatientChartV2.tsx — Referrals tab added as fourth
+tab. Tab font reduced 12px to 10px for mobile fit.
+
+Commit df0341e..c2428f8 — deployed Vercel production in 41s.
+
+TSC error encountered and resolved: ReferralsTabV2 initially imported from
+@/app/referrals/types (not yet in repo). Fixed via sed + Python patch to
+inline constants. Lesson recorded in HANDOVER.md Lessons Learned.
+
+Supabase SQL editor RLS prompt: chose Run without RLS for all 3 blocks
+since migration SQL includes explicit ENABLE ROW LEVEL SECURITY + CREATE
+POLICY statements. Lesson recorded in HANDOVER.md Lessons Learned.
+
 ## 2026-07-07 — Session 24
 
 ### Re-login hang — fully resolved
