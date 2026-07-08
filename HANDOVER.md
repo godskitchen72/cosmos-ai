@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 7, 2026, Session 23)
+# Cosmos Medical Technologies — HANDOVER (July 7, 2026, Session 24)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -14,113 +14,84 @@ self-contained.
 ## Current Status
 
 All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed and live.
+Re-login hang fully resolved. Patch script cleanup complete.
 TurboSMTP account closed (spam detection). SendGrid is the target provider.
 
 ---
 
-## Completed This Session (Session 23)
+## Completed This Session (Session 24)
 
-### PC NPI full-stack implementation
+### Re-login hang — fully resolved
 
-Product decision: All billing documents use `billing_npi`. Individual NPI
-never appears on documents except sole proprietors. Supervised providers
-use supervisor `pc_npi`.
+**Root cause:** `setLoading(false)` was never called on the success path of
+`handleLogin`. After all 8 login steps completed, `loading` remained `true`.
+On the second login the component was still mounted with `loading=true`,
+causing the button to show "Signing in…" indefinitely even though
+authentication succeeded.
 
-**Migration 025:** `ALTER TABLE doctors ADD COLUMN IF NOT EXISTS pc_npi text`
-Run in Supabase SQL editor. No on-disk file.
+**Fixes applied to `app/page.tsx`:**
 
-**`cosmos-api/database.py` complete rewrite:**
-- `_resolve_billing_npi(d, sup)`: supervised uses supervisor `pc_npi`;
-  PC corp uses own `pc_npi`; sole proprietor uses own `npi`
-- `billing_npi` exported in all doctor field dicts
-- `doctor_npi` retained for internal reference only
+1. `setLoading(false)` added before `setStage`/`setReady` in all
+   `handlePostLogin` branches (superadmin, md/pa/np, other roles).
 
-**`cosmos-api/forms` patched (11 files):**
-`nf2.py` `nf3.py` `pt.py` `vng.py` `pce.py` `mri.py` `ortho.py` `rx.py`
-`dme.py` `ans.py` `icd10.py` `pain_mgmt.py`
-All `patient_data.get("doctor_npi")` replaced with `billing_npi`.
-`nf3.py` internal resolver block removed (moved to `database.py`).
+2. `cosmos_login_marker` sessionStorage guard in `useEffect` — only restores
+   a prior session if the marker is present. Prevents stale Supabase auth
+   tokens from a prior user auto-navigating on page load.
 
-**`DoctorsSection.tsx`:**
-- `pc_npi` field in Billing tab after PC Corp Name
-- Hidden for sole proprietors (`tax_classification === 'individual'`)
-- 10-digit numeric input with counter
-- Card display: PC corp MD shows PC NPI, sole prop shows NPI, supervised shows Lic
+3. Direct `localStorage.removeItem('sb-ttudxnzmybcwrtqlbtta-auth-token')`
+   before `signIn` — clears stale session token synchronously without
+   racing the Supabase singleton client's async state machine.
 
-**`shared.tsx`:** `pc_npi` added to `BLANK_DOCTOR`
+4. All Sign Out buttons (superadmin picker, location picker, MFA setup,
+   MFA challenge): `sessionStorage.clear()` + `setLoading(false)` +
+   `setError('')` — ensures full state reset on every sign-out.
+
+5. `autoComplete="email"` on email field, `autoComplete="current-password"`
+   on PIN field — restores browser saved credential support (was `new-password`
+   during debugging, which suppressed autofill entirely).
+
+6. Debug instrumentation (`debugLog` state, `dlog()`, on-screen cyan log panel)
+   added during diagnosis and fully removed in final clean rewrite.
+
+**Key lesson:** The hang was not in `signIn`, `getUserProfile`, `login_attempts`,
+`writeAuditLog`, or `checkAndHandleMfa` — all completed. The missing
+`setLoading(false)` on the success path left React with stale loading state
+after stage transition.
+
+### Patch script cleanup
+
+`rm ~/fix_*.py ~/patch_*.py ~/rewrite_*.py` — confirmed clean.
 
 ---
 
-### Dev generator attorney_email fix
+## Completed Prior Sessions (carried forward)
 
-`app/dev/page.tsx`: lawyers select includes `email`; patient insert includes
-`attorney_email` from `atty.email`.
+### Session 23
 
----
+**PC NPI full-stack:** Migration 025 (`pc_npi` on `doctors`), `_resolve_billing_npi`
+in `database.py`, all 11 `forms/*.py` patched to `billing_npi`, `DoctorsSection.tsx`
+UI, `shared.tsx` `BLANK_DOCTOR` updated.
 
-### MD V2 dashboard
+**Dev generator:** `attorney_email` null gap fixed in `app/dev/page.tsx`.
 
-New route `/md-v2/[patientId]` — parallel shadcn MD patient chart.
-V2 is now the primary MD patient chart.
+**MD V2 dashboard:** `/md-v2/[patientId]` is now the primary MD patient chart.
 `/md/[patientId]` remains the clinical visit entry point via Start Visit.
+`MDClient.tsx` full shadcn rewrite routes to `/md-v2/`.
 
-**New files:**
-- `app/md-v2/[patientId]/page.tsx`
-- `app/md-v2/[patientId]/PatientChartV2.tsx` (tabs: Pat Profile / History / New Visit)
-- `app/md-v2/[patientId]/InfoTabV2.tsx`
-- `app/md-v2/[patientId]/HistoryTabV2.tsx`
-- `app/md-v2/page.tsx` (redirect to `/md`)
-
-Pat Profile tab: one-line cyan header (PTID DOB DOA Carrier) plus
-claim/pol line; collapsible Attorney card; pain scores grid; visit summary.
-Claim Information card removed. Insurance Carrier and Policy Holder removed.
-
-History tab: shadcn Card per visit, cyan left border on most recent,
-CPT/ICD-10 badges, bottom drawer with PCE generation.
-ICD-10 filter validates codes against `icd10Codes` table.
-
-New Visit tab: Start Visit button navigates to `/md/{patientId}`.
-
-`MDClient.tsx` full shadcn rewrite: patient cards route to `/md-v2/`;
-V2 badge removed; colored left accent border per treatment status.
-
----
-
-### Login page improvements
-
-`app/page.tsx`:
-- Dashboard role selector: shadcn Card per role with description line
-- Location picker: cyan doctor name and locations, Oxanium font
-- `autoComplete off` on email and PIN fields
-- `sessionStorage.clear()` on all Sign Out buttons all roles
-- Pre-login `signOut` removed from `handleLogin` (caused hang)
-
-`DashboardClient.tsx` `MDClient.tsx` `BillerDashboard.tsx`:
-`sessionStorage.clear()` added to Sign Out handlers.
-
-**OPEN BUG:** Re-login hang when switching users not fully resolved.
-`autoComplete off` deployed. If hang persists: add step-debug logging
-to `handleLogin` to identify which `await` is blocking.
-
----
-
-### TurboSMTP account closure
-
-Account closed by TurboSMTP (spam detection on test sends).
-`/send-billing-packet` broken until SendGrid configured.
-`/generate-zip` and PDF generation unaffected.
+**TurboSMTP account closed:** `/send-billing-packet` broken. SendGrid required.
 
 ---
 
 ## Open Items, Priority Order
 
-1. **Re-login hang when switching users.** Test after `autoComplete off`
-   deploy. If still hanging, add step-debug logging inside `handleLogin`
-   to identify which `await` is blocking.
-
-2. **SendGrid setup.** TurboSMTP closed. Set up SendGrid, domain auth
+1. **SendGrid setup.** TurboSMTP closed. Set up SendGrid, domain auth
    SPF/DKIM, HIPAA BAA, swap Render env vars, update
    `send_billing_endpoint.py`.
+
+2. **Supabase RLS alert on `patient_forms`.** Supabase security advisor
+   flagged `patient_forms` as publicly accessible (RLS disabled). Known
+   architecture gap. Must resolve before go-live with real patient data.
+   Also flagged: sensitive columns exposed via API without access restrictions.
 
 3. **`patient_forms` visit_id backfill.** Query:
    `SELECT form_type, visit_id, filename FROM patient_forms WHERE patient_id = 'PT331111'`
@@ -132,20 +103,17 @@ Account closed by TurboSMTP (spam detection on test sends).
 
 5. **DEV fill-all PCE button** — remove from `VisitTab.tsx` before go-live.
 
-6. **Patch script cleanup:**
-   `rm ~/fix_*.py ~/patch_*.py ~/rewrite_*.py 2>/dev/null`
-
-7. **`ARCHITECTURE.md` updates:** add MD V2 / MDClient / login to shadcn
+6. **`ARCHITECTURE.md` updates:** add MD V2 / MDClient / login to shadcn
    exceptions; add Migration 025 to migration list.
 
-8. **Sidebar rollout to FD, MD, Biller.** Deferred.
+7. **Sidebar rollout to FD, MD, Biller.** Deferred.
 
-9. **Doctor mailing address data.** Gottesman and Kramer placeholders.
+8. **Doctor mailing address data.** Gottesman and Kramer placeholders.
    Test only.
 
-10. **`patients.doctor_id` NOT NULL.** Deferred to pre-production.
+9. **`patients.doctor_id` NOT NULL.** Deferred to pre-production.
 
-11. **Vercel Pro upgrade.** Eliminates cold starts. Do at go-live.
+10. **Vercel Pro upgrade.** Eliminates cold starts. Do at go-live.
 
 ---
 
@@ -183,6 +151,7 @@ Account closed by TurboSMTP (spam detection on test sends).
 - [x] MD V2 shadcn chart (Session 23)
 - [x] MDClient shadcn list (Session 23)
 - [x] Login shadcn (Session 23)
+- [x] Re-login hang fixed (Session 24)
 - [ ] Sidebar rollout — FD, MD, Biller dashboards
 - [ ] Holistic UX audit
 - [ ] Accessibility (ARIA, keyboard nav)
@@ -213,9 +182,8 @@ Biller flag taps route to `/md/` with `visit_id` for flag resolution.
 
 **TurboSMTP closed:** `/send-billing-packet` returns SMTP error. `/generate-zip` fine.
 
-**Re-login session race:** `useEffect` calls `getSession` on mount. If stale session
-from previous user present it fires before new login completes. Partial
-mitigations in place. Full fix pending.
+**`patient_forms` RLS disabled:** Supabase security advisor flagged this table
+as publicly accessible. Known gap — must be resolved before go-live.
 
 **Auth server-component gap:** `createServerComponentClient` not exported.
 `doctor_id` URL param is the reliable doctor-scoping path.
@@ -308,6 +276,15 @@ selects an attorney in PatientForm. If attorney record has no email, field
 remains blank and FD must enter manually. Backend returns HTTP 400 if
 `patients.attorney_email` is null at send time.
 
+**Login `cosmos_login_marker`:** Set in sessionStorage after successful login
+for all roles. `useEffect` on mount skips session restore if marker is absent —
+prevents stale Supabase auth tokens from prior user auto-navigating on page load.
+Cleared by `sessionStorage.clear()` on every Sign Out button.
+
+**Supabase auth token localStorage key:**
+`sb-ttudxnzmybcwrtqlbtta-auth-token` — cleared directly before `signIn` in
+`handleLogin` to avoid async `signOut()` racing the singleton Supabase client.
+
 ---
 
 ## File Confidence Levels (cumulative)
@@ -316,6 +293,7 @@ remains blank and FD must enter manually. Backend returns HTTP 400 if
 
 | File | Confidence |
 |---|---|
+| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 24 — re-login hang fixed, clean rewrite, debug removed) |
 | `cosmos-api/database.py` | ★ Verified-final (Session 23 — complete rewrite, `billing_npi`, `pc_npi`) |
 | `cosmos-api/forms/nf2.py` | ★ Verified-final (Session 23 — `billing_npi`) |
 | `cosmos-api/forms/nf3.py` | ★ Verified-final (Session 23 — `billing_npi`, internal resolver removed) |
@@ -338,7 +316,6 @@ remains blank and FD must enter manually. Backend returns HTTP 400 if
 | `cosmos-dashboard/app/md-v2/[patientId]/InfoTabV2.tsx` | ★ Verified-final (Session 23 — new file) |
 | `cosmos-dashboard/app/md-v2/[patientId]/HistoryTabV2.tsx` | ★ Verified-final (Session 23 — new file) |
 | `cosmos-dashboard/app/md-v2/page.tsx` | ★ Verified-final (Session 23 — new file, redirect to `/md`) |
-| `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 23 — shadcn cards, `autoComplete off`, `sessionStorage.clear`) |
 | `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (Session 23 — `sessionStorage.clear` on Sign Out) |
 | `cosmos-dashboard/app/billing/BillerDashboard.tsx` | ★ Verified-final (Session 23 — `sessionStorage.clear` on Sign Out) |
 | `cosmos-api/main.py` | ★ Verified-final (Session 22 — `/generate-zip` + `/send-billing-packet` wired) |
@@ -353,7 +330,6 @@ remains blank and FD must enter manually. Backend returns HTTP 400 if
 | `cosmos-dashboard/app/md/[patientId]/components/PatientInfoTab.tsx` | ★ Verified-final (Session 20 — new file) |
 | `cosmos-dashboard/app/admin/components/CptCodesSection.tsx` | ★ Verified-final (Session 20 — warning badges, Replace mode, parser fix, toasts) |
 | `cosmos-dashboard/app/admin/components/Icd10Section.tsx` | ★ Verified-final (Session 20 — warning badges, Replace mode, toasts) |
-| `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (Session 20 — `alert()` replaced, AlertModal/ConfirmModal mounted) |
 | `cosmos-dashboard/app/admin/page.tsx` | ★ Verified-final (Session 19 — sidebar nav) |
 | `cosmos-dashboard/app/lib/auditLogger.ts` | ★ Verified-final (Session 17) |
 | `cosmos-dashboard/app/billing/page.tsx` | ★ Verified-final (Session 17) |
@@ -435,8 +411,12 @@ remains blank and FD must enter manually. Backend returns HTTP 400 if
 - **Zip filename convention (Session 22):** `patid_doa_dos_billing_packet.zip` — includes `_billing_packet` suffix for clarity
 - **Next.js 15 async params** — server components must use Promise params and `await params`
 - **Dynamic route folder naming in Termux** — use Python `os.makedirs` not `mkdir` for bracket folders; git tracks quoted folder names
-- **`supabase.auth.signOut` inside `handleLogin` causes hang** — remove it; clear session state via `sessionStorage.clear()` on Sign Out instead
-- **Browser autofill persists across sign-out** — `autoComplete off` on login fields required
-- **`sessionStorage.clear` on sign-out must be on every Sign Out button, all roles**
 - **`billing_npi` is the only NPI key used in PDF forms** — `doctor_npi` retained in `database.py` output dict for internal reference only
 - **PC NPI field only shown for providers with PC corp** — sole proprietors excluded (`tax_classification === 'individual'`)
+- **Re-login hang root cause (Session 24)** — missing `setLoading(false)` on success path in `handleLogin`. All login steps completed but `loading` state never cleared, causing frozen "Signing in…" UI. `setLoading(false)` must be called in every `handlePostLogin` branch before stage transition.
+- **`supabase.auth.signOut()` inside `handleLogin` causes hang** — do not await `signOut()` before `signIn()` on the same singleton Supabase client; clear the session token directly via `localStorage.removeItem('sb-<project-ref>-auth-token')` instead
+- **Supabase localStorage token key** — `sb-ttudxnzmybcwrtqlbtta-auth-token`. Remove directly before `signIn` to avoid singleton client state race.
+- **`cosmos_login_marker` sessionStorage pattern** — set `'1'` after successful login in all `handlePostLogin` branches; `useEffect` on page mount skips session restore if marker is absent; `sessionStorage.clear()` on Sign Out removes it
+- **Patch anchor drift** — after multiple iterative patches to the same file, anchors become unreliable. Prefer full clean rewrite from known-good source when more than ~4 patches have accumulated on one file
+- **On-screen debug log pattern** — when DevTools are unavailable, add a `debugLog` state array, a `dlog(msg)` helper, and render a monospace cyan panel above the Submit button. Remove completely before final deploy via clean rewrite
+- **`autoComplete="new-password"` suppresses browser saved credentials entirely** — use only as a temporary diagnostic measure; restore `"email"` / `"current-password"` for production

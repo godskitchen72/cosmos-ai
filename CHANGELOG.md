@@ -1,3 +1,40 @@
+## 2026-07-07 — Session 24
+
+### Re-login hang — fully resolved
+
+Root cause: setLoading(false) was never called on the success path of
+handleLogin. All 8 login steps completed (confirmed via on-screen debug log),
+but loading state was never cleared. On second login the component remained
+mounted with loading=true, causing "Signing in…" to hang indefinitely even
+though authentication succeeded.
+
+Fixes applied to app/page.tsx (clean rewrite):
+
+- setLoading(false) added before setStage/setReady in all handlePostLogin
+  branches: superadmin, md/pa/np with location picker, other roles.
+
+- cosmos_login_marker sessionStorage guard in useEffect: only restores a
+  prior session if marker === '1'. Prevents stale Supabase auth tokens from
+  a prior user auto-navigating on page load.
+
+- Direct localStorage.removeItem('sb-ttudxnzmybcwrtqlbtta-auth-token')
+  before signIn: clears stale session token synchronously without racing
+  the Supabase singleton client's async signOut() state machine.
+
+- All Sign Out buttons (superadmin picker, location picker, MFA setup,
+  MFA challenge): sessionStorage.clear() + setLoading(false) + setError('')
+  for full state reset.
+
+- autoComplete="email" on email field, autoComplete="current-password" on
+  PIN field: restores browser saved credential support.
+
+- Debug instrumentation (debugLog state, dlog(), on-screen cyan log panel)
+  added during diagnosis and fully removed in final clean rewrite.
+
+### Patch script cleanup
+
+rm ~/fix_*.py ~/patch_*.py ~/rewrite_*.py — confirmed clean.
+
 ## 2026-07-07 -- Session 23
 
 ### PC NPI full-stack implementation
