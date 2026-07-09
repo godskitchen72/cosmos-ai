@@ -1,3 +1,94 @@
+## 2026-07-09 — Session 29
+
+### AI_STYLE_GUIDE.md — shadcn Exception Scope Corrected
+
+§2 updated: exception scope was listed as "Biller dashboard only" — corrected
+to five approved surfaces: Biller (/billing), Admin (/admin), MD V2 (/md-v2),
+MDClient (/md), Referral dashboard (/referrals). Matches SYSTEM_PROMPT.md §9
+and ARCHITECTURE.md §1.
+
+### Provider Assignment — Appointment Tab
+
+app/referrals/ReferralSheet.tsx — Assigned Provider card added to Appointment tab.
+
+Dark custom ProviderDropdown component (useRef outside-click dismiss, Oxanium
+font, #0d1821 background). Providers loaded from referral_providers on mount.
+Filtered by referral category → specialty mapping (CATEGORY_SPECIALTIES dict).
+Show all toggle bypasses filter. Selection calls assignProvider() Server Action
+immediately with optimistic update + revert on error. Assigned provider's
+specialty, address, phone shown below dropdown. Schedule form Location
+pre-fills from assigned provider address when opened empty.
+
+### assignProvider() Server Action
+
+app/referrals/actions.ts — new assignProvider(referralId, providerId | null).
+
+Writes referral_provider_id (confirmed column name — not provider_id). Fetches
+provider address and returns providerAddress for Location pre-fill. Inserts
+provider_assigned timeline event. Returns { ok, providerAddress } or { error }.
+
+### Column Audit — actions.ts
+
+referral_providers: no address composite column — real columns are street, city,
+state, zip. referrals FK is referral_provider_id not provider_id. referral_timeline:
+no occurred_at — uses auto-set created_at. referral_documents: no uploaded_at —
+uses auto-set created_at. All actions.ts inserts corrected accordingly.
+getReferralProviders() return type changed to any[] (ReferralProviderRow stale).
+
+### Document Upload — Documents Tab
+
+app/referrals/ReferralSheet.tsx — Documents tab upload UI added.
+
+Upload card with DarkDropdown doc type selector (Result / Authorization /
+Referral Form / Other), hidden file input, file name + size preview, Upload
+button. Accepted: PDF, JPEG, PNG, TIFF. 25MB limit enforced client-side.
+Storage path: {patientId}/{referralId}/{timestamp}_{filename} in
+referral-documents bucket. On success: calls uploadReferralResult() Server
+Action → inserts referral_documents row + document_uploaded timeline event.
+Document list refreshes on upload. View button generates 15-min signed URL.
+
+### referral-documents Storage Bucket
+
+New Supabase Storage bucket: referral-documents, private, 25MB file limit,
+PDF/JPEG/PNG/TIFF. Created via SQL INSERT INTO storage.buckets. Three RLS
+policies (INSERT/SELECT/UPDATE) for authenticated role.
+
+### Timeline — Fixed End-to-End
+
+referral_timeline query in ReferralSheet.tsx now orders by created_at (was
+occurred_at — column does not exist). Timestamp display uses e.created_at.
+All timeline inserts no longer pass occurred_at. Timeline now records: referral
+created, status changed, provider assigned, appointment scheduled, document
+uploaded. Confirmed working in production.
+
+### Dark Dropdowns — ReferralSheet
+
+All native <select> elements in ReferralSheet.tsx replaced with custom dark
+dropdowns: ProviderDropdown (provider assignment) and DarkDropdown (Record
+Outcome). Eliminates Android OS light-theme native picker.
+
+### Overdue Row Flagging — ReferralDashboard
+
+app/referrals/ReferralDashboard.tsx — isOverdue() helper added.
+
+Definition: status not terminal/completed AND updated_at older than 14 days.
+Patient cell gets ⚠ OVERDUE dark red badge (#7f1d1d bg, #fca5a5 text). Table
+row gets subtle dark red background tint (#7f1d1d18). Overdue metric card
+filter now uses isOverdue() — previously used past appointment date (wrong
+definition). Now matches KPI count exactly.
+
+### Admin Sidebar — Referrals Link Removed
+
+app/admin/page.tsx — Referrals → nav link added then removed. Decision:
+Admin dashboard is configuration-only. Operational dashboards belong to
+Superadmin role-switching (not yet built). Admin has no operational reason
+to view the referral workflow.
+
+### Superadmin Dashboard — Scoped for Future
+
+Superadmin dashboard fully scoped: identity/access controls, role-switching/
+impersonation (read-only), cross-role KPI executive summary, full audit log,
+system health. Not built this session — documented in HANDOVER.md Open Items.
 ## 2026-07-09 — Session 28
 
 ### Referral Dashboard — Full FD Scheduling Workflow

@@ -103,13 +103,15 @@ only:
 - Palette: background `#0d1821`, accent `#00cfff`, borders `#1a3a4a`,
   success/section-headers `#19a866`.
 - Mobile-first; every screen hand-rolled inline `style={{...}}` —
-  **two explicit, scoped exceptions, both on the Biller dashboard
-  (`/billing`) only**: (1) shadcn/ui + Tailwind, bridged onto the same
-  palette via CSS variables (`ARCHITECTURE.md` §8); (2) a brighter
-  success/accent green, `#2ee08a`, specifically on that surface instead
-  of the `#19a866` above. Both approved once as one-time, scoped
-  exceptions. Don't extend either elsewhere without the same explicit
-  approval.
+  **five explicit, scoped exceptions, all approved by the product owner
+  after the tradeoff was presented**: (1) shadcn/ui + Tailwind, bridged
+  onto the same palette via CSS variables (`ARCHITECTURE.md` §8), approved
+  on: Biller dashboard (`/billing`), Admin (`/admin`), MD V2 chart
+  (`/md-v2`), MDClient list (`/md`), and Referral dashboard (`/referrals`);
+  (2) a brighter success/accent green, `#2ee08a`, scoped to the Biller
+  dashboard only. Don't extend either to any other surface without the
+  same explicit approval — see `ARCHITECTURE.md` §1 for the authoritative
+  list.
 - Never a native `<select>` — use the project's `DropdownSelect`/
   `StateSelect` components (or, inside the Biller exception only,
   shadcn's `Select`) for any select-like control; native selects render
