@@ -1,3 +1,149 @@
+## 2026-07-09 — Session 28
+
+### Referral Dashboard — Full FD Scheduling Workflow
+
+app/referrals/ReferralSheet.tsx — Appointment tab rebuilt from read-only
+to fully functional three-state workflow:
+
+Schedule form — shown when no current appointment exists or Reschedule
+tapped. Fields: Date (required), Time, Location, Confirmation #. Calls
+scheduleAppointment() Server Action on submit.
+
+Current appointment card — shows date/time/location/conf# with three action
+buttons: ✓ Patient Confirmed, Record Outcome, 🔄 Reschedule. Patient
+Confirmed writes patient_confirmed + patient_confirmed_at directly via
+Supabase client; auto-advances referral status to patient_confirmed if
+currently scheduled. Record Outcome shows inline dropdown (Completed / No
+Show / Rescheduled) + optional notes; updates referral_appointments.outcome
+and advances referral status to match.
+
+Prior appointments — read-only history cards below current card.
+
+### Referral Actions — Service Key Rewrite + Column Name Corrections
+
+app/referrals/actions.ts — full rewrite:
+
+All DB operations now use supabaseServer (service key). Previously used
+createServerClient with anon key + session cookie — caused silent RLS
+failures for reads and unhandled Server Action errors for writes.
+
+getActorId() replaces getClient() — resolves session user ID for attribution
+only; failure falls back to null rather than throwing. All DB writes use
+supabaseServer regardless of session state.
+
+All write actions now return { error: string } instead of throwing —
+callers check result.error and call toastError() directly. No unhandled
+Server Action exceptions reaching the Next.js error boundary.
+
+listReferrals() now joins patients for first_name/last_name, returning
+patient_name on each summary row.
+
+Column name corrections (confirmed against information_schema.columns):
+- referrals: created_by_user_id (was created_by)
+- referral_status_history: changed_by_user_id (was changed_by)
+- referral_timeline: actor_user_id (was actor_id)
+- referral_notes: author_user_id (was created_by)
+- referral_documents: uploaded_by_user_id (was uploaded_by)
+- referral_appointments: location_name (was location)
+
+### Schema — Attribution Columns Made Nullable
+
+Five attribution columns dropped NOT NULL constraint:
+ALTER TABLE referrals ALTER COLUMN created_by_user_id DROP NOT NULL;
+ALTER TABLE referral_status_history ALTER COLUMN changed_by_user_id DROP NOT NULL;
+ALTER TABLE referral_appointments ALTER COLUMN created_by_user_id DROP NOT NULL;
+ALTER TABLE referral_notes ALTER COLUMN author_user_id DROP NOT NULL;
+ALTER TABLE referral_documents ALTER COLUMN uploaded_by_user_id DROP NOT NULL;
+
+### Referral Dashboard — Patient Name Column + Dark Dropdowns + Metrics Refresh
+
+app/referrals/ReferralDashboard.tsx — rebuilt:
+
+Table recolumned to 4 mobile-first columns: Patient (name + type + urgency
+badge), Status, Appt, Date. Patient name visible without horizontal scroll.
+
+All three <select> filter dropdowns replaced with DarkSelect — custom dark
+pill dropdown with useRef outside-click dismiss. Eliminates OS light-theme
+native picker on Android Chrome.
+
+Refresh button now calls getReferralMetrics() + listReferrals() in parallel —
+metric cards (Total/Open/Pending/Upcoming/etc.) update on refresh, not just
+the table.
+
+resolvedRole derived from sessionStorage.getItem('cosmos_license_type') in
+useEffect — overrides userRole="md" prop from page.tsx for accurate
+role-aware UI.
+
+### Auth — cosmos_license_type Written for All Roles
+
+app/page.tsx line 118 (else branch covering FD/billing/admin/superadmin):
+sessionStorage.setItem('cosmos_license_type', prof.role) now added before
+cosmos_login_marker write. Previously only MD/PA/NP wrote this value (from
+doctors.license_type). FD users now correctly resolve as 'frontdesk'.
+
+### FD Dashboard — Referrals Nav Button
+
+app/dashboard/DashboardClient.tsx — 🔗 Referrals button added to Patients
+tab action row. Routes to /referrals via window.location.href.
+
+### Lifecycle Simplification
+
+types.ts VALID_TRANSITIONS simplified:
+- new: ['cancelled'] — FD schedules directly via Appointment tab
+- scheduling and auth_required preserved in DB but removed from Move To UI
+  on new status (business model has no insurance pre-authorization step)
+
+scheduleAppointment() in actions.ts bypasses VALID_TRANSITIONS for direct
+status update — writes status = 'scheduled' + inserts status history row
+directly via supabaseServer without calling updateReferralStatus.
+
+### CosmosUI — Toast System Fixed
+
+app/components/ui/CosmosUI.tsx — full rewrite:
+
+toastSuccess() now wires to _addToast — auto-dismiss green toast (3.5s,
+✓ icon). Previously incorrectly routed to AlertModal (blocking red modal).
+toastError() correctly routes to AlertModal (blocking red modal, OK required).
+ToastContainer renders bottom-anchored stack of auto-dismiss toasts.
+Toast types: success (green #2ee08a), info (cyan #00cfff), error (red #f87171).
+AlertModal border/text changed to red (#e74c3c) — was cyan.
+
+### Dev Generator — Referral Seeding + FK Fix
+
+app/api/wipe-patients/route.ts — referral subtree deleted before
+patient_visits to satisfy referrals_visit_id_fkey. Correct order:
+referral_notifications → referral_timeline → referral_status_history →
+referral_notes → referral_documents → referral_appointments →
+referrals → visit_line_items → patient_visits → patient_forms → appointments → patients
+
+app/api/seed-referrals/route.ts — new POST endpoint. Accepts
+{ patient_id, visit_id, referral_type_code, clinical_reason }.
+Uses supabaseServer to insert referrals + referral_status_history +
+referral_timeline rows. Called by dev generator after each successful PDF.
+ICD-10 excluded (not a referral type).
+
+app/dev/page.tsx — referral seeding integrated. After each successful PDF
+call, fetches /api/seed-referrals with referral_type_code from map.
+Results log compacted: all referral results per visit on one line
+(MRI ✓ · PT ✓). Intermediate per-referral lines removed.
+
+### Provider Directory — Admin CRUD
+
+app/admin/components/ReferralProvidersSection.tsx — new component. Full
+CRUD for referral_providers table: add, edit, deactivate/activate.
+Fields: Name, Facility Name, Specialty (dropdown), Phone, Fax, Email,
+Street, City, State, ZIP, NPI, Avg Turnaround Days, Preferred Contact,
+Notes, Active toggle. Search bar. Active Only / Show All toggle.
+Deactivate/Activate with confirm modal.
+
+app/admin/page.tsx — 🔗 Ref. Providers tab added to sidebar nav and
+render block.
+
+10 providers seeded via Supabase SQL (one per specialty): Physical Therapy,
+MRI/Radiology, Orthopedic, Pain Management, Neurology, VNG/Vestibular,
+Chiropractic, ANS Autonomic, DME/Equipment, Pharmacy. All providers:
+email = 'referralsout@outlook.com', city = NY metro area.
+
 ## 2026-07-08 — Session 26
 
 ### Referral Management Module — Phase 1 Route Deployment
