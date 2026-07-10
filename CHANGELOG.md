@@ -1,3 +1,64 @@
+## 2026-07-10 — Session 32
+
+### ReferralSheet.tsx Refactor
+
+Split 1,078-line monolith into shell + 5 tab components under
+app/referrals/components/. Zero behavior change — deployed and confirmed
+before feature work began.
+
+New files: ReferralDropdowns.tsx, ReferralOverviewTab.tsx,
+ReferralAppointmentTab.tsx, ReferralDocumentsTab.tsx, ReferralNotesTab.tsx,
+ReferralTimelineTab.tsx. ReferralSheet.tsx reduced to shell (state, handlers,
+tab routing, prop passthrough).
+
+### types.ts Updates
+
+ReferralDocumentRow.appointment_id: string | null added (Migration 030).
+UploadSessionResultInput interface added. reviewed status color changed from
+#1a3a1a/#86efac to #19a866/#ffffff (solid green — terminal complete state).
+
+### Per-Session MRI Result Upload — Full Workflow
+
+Product decisions: session upload marks outcome=completed only (no status
+change); FD taps Confirm Results to advance to needs_review; MD taps Mark
+Reviewed to advance to reviewed (solid green); per-session reschedule/cancel
+deferred to Session 33.
+
+actions.ts — uploadReferralResult() extended with optional appointmentId:
+writes appointment_id to referral_documents, sets outcome=completed on that
+session row. confirmSessionResults() added: FD-initiated, direct update to
+needs_review (bypasses VALID_TRANSITIONS — intentional for async clinical
+event). deleteSessionResult() added: deletes referral_documents row, reverts
+referral_appointments.outcome to null, removes storage object (best-effort).
+listReferrals(): outcome added to appointment inline select; body_parts
+explicitly set in base spread to prevent PostgREST join collision;
+pendingAppts filter uses (a.outcome ?? null) === null.
+
+ReferralSheet.tsx — uploadingSessionId, confirmingResults, deletingResultId
+state added. handleUploadSessionResult(), handleConfirmSessionResults(),
+handleDeleteSessionResult() handlers added. sessionDocuments prop derived
+from detail.documents filtered to result type with appointment_id set.
+
+ReferralAppointmentTab.tsx — per-session ⬆ Upload Result button (outcome
+null); ✓ Result Uploaded + filename + 🗑 Delete button with inline confirm
+(outcome=completed); Confirm Results button when ≥1 session uploaded and
+referral not yet needs_review/reviewed/closed.
+
+ReferralsTabV2.tsx — needs_review cards: orange border, tap to expand docs,
+Mark Reviewed button (advances to reviewed). reviewed cards: green border,
+tap to expand docs (no Mark Reviewed). Both: Open Full Referral → link.
+loadReferrals() extracted for post-review refresh. fetchResultDocs()
+on-demand, cached per referral.
+
+### Bug Fix — listReferrals body_parts spread collision
+
+body_parts from referral row was potentially colliding with appointment-level
+body_parts in ...r spread. Fixed with explicit body_parts assignment in base
+object. outcome added to appointment inline select for correct pendingAppts
+filtering.
+
+---
+
 ## 2026-07-10 — Session 31
 
 ### Infrastructure — DB Indexes (Migration 028)

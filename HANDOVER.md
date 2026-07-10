@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 10, 2026, Session 31)
+# Cosmos Medical Technologies — HANDOVER (July 10, 2026, Session 32)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -13,15 +13,93 @@ self-contained.
 
 ## Current Status
 
-All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed and live.
-Session 31 priority queue exhausted. MRI session splitting workflow fully
-operational end-to-end. Sentry error monitoring live on both services.
-Migration 030 deployed — `referral_documents.appointment_id` ready.
-Per-session result upload feature (Session 32 priority #1) not yet built.
+All `cosmos-dashboard` commits confirmed deployed and live. Session 32
+priority queue exhausted. Per-session MRI result upload workflow fully
+operational end-to-end. `ReferralSheet.tsx` refactored into shell + 5 tab
+components. MD chart result viewing live. FD Confirm Results + session result
+delete live. `reviewed` status solid green. Per-session reschedule/cancel
+buttons deferred to Session 33.
 
 ---
 
-## Completed This Session (Session 31)
+## Completed This Session (Session 32)
+
+### ReferralSheet.tsx Refactor ✅ CLOSED
+
+Split 1,078-line monolith into shell + 5 extracted tab components. Zero
+behavior change — pure structural refactor deployed and confirmed before
+feature work began.
+
+New files created under `app/referrals/components/`:
+- `ReferralDropdowns.tsx` — `DarkDropdown` + `ProviderDropdown` primitives
+- `ReferralOverviewTab.tsx` — Overview tab (pure display)
+- `ReferralAppointmentTab.tsx` — provider assignment, MRI sessions, schedule form, outcome
+- `ReferralDocumentsTab.tsx` — upload card + document list
+- `ReferralNotesTab.tsx` — note entry + list
+- `ReferralTimelineTab.tsx` — timeline event list
+
+`ReferralSheet.tsx` reduced to shell: state, handlers, tab routing, prop passthrough.
+
+### types.ts ✅ CLOSED
+
+- `ReferralDocumentRow.appointment_id: string | null` added (Migration 030 column)
+- `UploadSessionResultInput` interface added
+- `reviewed` status color updated: `#1a3a1a`/`#86efac` → `#19a866`/`#ffffff` (solid green)
+
+### Per-Session MRI Result Upload ✅ CLOSED (Session 32 Priority #1)
+
+**Product decisions recorded:**
+- Session upload only marks `outcome = completed` on that appointment — no referral status change
+- FD must tap **Confirm Results** to advance referral to `needs_review`
+- Confirm Results button appears when ≥1 session has a result uploaded (FD decides timing)
+- MD taps **Mark Reviewed** in patient chart → referral advances to `reviewed` (solid green)
+- `reviewed` status is the terminal "complete" state — no separate `completed` status at referral level
+- Per-session reschedule/cancel buttons deferred to Session 33
+
+**`actions.ts`:**
+- `uploadReferralResult()` extended: `appointmentId?` param writes `appointment_id` to
+  `referral_documents`, sets `outcome = completed` on that session row; no referral status change
+- `confirmSessionResults()` added: FD-initiated, advances referral to `needs_review` (bypasses
+  `VALID_TRANSITIONS` — direct update intentional for async clinical event)
+- `deleteSessionResult()` added: deletes `referral_documents` row, reverts
+  `referral_appointments.outcome` to null, deletes storage object (best-effort)
+- `listReferrals()`: `outcome` added to appointment select; `body_parts` explicitly set
+  in base spread to prevent PostgREST join collision; `pendingAppts` filter uses
+  `(a.outcome ?? null) === null` for precision
+
+**`ReferralSheet.tsx`:**
+- `uploadingSessionId`, `confirmingResults`, `deletingResultId` state added
+- `handleUploadSessionResult()` — uploads to storage, calls `uploadReferralResult()` with `appointmentId`
+- `handleConfirmSessionResults()` — calls `confirmSessionResults()`, toasts, refreshes
+- `handleDeleteSessionResult()` — calls `deleteSessionResult()`, toasts, refreshes
+- `sessionDocuments` prop derived from `detail.documents` filtered to `doc_type = result` and `appointment_id` set
+- All new props passed to `ReferralAppointmentTab`
+
+**`ReferralAppointmentTab.tsx`:**
+- Per-session upload button (`⬆ Upload Result`) when `outcome` is null
+- Per-session ✓ Result Uploaded + filename display + `🗑 Delete` button (inline confirm) when `outcome = completed`
+- `Confirm Results (N of M uploaded)` button when ≥1 session uploaded and referral not yet `needs_review`/`reviewed`/`closed`
+- `SessionUploadButton` sub-component with per-session hidden file input
+
+**`ReferralsTabV2.tsx` (MD patient chart):**
+- `needs_review` cards: orange border, tap to expand result documents, **Mark Reviewed** button
+- `reviewed` cards: green border, tap to expand result documents (no Mark Reviewed — already done)
+- Both states: **Open Full Referral →** link
+- `loadReferrals()` extracted for refresh after Mark Reviewed
+- `fetchResultDocs()` on-demand fetch, cached per referral
+
+### Bug Fix — listReferrals body_parts collision ✅ CLOSED
+
+`body_parts` from PostgREST referral row was potentially colliding with
+appointment-level `body_parts` in the `...r` spread. Fixed by explicitly
+setting `body_parts` in base object. Also added `outcome` to appointment
+inline select so `pendingAppts` filter works correctly without `any` casts.
+
+---
+
+## Completed Prior Sessions (carried forward)
+
+### Session 31
 
 ### Infrastructure — DB Indexes ✅ CLOSED (Migration 028)
 
@@ -395,9 +473,16 @@ PostgREST inline join type not including it. Workaround — not a schema gap.
 
 | File | Status |
 |---|---|
-| `cosmos-dashboard/app/referrals/actions.ts` | ★ Verified-final (Session 31) |
-| `cosmos-dashboard/app/referrals/types.ts` | ★ Verified-final (Session 31) |
-| `cosmos-dashboard/app/referrals/ReferralSheet.tsx` | ★ Verified-final (Session 31) |
+| `cosmos-dashboard/app/referrals/actions.ts` | ★ Verified-final (Session 32) |
+| `cosmos-dashboard/app/referrals/types.ts` | ★ Verified-final (Session 32) |
+| `cosmos-dashboard/app/referrals/ReferralSheet.tsx` | ★ Verified-final (Session 32) |
+| `cosmos-dashboard/app/referrals/components/ReferralDropdowns.tsx` | ★ Verified-final (Session 32) |
+| `cosmos-dashboard/app/referrals/components/ReferralOverviewTab.tsx` | ★ Verified-final (Session 32) |
+| `cosmos-dashboard/app/referrals/components/ReferralAppointmentTab.tsx` | ★ Verified-final (Session 32) |
+| `cosmos-dashboard/app/referrals/components/ReferralDocumentsTab.tsx` | ★ Verified-final (Session 32) |
+| `cosmos-dashboard/app/referrals/components/ReferralNotesTab.tsx` | ★ Verified-final (Session 32) |
+| `cosmos-dashboard/app/referrals/components/ReferralTimelineTab.tsx` | ★ Verified-final (Session 32) |
+| `cosmos-dashboard/app/md-v2/[patientId]/ReferralsTabV2.tsx` | ★ Verified-final (Session 32) |
 | `cosmos-dashboard/app/referrals/ReferralDashboard.tsx` | ★ Verified-final (Session 31) |
 | `cosmos-dashboard/app/md/[patientId]/mri/MriReferral.tsx` | ★ Verified-final (Session 31) |
 | `cosmos-api/main.py` | ★ Verified-final (Session 31 — Sentry added) |
@@ -413,7 +498,7 @@ PostgREST inline join type not including it. Workaround — not a schema gap.
 | `cosmos-dashboard/app/dashboard/DashboardClient.tsx` | ★ Verified-final (Session 28) |
 | `cosmos-dashboard/app/page.tsx` | ★ Verified-final (Session 28) |
 | `cosmos-dashboard/app/md-v2/[patientId]/PatientChartV2.tsx` | ★ Verified-final (Session 28) |
-| `cosmos-dashboard/app/md-v2/[patientId]/ReferralsTabV2.tsx` | ★ Verified-final (Session 27) |
+| `cosmos-dashboard/app/md-v2/[patientId]/PatientChartV2.tsx` | ★ Verified-final (Session 28) |
 | `cosmos-api/database.py` | ★ Verified-final (Session 23 — billing_npi) |
 | `cosmos-api/forms/mri.py` | ★ Verified-final (Session 23 — billing_npi) |
 | `cosmos-api/forms/ortho.py` | ★ Verified-final (Session 23 — billing_npi) |
@@ -488,3 +573,9 @@ PostgREST inline join type not including it. Workaround — not a schema gap.
 - **Multiple patches to same file cause anchor drift** — after 2+ patches, use line-number based Python replacement (`sed -n 'N,Mp'` to confirm then replace by line range) rather than string anchors
 - **PostgREST inline join type omits custom columns** — `outcome`, `body_parts` on `referral_appointments` not in TypeScript inferred type; cast as `(row as any).outcome`
 - **`listReferrals()` now returns expanded rows for MRI** — row count no longer equals referral count; `_session_appointment` field signals an expanded row
+- **PostgREST `...r` spread can collide with join column names** — when a parent table and a joined table share a column name (e.g. `body_parts`), the spread may silently overwrite the parent value with the joined array; always explicitly set ambiguous fields in the base object after spread
+- **`outcome` must be in `listReferrals()` appointment inline select** — omitting it causes `!a.outcome` filter to treat all appointments as pending (undefined is falsy but not null); use `(a.outcome ?? null) === null` for precision
+- **Refactor before feature** — when a file has 3+ patch sessions behind it, split it first (zero behavior change, deploy, confirm), then add the feature on top; combining both in one commit makes bugs unattributable
+- **`confirmSessionResults()` bypasses `VALID_TRANSITIONS`** — result upload is an async clinical event that can arrive from any scheduled/confirmed state; direct `referrals` update is intentional, not a bug
+- **`deleteSessionResult()` deletes DB row first** — storage object deletion is best-effort after; an orphaned storage blob with no DB reference is harmless, but a DB row pointing at a deleted file leaves a broken badge
+- **`reviewed` status is the terminal "complete" state** — `completed` at referral level means "appointment attended, awaiting results"; never use it as post-review terminal; `reviewed` → solid green (`#19a866`/`#ffffff`) is the correct end state
