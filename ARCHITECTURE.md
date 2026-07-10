@@ -118,6 +118,10 @@ exist for these.**
 - 024 — `patients.attorney_email text` — stores attorney email auto-filled from `lawyers.email`; used by `/send-billing-packet` endpoint (Session 22)
 - 025 — `doctors.pc_npi text` — PC corporation NPI; resolved by `_resolve_billing_npi()` in `database.py`; used in all `forms/*.py` as `billing_npi` (Session 23)
 - 026 — `referral_providers`, `referral_types` (seeded: MRI/CT/MRA/Ultrasound/PT/Ortho/Pain Mgmt/EMG/VNG/ANS), `referrals`, `referral_appointments`, `referral_documents`, `referral_status_history`, `referral_timeline`, `referral_notes`, `referral_notifications` — full Referral Management Module schema; all tables RLS-enabled `authenticated` only; `updated_at` triggers on 4 tables (Session 25)
+- 027 — `patients.email text` nullable — patient email for appointment notifications (Session 30)
+- 028 — Performance indexes: `idx_patient_visits_patient_id`, `idx_patient_visits_submitted_to_billing` (partial WHERE NOT NULL), `idx_patient_visits_location_id`, `idx_biller_md_flags_visit_id`, `idx_biller_md_flags_patient_id`, `idx_referrals_referral_provider_id` (Session 31)
+- 029 — `referrals.body_parts text[] DEFAULT '{}'`; `referral_appointments.body_parts text[] DEFAULT '{}'` — MRI session splitting; body parts pool per referral, per-appointment body parts assignment (Session 31)
+- 030 — `referral_documents.appointment_id uuid REFERENCES referral_appointments(id)` nullable; `idx_ref_docs_appointment_id` index — links uploaded result documents to specific MRI sessions (Session 31)
 
 Key tables referenced throughout the codebase: `patients`,
 `patient_visits` (visit-scoped data, including `cpt_codes`/`icd10_codes`,
