@@ -1,3 +1,110 @@
+## 2026-07-09 — Session 30
+
+### Priority Queue — Full Resolution
+
+All actionable items from the Session 29 priority queue resolved or
+formally deferred this session.
+
+### patient_forms visit_id backfill — CLOSED
+
+Investigation: all 30 null-visit_id rows were dev-seeded ghost records
+with both visit_id and filename null. No real PDF existed. No real patient
+data affected. Billing ZIP correctly excluded them. Resolved:
+DELETE FROM patient_forms WHERE visit_id IS NULL AND filename IS NULL;
+
+### CPT codes provider_type — CLOSED
+
+All 34 CPT codes bulk-updated: MD → General in database.
+VisitTab.tsx filter updated to show codes where
+provider_type === effectiveLicenseType || provider_type === 'General'.
+PA and NP users now see full 34-code set (previously empty picker).
+Product decision: single General code set correct for this practice.
+DC/PT/etc. are referral recipients, not visit coders in Cosmos.
+
+### ReferralProviderRow type cleanup — CLOSED
+
+app/referrals/types.ts fully corrected. All seven interface field names
+updated to match live schema: ReferralProviderRow (street/city/state/zip),
+ReferralRow (referral_provider_id, created_by_user_id), ReferralAppointmentRow
+(location_name), ReferralDocumentRow (uploaded_by_user_id, created_at),
+ReferralStatusHistoryRow (changed_by_user_id, created_at), ReferralTimelineRow
+(actor_user_id, created_at), ReferralNoteRow (author_user_id).
+
+### Migration 027 — patients.email
+
+ALTER TABLE patients ADD COLUMN email text;
+Optional nullable field. FD enters at registration or via edit. If absent,
+FD calls patient manually. Future: SMS via Twilio when ready.
+
+### PatientForm.tsx — Email field
+
+Email field added to Personal Information section after Phone. Optional,
+type="email", inputMode="email". State initialized from patient?.email in
+edit mode. Writes to patients.email on save (both INSERT and UPDATE paths).
+
+### PatientProfile.tsx — Email display
+
+Email conditionally shown in patient info grid when has(patient, 'email')
+is true. Uses spread pattern into the grid array.
+
+### actions.ts — sendEmail() Resend helper
+
+Fire-and-forget email helper. Uses RESEND_API_KEY env var (added to Vercel
+Production environment variables, separate from Render). Sends via Resend
+from admin@cosmosmt.com. Logs every attempt to referral_notifications
+(delivery_status: sent/failed, sent_at). Uses two-arg .then(onFulfilled,
+onRejected) — Supabase insert returns PromiseLike<void>; .catch() not
+available.
+
+### actions.ts — Patient appointment confirmation email
+
+scheduleAppointment() — after successful insert, fetches patient.email.
+If present, sends appointment confirmation: subject "Appointment
+Confirmation — {type}", body includes patient name, referral type, date
+(long format), time, location, confirmation number. Confirmed working in
+production.
+
+### actions.ts — Provider assignment notification email
+
+assignProvider() — after successful provider assignment, fetches
+referral_providers.email. If present, sends referral notification: subject
+"New {type} Referral — {patient name}", body includes patient name,
+referral type, urgency, clinical reason. For MRI/Rx/DME types: fetches
+most recent patient_forms row, downloads PDF from patient-forms storage
+bucket, attaches as base64. Confirmed working in production (email received,
+PDF attached).
+
+### RESEND_API_KEY — Vercel env var added
+
+RESEND_API_KEY added to Vercel Production + Preview environment variables.
+Required for actions.ts sendEmail(). Previously only set on Render for
+cosmos-api attorney email feature.
+
+### Superadmin dashboard — CLOSED (already built)
+
+Confirmed: superadmin login lands on role-selector screen with 👑 SUPER
+ADMIN badge and four dashboard tiles. No separate /superadmin route needed.
+Audit log records all logins. Priority closed.
+
+### DEV artifacts — deferred to go-live
+
+DEV fill-all PCE button (VisitTab.tsx) and Dev Tools card (Admin) retained
+during testing. Remove together at go-live.
+
+### Doctor mailing addresses — deferred to pre-production
+
+All current doctor records are test data. Real addresses entered at go-live.
+
+### SMS notifications — deferred
+
+Twilio integration deferred. Email primary channel. sendSMS() will slot
+alongside sendEmail() in actions.ts when Twilio account ready.
+
+### Provider portal — deferred to Phase 2
+
+Token-gated provider referral view page (public route with signed URL).
+MRI/Rx/DME providers receive PDF via email attachment in the interim.
+
 ## 2026-07-09 — Session 29
 
 ### AI_STYLE_GUIDE.md — shadcn Exception Scope Corrected
