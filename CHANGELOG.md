@@ -50,6 +50,15 @@ tap to expand docs (no Mark Reviewed). Both: Open Full Referral → link.
 loadReferrals() extracted for post-review refresh. fetchResultDocs()
 on-demand, cached per referral.
 
+### Bug Fix — refreshDetail select('*') outcome misread
+
+ReferralSheet.tsx refreshDetail() used select('*') on referral_appointments.
+Supabase JS client column ordering caused outcome to be misread as truthy for
+fresh appointments with outcome=null in DB — session cards rendered green
+"✓ Result Uploaded" with no Upload Result button. Fixed with explicit column
+list. Also fixed stale toast message: "Referral advanced to Needs MD Review"
+→ "Tap Confirm Results when ready." Confirmed on fresh patient data.
+
 ### Bug Fix — listReferrals body_parts spread collision
 
 body_parts from referral row was potentially colliding with appointment-level

@@ -17,8 +17,9 @@ All `cosmos-dashboard` commits confirmed deployed and live. Session 32
 priority queue exhausted. Per-session MRI result upload workflow fully
 operational end-to-end. `ReferralSheet.tsx` refactored into shell + 5 tab
 components. MD chart result viewing live. FD Confirm Results + session result
-delete live. `reviewed` status solid green. Per-session reschedule/cancel
-buttons deferred to Session 33.
+delete live. `reviewed` status solid green. `refreshDetail()` explicit column
+select bug fixed and deployed. Per-session reschedule/cancel buttons deferred
+to Session 33.
 
 ---
 
@@ -87,6 +88,16 @@ New files created under `app/referrals/components/`:
 - Both states: **Open Full Referral →** link
 - `loadReferrals()` extracted for refresh after Mark Reviewed
 - `fetchResultDocs()` on-demand fetch, cached per referral
+
+### Bug Fix — refreshDetail select('*') outcome misread ✅ CLOSED
+
+`refreshDetail()` in `ReferralSheet.tsx` used `select('*')` on
+`referral_appointments`. Supabase JS client was returning `outcome` as
+truthy for fresh appointments with `outcome = null` in DB — causing MRI
+session cards to render as green "✓ Result Uploaded" with no Upload Result
+button on first open. Fix: replaced `select('*')` with an explicit column
+list. Also fixed stale toast message ("Referral advanced to Needs MD Review"
+→ "Tap Confirm Results when ready"). Confirmed working on fresh patient data.
 
 ### Bug Fix — listReferrals body_parts collision ✅ CLOSED
 
@@ -579,3 +590,4 @@ PostgREST inline join type not including it. Workaround — not a schema gap.
 - **`confirmSessionResults()` bypasses `VALID_TRANSITIONS`** — result upload is an async clinical event that can arrive from any scheduled/confirmed state; direct `referrals` update is intentional, not a bug
 - **`deleteSessionResult()` deletes DB row first** — storage object deletion is best-effort after; an orphaned storage blob with no DB reference is harmless, but a DB row pointing at a deleted file leaves a broken badge
 - **`reviewed` status is the terminal "complete" state** — `completed` at referral level means "appointment attended, awaiting results"; never use it as post-review terminal; `reviewed` → solid green (`#19a866`/`#ffffff`) is the correct end state
+- **Never use `select('*')` when a column value controls conditional UI rendering** — Supabase JS client column ordering in `select('*')` responses can cause fields to be misread; always select columns explicitly when the value of a specific field drives conditional rendering (e.g. `outcome === 'completed'`)
