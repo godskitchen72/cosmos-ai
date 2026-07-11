@@ -1,3 +1,109 @@
+## 2026-07-10 — Session 33
+
+### Per-Session Cancel
+
+cancelSession(referralId, appointmentId) added to actions.ts. Writes
+outcome='cancelled' to referral_appointments (row kept for audit). Reverts
+referral status to most recent non-scheduled status from
+referral_status_history (Option A — history lookup). Writes status history
++ timeline rows. Two-tap confirm pattern on session card: first tap shows
+inline confirm, second tap executes. Cancel button hidden when
+outcome=completed. __dismiss__ sentinel used for Keep button. handleCancelSession()
+in ReferralSheet.tsx handles dismiss, first-tap-show, second-tap-execute logic.
+
+### Per-Session Reschedule
+
+rescheduleSession(referralId, appointmentId, ...) added to actions.ts.
+Updates referral_appointments row in place: new date/time/location/confNum,
+outcome→null, body_parts→[]. FD re-selects body parts from referral's full
+pool (up to 2). Referral status unchanged. Writes timeline entry. Inline
+reschedule form renders on session card when reschedulingSessionId matches.
+
+### PDF View Badge on Completed Sessions
+
+📄 View PDF button added before Delete button on completed session cards.
+handleViewSessionDoc() in ReferralSheet.tsx creates 15-minute signed URL
+from referral-documents bucket and opens in new tab. onViewSessionDoc prop
+added to ReferralAppointmentTab interface and destructured.
+
+### Patient Name + DOB/DOI in ReferralSheet Header
+
+Patient name added as cyan (#00cfff) subtitle beneath referral type label.
+DOB + DOI displayed in bright green (#19a866) below name in mm/dd/yyyy
+format. patient_name renders correctly. patient_dob/patient_doi currently
+null — PostgREST inline join with dob/doi columns caused listReferrals()
+to return 0 rows (reverted, deferred to client-side fetch Session 34).
+
+### types.ts Updates
+
+ReferralSummary: patient_name, patient_dob, patient_doi, _all_appointments
+fields added. _all_appointments required for UPCOMING filter serialization
+fix (Next.js server actions strip unknown type properties).
+
+### Font Size Bump — ReferralAppointmentTab
+
+All inline fontSize values +2pt: 10→12 (session header, chips, scheduled
+count, NEXT SESSION label, selected helper text), 11→13 (MRI Sessions header,
+parts chip, all sessions scheduled, Assigned Provider header, Upload Result
+button), Confirm Results button →14.
+
+### Timeline Oldest-First + Color Updates
+
+referral_timeline query ascending: true (oldest first). Event label text
+→ cyan (#00cfff). Timestamps → bright green (#19a866). Bullet dots →
+bright green (#19a866).
+
+### NEXT SESSION Label + Chip Colors
+
+NEXT SESSION label → bright green (#19a866). Unselected body part chips
+→ cyan (#00cfff) in both main pool and inline reschedule form.
+
+### Cancel Session Button Label
+
+"✕ Cancel Session" → "✕ Cancel" on session cards.
+
+### UPCOMING KPI Fix
+
+getReferralMetrics() UPCOMING count adds .is('outcome', null) to exclude
+completed and cancelled sessions. Previously counted all scheduled
+appointments regardless of outcome, inflating the KPI.
+
+### UPCOMING Filter Per-Session Expansion
+
+ReferralDashboard.tsx metricFilter==='upcoming' block now expands MRI
+referrals into one row per upcoming pending session. Each row has
+_session_appointment set to that session's data. Requires _all_appointments
+on base spread in listReferrals() (added this session).
+
+### Email Templates Rebuilt
+
+All three email templates in actions.ts rebuilt. Replaced table/tr/td
+layout with div row pairs (display:flex; justify-content:space-between).
+font-family:'Oxanium',sans-serif added to all HTML elements. Email system
+confirmed end-to-end: Resend domain cosmosmt.com verified, all /emails
+calls returning 200, provider session email hitting referralsout@outlook.com.
+Patient emails not sending — all test patient email fields are NULL (test
+data only, not a code bug).
+
+### Bug Fix — TS1117 Duplicate fontSize
+
+Confirm Results button had duplicate fontSize key after email patch. Removed
+original fontSize:12 from button style object.
+
+### Bug Fix — UPCOMING Dashboard 0 Results
+
+listReferrals() dob/doi inline join caused PostgREST to error and return 0
+rows. Reverted patients nested select to first_name/last_name only.
+patient_dob/patient_doi set to null in base spread.
+
+### Deferred to Session 34
+
+Lock icon removal from Closed status (types.ts icon field — emoji Unicode
+encoding mismatch in Python patch, anchor NOT FOUND). Patient DOB/DOI
+client-side fetch in ReferralSheet.tsx refreshDetail().
+
+---
+
 ## 2026-07-10 — Session 32
 
 ### ReferralSheet.tsx Refactor
