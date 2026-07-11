@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 10, 2026, Session 33)
+# Cosmos Medical Technologies — HANDOVER (July 11, 2026, Session 34)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -14,183 +14,136 @@ self-contained.
 ## Current Status
 
 All `cosmos-dashboard` commits confirmed deployed and live on
-`cosmos-dashboard-nu.vercel.app`. Session 33 priority queue exhausted.
-Per-session cancel/reschedule buttons live. Patient name + DOB/DOI in
-ReferralSheet header. Font size bump throughout ReferralAppointmentTab.
-Timeline oldest-first. NEXT SESSION label green. Unselected body part
-chips cyan. PDF View badge before Delete on completed sessions. UPCOMING
-KPI fixed to exclude completed/cancelled sessions. UPCOMING filter expands
-per-session rows. Email templates rebuilt with div layout + Oxanium font.
-Email system confirmed end-to-end via Resend logs.
+`cosmos-dashboard-nu.vercel.app`. Session 34 priority queue largely
+exhausted. Per-session MD review flow fully implemented end-to-end.
+UPCOMING/REVIEW KPI cards match table row counts. DOB/DOI client-side
+fetch live. Body part abbreviations (L./R.) throughout. CT session
+splitting enabled. MD dashboard review banner + patient card badge live.
 
-One pending patch did not land: lock icon removal from Closed status label
-(`types.ts` icon field anchor NOT FOUND — emoji encoding mismatch). Deferred
-to Session 34.
+One open item: Lock icon removal from Closed status label (`types.ts`
+icon field — emoji anchor mismatch). Deferred again. Betty Martin test
+data still has stale `needs_review` referral status (pre-migration legacy
+data) — needs SQL reset when convenient.
 
 ---
 
-## Completed This Session (Session 33)
+## Completed This Session (Session 34)
 
-### Font Size Bump — ReferralAppointmentTab.tsx ✅ CLOSED
+### UPCOMING KPI / Table Row Count Mismatch ✅ CLOSED
 
-All inline fontSize values bumped +2pt throughout: session header 10→12,
-body part chips 10→12, MRI Sessions header 11→13, scheduled count 10→12,
-NEXT SESSION label 10→12, unassigned parts chip 11→13, selected helper
-text 10→12, all sessions scheduled 11→13, Confirm Results button →14,
-Assigned Provider header 11→13, Upload Result button 11→13.
+Root cause: `listReferrals()` was double-expanding MRI sessions (once in
+actions.ts, once in ReferralDashboard.tsx). Removed expansion from
+`listReferrals()` — base data now returns one row per referral with
+`_all_appointments` attached. UPCOMING filter in ReferralDashboard.tsx
+does the expansion, gated to future dates + `outcome = null`. Status badge
+for expanded rows shows "Scheduled".
 
-### Patient Name + DOB/DOI in ReferralSheet Header ✅ CLOSED
+### REVIEW KPI / Table Row Count ✅ CLOSED
 
-Patient name added as cyan subtitle beneath referral type label. DOB and
-DOI displayed in bright green below name in mm/dd/yyyy format. Uses
-`patient_name`, `patient_dob`, `patient_doi` fields on `ReferralSummary`.
-`patient_dob`/`patient_doi` currently return null (dob/doi columns exist
-on patients table but PostgREST inline join with dob+doi caused listReferrals
-to return 0 rows — reverted, deferred to client-side fetch in Session 34).
-Patient name renders correctly from existing `patient_name` field.
+Migration 031: `referral_appointments.needs_review boolean NOT NULL DEFAULT false`.
+Migration 032: `referral_appointments.reviewed_at timestamptz DEFAULT NULL`.
 
-### types.ts Updates ✅ CLOSED
+Per-session review model replaces referral-level `needs_review` status:
+- FD uploads result → taps **✔ Done** → `needs_review = true` on session
+- MD reviews session → `reviewed_at = now()`, `needs_review = false`
+- REVIEW KPI counts `referral_appointments.needs_review = true` (distinct referrals)
+- REVIEW filter expands to one row per `needs_review = true` session
+- Referral-level status no longer used for review tracking
 
-- `ReferralDocumentRow.appointment_id: string | null` confirmed (was already
-  added in Session 32 — patch verified and re-applied)
-- `ReferralSummary.patient_name: string | null` added
-- `ReferralSummary.patient_dob: string | null` added
-- `ReferralSummary.patient_doi: string | null` added
-- `ReferralSummary._all_appointments?: any[]` added (serialization fix for
-  UPCOMING filter expansion)
+`markSessionNeedsReview(referralId, appointmentId)` added to `actions.ts`.
+`reviewSession(referralId, appointmentId)` updated — clears `needs_review`,
+sets `reviewed_at`, no longer auto-advances referral status.
+`confirmSessionResults()` removed — replaced by per-session Done button.
 
-### Per-Session Cancel ✅ CLOSED
+### MD Dashboard Review Banner + Badge ✅ CLOSED
 
-**Product decisions recorded:**
-- `outcome = 'cancelled'` written to `referral_appointments` (row kept for audit)
-- Referral status reverts to most recent non-`scheduled` status from
-  `referral_status_history` (Option A — history lookup)
-- Two-tap confirm pattern: first tap shows inline confirm, second tap executes
-- Cancel button hidden once `outcome = completed` (result uploaded)
-- `__dismiss__` sentinel used for Keep button to avoid triggering DB call
+Cyan banner in `MDClient.tsx` shows when any patient has a session with
+`needs_review = true`. Banner lists patient name + referral type with Tap →.
+Per-patient card shows 📋 badge with count. Both query
+`referral_appointments.needs_review = true` filtered to MD's patient list.
 
-`cancelSession(referralId, appointmentId)` added to `actions.ts`:
-writes `outcome = 'cancelled'`, queries `referral_status_history` for prior
-non-scheduled status, reverts `referrals.status`, writes history + timeline rows.
+### ReferralsTabV2 — Session Results Table ✅ CLOSED
 
-### Per-Session Reschedule ✅ CLOSED
+`app/md-v2/[patientId]/ReferralsTabV2.tsx` fully rebuilt. For referrals
+where any session has `needs_review = true` or `reviewed_at` set:
+- Card expands to show shadcn Table with one row per completed session
+- Columns: Body Parts · Scheduled · Results Received · PDF · Review
+- Review button writes `reviewed_at`, clears `needs_review`
+- Status badge derives from appointment-level state (not referral status)
+- Card border + prompt text reflects needs_review vs reviewed state
+- `needs_review` added to `referral_appointments` select
 
-**Product decisions recorded:**
-- Update in place (same `referral_appointments` row)
-- `outcome` → null, `body_parts` → [] (FD re-selects body parts)
-- Date/time/location/confirmation number all updatable
-- Referral status unchanged (remains `scheduled`)
+### DOB/DOI Client-Side Fetch ✅ CLOSED
 
-`rescheduleSession(referralId, appointmentId, ...)` added to `actions.ts`:
-updates appointment row in place, writes timeline entry.
+`ReferralSheet.tsx`: on open, separate `supabase.from('patients').select('dob,
+doi').eq('patient_id', referral.patient_id)` call sets `patientDob`/`patientDoi`
+state. Header renders DOB: MM/DD/YYYY · DOI: MM/DD/YYYY in green (#19a866).
+Bypasses PostgREST inline join limitation.
 
-Inline reschedule form renders on session card when `reschedulingSessionId`
-matches — reuses same body parts pool from `referral.body_parts`, up to 2
-selectable.
+### Body Part Abbreviations ✅ CLOSED
 
-### PDF View Badge on Completed Sessions ✅ CLOSED
+`abbrevBp(bp)` helper (Left→L., Right→R.) added to:
+- `ReferralAppointmentTab.tsx` — session cards, unassigned pool, reschedule picker
+- `ReferralDashboard.tsx` — session row body part chips
+- `ReferralsTabV2.tsx` — session results table chips, card summary line
 
-`📄 View PDF` button added before Delete button on session cards where
-result has been uploaded. Calls `handleViewSessionDoc()` which creates a
-15-minute signed URL from `referral-documents` Supabase Storage bucket
-and opens in new tab.
+### Font Size Bumps ✅ CLOSED
 
-`onViewSessionDoc` prop added to `ReferralAppointmentTab` interface.
-`handleViewSessionDoc()` handler added to `ReferralSheet.tsx`.
++2pt throughout: `ReferralAppointmentTab.tsx`, `ReferralOverviewTab.tsx`,
+`ReferralTimelineTab.tsx`, `InfoTabV2.tsx`, `PatientChartV2.tsx` header.
 
-### Timeline Oldest-First ✅ CLOSED
+### ReferralOverviewTab Restyled ✅ CLOSED
 
-`referral_timeline` query in `refreshDetail()` changed from
-`ascending: false` to `ascending: true`. Timeline now reads chronologically
-top-to-bottom.
+Provider name → cyan (#00cfff). Facility name, phone, email → green (#19a866).
+Email + phone fields added (requires `referral_providers.email, phone` in
+`listReferrals()` select and `ReferralSummary` type). No extra spacing.
+`abbrevBp` applied to body part chips. Clinical reason text → green (#19a866).
 
-### Timeline Color Updates ✅ CLOSED
+### Provider Required Before Scheduling ✅ CLOSED
 
-- Event label text → cyan (`#00cfff`)
-- Timestamps → bright green (`#19a866`)
-- Bullet dots → bright green (`#19a866`)
+`handleSchedule()` in `ReferralSheet.tsx` now guards: if `!assignedId`,
+toast error "Assign a provider before scheduling." and return early.
 
-### NEXT SESSION Label + Chip Colors ✅ CLOSED
+### CT Session Splitting ✅ CLOSED
 
-- NEXT SESSION label → bright green (`#19a866`)
-- Unselected body part chips → cyan (`#00cfff`) in both main pool and
-  inline reschedule form
+`MriReferral.tsx` `createLifecycleRecord()`: when `modality === 'CT'`,
+`body_parts` is now populated from `CT_STUDIES` selections. MRI branch
+unchanged. CT referrals now trigger the same session splitter, per-session
+upload, Done button, and MD review flow as MRI.
 
-### Cancel Session Button Label ✅ CLOSED
+### allDone Logic Fix ✅ CLOSED
 
-"✕ Cancel Session" → "✕ Cancel" on session cards.
+`allDone` in `ReferralAppointmentTab.tsx` now checks
+`unassignedParts.length === 0` instead of `schedCount >= reqSessions`.
+Fixes "4 of 3 scheduled" display when more sessions are created than
+`reqSessions` formula predicted.
 
-### UPCOMING KPI Fix ✅ CLOSED
+### UPCOMING Filter Status Badge ✅ CLOSED
 
-`getReferralMetrics()` UPCOMING count now filters `.is('outcome', null)` —
-excludes completed and cancelled sessions from the KPI count. Previously
-counted all scheduled appointments regardless of outcome.
-
-### UPCOMING Filter Per-Session Expansion ✅ CLOSED
-
-When `metricFilter === 'upcoming'` in `ReferralDashboard.tsx`:
-- Filters referrals to those with ≥1 upcoming pending session
-- Expands MRI referrals into one row per upcoming pending session
-- Each expanded row has `_session_appointment` set to that session's data
-- Requires `_all_appointments: appts` on base spread in `listReferrals()`
-  and `_all_appointments?: any[]` on `ReferralSummary` type
-
-### Email Templates Rebuilt ✅ CLOSED
-
-All three provider/patient email templates in `actions.ts` rebuilt:
-- Replaced `<table>/<tr>/<td>` layout with `<div>` row pairs
-  (`display:flex; justify-content:space-between`)
-- `font-family:'Oxanium',sans-serif` added to all HTML elements
-- 24-hour time format kept as-is
-- Provider assignment email, patient appointment confirmation email,
-  provider session email — all three updated
-
-Email system confirmed end-to-end: Resend domain `cosmosmt.com` verified,
-all `/emails` calls returning 200, emails hitting `referralsout@outlook.com`
-inbox. Delay (~1-2 min) is normal Resend async behavior. Patient emails
-not sending because all test patient `email` fields are NULL — not a code
-bug, test data only.
-
-### Bug Fix — TS1117 Duplicate fontSize ✅ CLOSED
-
-Confirm Results button had duplicate `fontSize` key after email patch
-(original `fontSize: 12` + new `fontSize: 14` in same style object).
-Fixed by removing original `fontSize: 12` from that button's style.
-
-### Bug Fix — UPCOMING Dashboard 0 Results ✅ CLOSED
-
-`listReferrals()` `dob`/`doi` inline join caused PostgREST to error and
-return 0 rows for all referrals. Reverted patients select to
-`first_name, last_name` only. `patient_dob`/`patient_doi` set to null in
-base spread (types still satisfied). Dashboard restored.
-
-Root cause: PostgREST inline join syntax for nested table select is
-sensitive to column additions — adding `dob, doi` to the patients nested
-select caused a silent query failure. Fix deferred: fetch dob/doi
-client-side in `ReferralSheet.tsx` on open (separate query) in Session 34.
+Expanded UPCOMING rows show "Scheduled" badge. Expanded REVIEW rows show
+"Needs MD Review" badge. Implemented via `_session_is_review` flag on
+expanded rows — avoids closure issue with `metricFilter` in useMemo columns.
 
 ---
 
 ## Open Items, Priority Order
 
-1. **Lock icon removal from Closed status.** `types.ts` has
-   `icon:'🔒'` on the `closed` status meta object. Python one-liner
-   patch returned NOT FOUND — emoji Unicode encoding mismatch between
-   what's in the file and what the shell sent. Pull `types.ts` fresh,
-   inspect the exact bytes around the icon field, write targeted patch.
+1. **Lock icon removal from Closed status** (`types.ts` icon field).
+   Python patch anchor failed Session 33 + 34 due to emoji Unicode encoding
+   mismatch. Fix: pull `types.ts` fresh, inspect exact bytes around the
+   icon field, write targeted patch.
 
-2. **Patient DOB/DOI in header — client-side fetch.** `patient_dob` and
-   `patient_doi` are currently always null because the PostgREST inline
-   join with `dob, doi` broke `listReferrals()`. Fix: in `ReferralSheet.tsx`
-   `refreshDetail()`, add a separate `supabase.from('patients').select('dob,
-   doi').eq('patient_id', referral.patient_id).single()` call and set
-   `patientDob`/`patientDoi` state. Pass as props to header render.
+2. **Betty Martin test data cleanup.** Referral still has `status =
+   needs_review` from pre-migration `confirmSessionResults()` flow. Run:
+   `UPDATE referrals SET status = 'scheduled' WHERE patient_id = 'PT120427'
+   AND deleted_at IS NULL;` when convenient.
 
-3. **MRA/CT session splitting.** Deferred. Product decision pending on
-   whether CT requires same 2-body-parts-per-session rule as MRI.
-
-4. **DEV artifacts removal.** Remove DEV fill-all PCE button from
+3. **DEV artifacts removal.** Remove DEV fill-all PCE button from
    `VisitTab.tsx` and Dev Tools card from Admin panel before go-live.
+
+4. **Patient email required at intake.** `PatientForm.tsx` should make
+   `email` a required field. All test patient emails NULL — patient
+   confirmation emails dead until fixed.
 
 5. **Sidebar rollout — FD, MD, Biller.** Deferred.
 
@@ -204,20 +157,14 @@ client-side in `ReferralSheet.tsx` on open (separate query) in Session 34.
 9. **HIPAA BAAs.** Supabase, Render, Vercel, Resend — must be signed
    before go-live with real patient data.
 
-10. **SPF/DKIM records** for `cosmosmt.com` on Porkbun/Cloudflare — fixes
-    email spam classification. At go-live.
+10. **SPF/DKIM records** for `cosmosmt.com` — fixes email spam classification.
+    At go-live.
 
-11. **Twilio SMS integration.** Deferred. `sendSMS()` slots alongside
-    `sendEmail()` in `actions.ts` when Twilio account is ready.
+11. **Twilio SMS integration.** Deferred.
 
 12. **Provider portal — token-gated referral view.** Phase 2.
 
 13. **`getReferralProviders()` return type.** Still `any[]`.
-
-14. **Patient email collection at intake.** All test patient `email` fields
-    are NULL. Patient confirmation emails will not fire until real email
-    addresses are collected at intake. `PatientForm.tsx` should make email
-    a required field — deferred to Session 34.
 
 ---
 
@@ -291,7 +238,7 @@ client-side in `ReferralSheet.tsx` on open (separate query) in Session 34.
 - [x] Migration 030 — referral_documents.appointment_id (Session 31)
 - [x] Per-session result upload + FD Confirm + MD Mark Reviewed (Session 32)
 - [x] Per-session cancel + reschedule buttons (Session 33)
-- [x] Patient name + DOB/DOI in ReferralSheet header (Session 33 — name only; DOB/DOI deferred)
+- [x] Patient name in ReferralSheet header (Session 33)
 - [x] Font size bump throughout ReferralAppointmentTab (Session 33)
 - [x] PDF View badge on completed session cards (Session 33)
 - [x] Timeline oldest-first + color updates (Session 33)
@@ -299,8 +246,26 @@ client-side in `ReferralSheet.tsx` on open (separate query) in Session 34.
 - [x] UPCOMING KPI excludes completed/cancelled sessions (Session 33)
 - [x] UPCOMING filter per-session row expansion (Session 33)
 - [x] Email templates div layout + Oxanium font (Session 33)
-- [ ] Lock icon removal from Closed status (Session 34 — anchor mismatch)
-- [ ] Patient DOB/DOI client-side fetch (Session 34)
+- [x] UPCOMING KPI/table row count fix — removed double expansion (Session 34)
+- [x] Per-session Done button replaces Confirm Results (Session 34)
+- [x] Migration 031 — referral_appointments.needs_review (Session 34)
+- [x] Migration 032 — referral_appointments.reviewed_at (Session 34)
+- [x] markSessionNeedsReview() action (Session 34)
+- [x] reviewSession() updated — session-level, no referral status advance (Session 34)
+- [x] MD dashboard review banner + patient card badge (Session 34)
+- [x] ReferralsTabV2 session results shadcn table (Session 34)
+- [x] REVIEW KPI counts appointment-level needs_review (Session 34)
+- [x] REVIEW filter expands per needs_review session (Session 34)
+- [x] DOB/DOI client-side fetch in ReferralSheet (Session 34)
+- [x] Body part abbreviations L./R. throughout (Session 34)
+- [x] Font bumps +2pt — Overview, Timeline, InfoTabV2, PatientChartV2 (Session 34)
+- [x] ReferralOverviewTab restyled — provider cyan, clinical reason green, email+phone (Session 34)
+- [x] Provider required before scheduling gate (Session 34)
+- [x] CT session splitting via body_parts population (Session 34)
+- [x] allDone fix — uses unassignedParts.length===0 (Session 34)
+- [x] referral_providers.email + phone added to listReferrals select (Session 34)
+- [ ] Lock icon removal from Closed status (anchor mismatch — deferred)
+- [ ] Patient email required at intake — PatientForm.tsx
 - [ ] Sidebar rollout — FD, MD, Biller dashboards
 - [ ] Holistic UX audit
 - [ ] Accessibility (ARIA, keyboard nav)
@@ -316,38 +281,32 @@ client-side in `ReferralSheet.tsx` on open (separate query) in Session 34.
 
 ## Known Architecture Gaps
 
-- `getReferralProviders()` return type is still `any[]` — all downstream
-  code operates without type safety on provider data.
+- `getReferralProviders()` return type is still `any[]`.
 - `/referrals/page.tsx` `userRole` prop hardcoded to `"md"` — relies on
   sessionStorage override in `useEffect`; hard refresh without re-login
   can expose wrong role default.
-- `referral_notifications` table schema mismatch — table was designed for
-  internal user notifications (recipient_user_id/recipient_role), not
-  outbound Resend emails. Outbound emails are not logged to this table.
-  Email delivery audit is via Resend dashboard only.
-- `patient_dob`/`patient_doi` on `ReferralSummary` always null — PostgREST
-  inline join with dob/doi columns in patients nested select causes
-  listReferrals() to return 0 rows. Client-side fetch required.
+- `referral_notifications` table schema mismatch — designed for internal
+  user notifications, not outbound Resend emails. Email delivery audit
+  via Resend dashboard only.
+- Betty Martin referral has stale `status = needs_review` from pre-migration
+  `confirmSessionResults()` flow. Needs SQL reset.
 
 ---
 
 ## Technical Lessons This Session
 
-- PostgREST inline join syntax for nested table selects is sensitive to
-  column additions. Adding columns to `patients ( first_name, last_name )`
-  caused the entire `listReferrals()` query to fail silently — returning
-  0 rows with no visible error. Always verify new nested column additions
-  against the live PostgREST response before deploying.
-- Next.js server actions strip properties not defined in the TypeScript
-  return type during JSON serialization. `_all_appointments` was dropped
-  from `ReferralSummary` rows until added to the type definition.
-- Python one-liner emoji replacements in Termux can fail due to Unicode
-  encoding mismatches between the emoji in the file and the emoji sent
-  via the shell command. Always pull the file fresh and inspect bytes
-  before patching emoji-containing strings.
-- Vercel CLI `Unexpected error. ()` is a transient Vercel infrastructure
-  issue — not a code problem. Git push to GitHub triggers auto-deploy
-  independently. Tap Redeploy in Vercel dashboard when CLI fails.
-- Chrome on Android re-downloads of identically named files may create
-  0-byte files — confirmed again this session. Always `rm -f` prior
-  copies before downloading patch scripts.
+- PostgREST inline join syntax is sensitive to column additions — confirmed
+  again. Always use separate client-side queries for fields not in the
+  original select.
+- Python patch anchor failures are almost always caused by the file having
+  changed since it was last read. Always pull a fresh copy immediately
+  before writing a patch script.
+- TypeScript `useMemo` columns don't see updated closure variables like
+  `metricFilter` — use row-level flags (`_session_is_review`) instead of
+  checking outer state inside cell renderers.
+- When expanding referral rows into session rows, `_session_appointment`
+  alone is insufficient for badge logic — add semantic flags like
+  `_session_is_review` to disambiguate UPCOMING vs REVIEW expansions.
+- `Math.ceil(totalParts / 2)` for `reqSessions` can be exceeded when
+  sessions are rescheduled and new ones added — always check
+  `unassignedParts.length === 0` for done state, not appointment count.

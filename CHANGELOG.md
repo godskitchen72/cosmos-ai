@@ -1,834 +1,100 @@
-## 2026-07-10 — Session 33
+## 2026-07-11 — Session 34
 
-### Per-Session Cancel
+### UPCOMING KPI / Table Row Count Fix
 
-cancelSession(referralId, appointmentId) added to actions.ts. Writes
-outcome='cancelled' to referral_appointments (row kept for audit). Reverts
-referral status to most recent non-scheduled status from
-referral_status_history (Option A — history lookup). Writes status history
-+ timeline rows. Two-tap confirm pattern on session card: first tap shows
-inline confirm, second tap executes. Cancel button hidden when
-outcome=completed. __dismiss__ sentinel used for Keep button. handleCancelSession()
-in ReferralSheet.tsx handles dismiss, first-tap-show, second-tap-execute logic.
+Removed double-expansion bug: `listReferrals()` was expanding MRI sessions
+AND `ReferralDashboard.tsx` was expanding again. Removed expansion from
+`listReferrals()` — base data returns one row per referral with
+`_all_appointments` attached. UPCOMING filter does expansion only, gated
+to future dates + `outcome = null`. Status badge for expanded rows shows
+"Scheduled" via `_session_appointment` flag check.
 
-### Per-Session Reschedule
+### Per-Session MD Review Flow (Migrations 031 + 032)
 
-rescheduleSession(referralId, appointmentId, ...) added to actions.ts.
-Updates referral_appointments row in place: new date/time/location/confNum,
-outcome→null, body_parts→[]. FD re-selects body parts from referral's full
-pool (up to 2). Referral status unchanged. Writes timeline entry. Inline
-reschedule form renders on session card when reschedulingSessionId matches.
+Migration 031: `referral_appointments.needs_review boolean NOT NULL DEFAULT false`.
+Migration 032: `referral_appointments.reviewed_at timestamptz DEFAULT NULL`.
 
-### PDF View Badge on Completed Sessions
+Replaces referral-level `needs_review` status with per-session flags.
+`confirmSessionResults()` removed. `markSessionNeedsReview(referralId,
+appointmentId)` added — sets `needs_review = true`, writes timeline entry.
+`reviewSession()` updated — sets `reviewed_at = now()`, clears `needs_review`,
+no referral status advancement.
 
-📄 View PDF button added before Delete button on completed session cards.
-handleViewSessionDoc() in ReferralSheet.tsx creates 15-minute signed URL
-from referral-documents bucket and opens in new tab. onViewSessionDoc prop
-added to ReferralAppointmentTab interface and destructured.
+FD flow: Upload Result → ✔ Done button appears → tap Done → session shows
+"📋 Sent for MD Review". Delete button hidden once needs_review=true.
 
-### Patient Name + DOB/DOI in ReferralSheet Header
+MD flow: Review banner on MD dashboard → tap patient → Referrals tab →
+expand referral card → session results table → ✔ Review button per session.
 
-Patient name added as cyan (#00cfff) subtitle beneath referral type label.
-DOB + DOI displayed in bright green (#19a866) below name in mm/dd/yyyy
-format. patient_name renders correctly. patient_dob/patient_doi currently
-null — PostgREST inline join with dob/doi columns caused listReferrals()
-to return 0 rows (reverted, deferred to client-side fetch Session 34).
+### MD Dashboard Review Banner + Patient Card Badge
 
-### types.ts Updates
+`MDClient.tsx`: cyan banner shows count of referrals with `needs_review=true`
+sessions, lists patient name + referral type, taps to `/md-v2/[patientId]`.
+Per-patient card shows 📋 badge with session count. Query:
+`referral_appointments.needs_review = true` joined to MD's patient list.
 
-ReferralSummary: patient_name, patient_dob, patient_doi, _all_appointments
-fields added. _all_appointments required for UPCOMING filter serialization
-fix (Next.js server actions strip unknown type properties).
+### ReferralsTabV2 Session Results Table
 
-### Font Size Bump — ReferralAppointmentTab
+Fully rebuilt `app/md-v2/[patientId]/ReferralsTabV2.tsx`. Card expands when
+any session has `needs_review=true` or `reviewed_at` set. shadcn Table with
+one row per completed session: Body Parts · Scheduled · Results Received ·
+PDF · Review. Status badge derives from appointment-level state. `needs_review`
+added to `referral_appointments` select.
 
-All inline fontSize values +2pt: 10→12 (session header, chips, scheduled
-count, NEXT SESSION label, selected helper text), 11→13 (MRI Sessions header,
-parts chip, all sessions scheduled, Assigned Provider header, Upload Result
-button), Confirm Results button →14.
+### REVIEW KPI + Filter
 
-### Timeline Oldest-First + Color Updates
+REVIEW KPI now counts `referral_appointments.needs_review = true` (not
+referral status). REVIEW filter expands to one row per `needs_review=true`
+session. Expanded rows show "Needs MD Review" badge via `_session_is_review`
+flag (avoids useMemo closure issue).
 
-referral_timeline query ascending: true (oldest first). Event label text
-→ cyan (#00cfff). Timestamps → bright green (#19a866). Bullet dots →
-bright green (#19a866).
+### DOB/DOI Client-Side Fetch
 
-### NEXT SESSION Label + Chip Colors
+`ReferralSheet.tsx`: on open, separate `supabase.from('patients').select('dob,
+doi')` call. Header shows DOB: MM/DD/YYYY · DOI: MM/DD/YYYY in green.
+Bypasses PostgREST inline join limitation that caused listReferrals() to
+return 0 rows when dob/doi were added to nested patients select.
 
-NEXT SESSION label → bright green (#19a866). Unselected body part chips
-→ cyan (#00cfff) in both main pool and inline reschedule form.
+### Body Part Abbreviations
 
-### Cancel Session Button Label
+`abbrevBp(bp)` helper: Left→L., Right→R. Applied in ReferralAppointmentTab
+(session cards, unassigned pool, reschedule picker), ReferralDashboard (row
+chips), ReferralsTabV2 (table chips, card summary).
 
-"✕ Cancel Session" → "✕ Cancel" on session cards.
+### Font Size Bumps +2pt
 
-### UPCOMING KPI Fix
+ReferralAppointmentTab, ReferralOverviewTab, ReferralTimelineTab, InfoTabV2,
+PatientChartV2 header — all inline fontSize values and Tailwind text classes
+bumped +2pt.
 
-getReferralMetrics() UPCOMING count adds .is('outcome', null) to exclude
-completed and cancelled sessions. Previously counted all scheduled
-appointments regardless of outcome, inflating the KPI.
+### ReferralOverviewTab Restyled
 
-### UPCOMING Filter Per-Session Expansion
+Provider name → cyan (#00cfff). Facility, phone, email → green (#19a866).
+Email + phone added (referral_providers.email, phone added to listReferrals
+select and ReferralSummary type). No extra spacing between fields. abbrevBp
+on body part chips. Clinical reason → green (#19a866).
 
-ReferralDashboard.tsx metricFilter==='upcoming' block now expands MRI
-referrals into one row per upcoming pending session. Each row has
-_session_appointment set to that session's data. Requires _all_appointments
-on base spread in listReferrals() (added this session).
+### Provider Required Before Scheduling
 
-### Email Templates Rebuilt
+`handleSchedule()` in `ReferralSheet.tsx` guards on `!assignedId` — toast
+error "Assign a provider before scheduling." and return early.
 
-All three email templates in actions.ts rebuilt. Replaced table/tr/td
-layout with div row pairs (display:flex; justify-content:space-between).
-font-family:'Oxanium',sans-serif added to all HTML elements. Email system
-confirmed end-to-end: Resend domain cosmosmt.com verified, all /emails
-calls returning 200, provider session email hitting referralsout@outlook.com.
-Patient emails not sending — all test patient email fields are NULL (test
-data only, not a code bug).
+### CT Session Splitting
 
-### Bug Fix — TS1117 Duplicate fontSize
+`MriReferral.tsx` `createLifecycleRecord()`: CT branch populates `body_parts`
+from `CT_STUDIES` selections. MRI/MRA branches unchanged. CT referrals now
+trigger the same session splitter, upload, Done, and MD review flow as MRI.
 
-Confirm Results button had duplicate fontSize key after email patch. Removed
-original fontSize:12 from button style object.
+### allDone Logic Fix
 
-### Bug Fix — UPCOMING Dashboard 0 Results
+`ReferralAppointmentTab.tsx`: `allDone = unassignedParts.length === 0`
+(was `schedCount >= reqSessions`). Fixes "4 of 3 scheduled" display bug
+when rescheduled sessions exceeded the formula's session count.
 
-listReferrals() dob/doi inline join caused PostgREST to error and return 0
-rows. Reverted patients nested select to first_name/last_name only.
-patient_dob/patient_doi set to null in base spread.
+### Appt Column Per-Session Date Fix
 
-### Deferred to Session 34
-
-Lock icon removal from Closed status (types.ts icon field — emoji Unicode
-encoding mismatch in Python patch, anchor NOT FOUND). Patient DOB/DOI
-client-side fetch in ReferralSheet.tsx refreshDetail().
-
----
-
-## 2026-07-10 — Session 32
-
-### ReferralSheet.tsx Refactor
-
-Split 1,078-line monolith into shell + 5 tab components under
-app/referrals/components/. Zero behavior change — deployed and confirmed
-before feature work began.
-
-New files: ReferralDropdowns.tsx, ReferralOverviewTab.tsx,
-ReferralAppointmentTab.tsx, ReferralDocumentsTab.tsx, ReferralNotesTab.tsx,
-ReferralTimelineTab.tsx. ReferralSheet.tsx reduced to shell (state, handlers,
-tab routing, prop passthrough).
-
-### types.ts Updates
-
-ReferralDocumentRow.appointment_id: string | null added (Migration 030).
-UploadSessionResultInput interface added. reviewed status color changed from
-#1a3a1a/#86efac to #19a866/#ffffff (solid green — terminal complete state).
-
-### Per-Session MRI Result Upload — Full Workflow
-
-Product decisions: session upload marks outcome=completed only (no status
-change); FD taps Confirm Results to advance to needs_review; MD taps Mark
-Reviewed to advance to reviewed (solid green); per-session reschedule/cancel
-deferred to Session 33.
-
-actions.ts — uploadReferralResult() extended with optional appointmentId:
-writes appointment_id to referral_documents, sets outcome=completed on that
-session row. confirmSessionResults() added: FD-initiated, direct update to
-needs_review (bypasses VALID_TRANSITIONS — intentional for async clinical
-event). deleteSessionResult() added: deletes referral_documents row, reverts
-referral_appointments.outcome to null, removes storage object (best-effort).
-listReferrals(): outcome added to appointment inline select; body_parts
-explicitly set in base spread to prevent PostgREST join collision;
-pendingAppts filter uses (a.outcome ?? null) === null.
-
-ReferralSheet.tsx — uploadingSessionId, confirmingResults, deletingResultId
-state added. handleUploadSessionResult(), handleConfirmSessionResults(),
-handleDeleteSessionResult() handlers added. sessionDocuments prop derived
-from detail.documents filtered to result type with appointment_id set.
-
-ReferralAppointmentTab.tsx — per-session ⬆ Upload Result button (outcome
-null); ✓ Result Uploaded + filename + 🗑 Delete button with inline confirm
-(outcome=completed); Confirm Results button when ≥1 session uploaded and
-referral not yet needs_review/reviewed/closed.
-
-ReferralsTabV2.tsx — needs_review cards: orange border, tap to expand docs,
-Mark Reviewed button (advances to reviewed). reviewed cards: green border,
-tap to expand docs (no Mark Reviewed). Both: Open Full Referral → link.
-loadReferrals() extracted for post-review refresh. fetchResultDocs()
-on-demand, cached per referral.
-
-### Bug Fix — refreshDetail select('*') outcome misread
-
-ReferralSheet.tsx refreshDetail() used select('*') on referral_appointments.
-Supabase JS client column ordering caused outcome to be misread as truthy for
-fresh appointments with outcome=null in DB — session cards rendered green
-"✓ Result Uploaded" with no Upload Result button. Fixed with explicit column
-list. Also fixed stale toast message: "Referral advanced to Needs MD Review"
-→ "Tap Confirm Results when ready." Confirmed on fresh patient data.
-
-### Bug Fix — listReferrals body_parts spread collision
-
-body_parts from referral row was potentially colliding with appointment-level
-body_parts in ...r spread. Fixed with explicit body_parts assignment in base
-object. outcome added to appointment inline select for correct pendingAppts
-filtering.
-
----
-
-## 2026-07-10 — Session 31
-
-### Infrastructure — DB Indexes (Migration 028)
-
-6 indexes added to Supabase SQL editor. Pre-existing index audit confirmed
-referral tables already well-indexed from Migration 026. Gaps filled:
-- idx_patient_visits_patient_id
-- idx_patient_visits_submitted_to_billing (partial WHERE NOT NULL)
-- idx_patient_visits_location_id
-- idx_biller_md_flags_visit_id
-- idx_biller_md_flags_patient_id
-- idx_referrals_referral_provider_id
-All used IF NOT EXISTS. login_attempts.email index confirmed pre-existing.
-
-### Infrastructure — Sentry Error Monitoring
-
-cosmos-dashboard: @sentry/nextjs installed. sentry.client.config.ts,
-sentry.server.config.ts, instrumentation.ts created manually (wizard not
-usable in Termux). DSN confirmed working via curl test — event received
-in Sentry dashboard. Sentry project: cosmos-dashboard.
-
-cosmos-api: sentry-sdk 2.64.0 installed (base, not [fastapi] — pydantic-core
-requires Rust on ARM/Termux). sentry_sdk.init() added to main.py after
-import supabase as sb. sentry-sdk>=2.64.0 added to requirements.txt.
-Sentry project: cosmos-api.
-
-Both projects under cosmosmedtechnologies Sentry org. Alert: 1 occurrence,
-notify via email.
-
-### MRI Referral UI — Spine Buttons
-
-Spine buttons now rendered in rows of 2 (Cervical W/O | Cervical W/WO).
-Per-pair mutual exclusivity: selecting W/O deselects W/WO for same region
-and vice versa. Implemented via SPINE_PAIRS toggle logic in MriReferral.tsx.
-
-### MRI Referral UI — CT Section
-
-CT / CAT Scan section dimmed (disabledOverlay + secDisabled) when NO — MRI
-available is selected. CT enabled only when YES — CT only (metal implant).
-Label shows "(MRI selected — CT unavailable)" when dimmed.
-
-### Migration 029 — MRI Session Tracking
-
-ALTER TABLE referrals ADD COLUMN body_parts text[] DEFAULT '{}';
-ALTER TABLE referral_appointments ADD COLUMN body_parts text[] DEFAULT '{}';
-
-### MRI Session Splitting — Full Workflow
-
-Product decisions: max 2 body parts per session; FD manually selects which
-parts go in each session; auto-advance to scheduled when all sessions booked;
-MRA/CT session splitting deferred.
-
-MriReferral.tsx — createLifecycleRecord() now writes body_parts[] (MRI spine
-+ extremity labels only, MRA/CT excluded) to referrals table.
-
-types.ts — ScheduleAppointmentInput: body_parts?: string[]. ReferralSummary:
-body_parts: string[] | null, _session_appointment optional field,
-current_appointment.outcome added. ReferralAppointmentRow: body_parts optional.
-
-actions.ts — scheduleAppointment() writes body_parts to referral_appointments.
-Auto-advance: MRI referrals only advance to scheduled when appointment_count
->= ceil(body_parts.length / 2). Non-MRI advances on first appointment.
-listReferrals() adds body_parts + outcome to select; expands MRI referrals
-with pending appointments into one row per session (_session_appointment).
-Provider session email added — fires on every scheduleAppointment() call
-with date, time, body parts for that session.
-
-ReferralSheet.tsx — Overview tab: CLINICAL REASON + PROVIDER labels now
-#19a866 (bright green). Body parts shown as cyan chips below clinical reason.
-Header: body_part text removed (moved to Overview). Appointment tab: MRI
-Sessions card with session counter, scheduled sessions list, unassigned parts
-pool (select up to 2), schedule form visible when sessions remain. sessionParts
-state added; wired into handleSchedule(); cleared on cancel and save.
-
-ReferralDashboard.tsx — UPCOMING KPI: individual referral_appointments rows
-where scheduled_date >= today. OVERDUE KPI: stale referrals (14 days, not
-scheduled) + missed appointments (date passed, no outcome). isOverdue() updated
-to match. Per-session rows: MRI referrals expand into one list row per pending
-session; each row shows date + body parts in cyan chips.
-
-### Provider Session Email
-
-actions.ts scheduleAppointment() — provider session email added after patient
-email block. Fires fire-and-forget on every session save. Fetches assigned
-provider from referrals.referral_provider_id. Email includes patient name,
-date, time, location, confirmation #, body parts for that session.
-Subject: "Session Scheduled — {type} — {patient name}".
-
-### UPCOMING and OVERDUE KPI Redesign
-
-UPCOMING: now counts individual appointment rows (scheduled_date >= today)
-rather than referral records in scheduled status. Reflects actual calendar load.
-
-OVERDUE: two conditions summed — (1) open referral not updated in 14 days
-(excluding scheduled/patient_confirmed status), (2) appointment date passed
-with no outcome recorded (missed appointment). isOverdue() client-side updated
-to match both conditions.
-
-### Per-Session Rows in Referral Dashboard
-
-listReferrals() expands MRI referrals with pending appointments into multiple
-ReferralSummary rows — one per session. Each row carries _session_appointment
-{scheduled_date, scheduled_time, body_parts, outcome}. Dashboard patient cell
-renders date + cyan body part chips for session rows. Non-MRI and unscheduled
-MRI referrals return as single rows unchanged.
-
-Completed/no-show/rescheduled appointments filtered out of session display
-(outcome != null excluded). Clicking any session row opens the full referral
-sheet for that referral_id.
-
-### Migration 030 — appointment_id on referral_documents
-
-ALTER TABLE referral_documents ADD COLUMN appointment_id uuid
-REFERENCES referral_appointments(id);
-CREATE INDEX idx_ref_docs_appointment_id ON referral_documents(appointment_id);
-
-Deployed. No code changes yet. Session 32 picks up with per-session upload
-button on session cards, auto-close session on upload, referral auto-advance
-chain to needs_review, MD chart result viewing.
-
-## 2026-07-09 — Session 30
-
-### Priority Queue — Full Resolution
-
-All actionable items from the Session 29 priority queue resolved or
-formally deferred this session.
-
-### patient_forms visit_id backfill — CLOSED
-
-Investigation: all 30 null-visit_id rows were dev-seeded ghost records
-with both visit_id and filename null. No real PDF existed. No real patient
-data affected. Billing ZIP correctly excluded them. Resolved:
-DELETE FROM patient_forms WHERE visit_id IS NULL AND filename IS NULL;
-
-### CPT codes provider_type — CLOSED
-
-All 34 CPT codes bulk-updated: MD → General in database.
-VisitTab.tsx filter updated to show codes where
-provider_type === effectiveLicenseType || provider_type === 'General'.
-PA and NP users now see full 34-code set (previously empty picker).
-Product decision: single General code set correct for this practice.
-DC/PT/etc. are referral recipients, not visit coders in Cosmos.
-
-### ReferralProviderRow type cleanup — CLOSED
-
-app/referrals/types.ts fully corrected. All seven interface field names
-updated to match live schema: ReferralProviderRow (street/city/state/zip),
-ReferralRow (referral_provider_id, created_by_user_id), ReferralAppointmentRow
-(location_name), ReferralDocumentRow (uploaded_by_user_id, created_at),
-ReferralStatusHistoryRow (changed_by_user_id, created_at), ReferralTimelineRow
-(actor_user_id, created_at), ReferralNoteRow (author_user_id).
-
-### Migration 027 — patients.email
-
-ALTER TABLE patients ADD COLUMN email text;
-Optional nullable field. FD enters at registration or via edit. If absent,
-FD calls patient manually. Future: SMS via Twilio when ready.
-
-### PatientForm.tsx — Email field
-
-Email field added to Personal Information section after Phone. Optional,
-type="email", inputMode="email". State initialized from patient?.email in
-edit mode. Writes to patients.email on save (both INSERT and UPDATE paths).
-
-### PatientProfile.tsx — Email display
-
-Email conditionally shown in patient info grid when has(patient, 'email')
-is true. Uses spread pattern into the grid array.
-
-### actions.ts — sendEmail() Resend helper
-
-Fire-and-forget email helper. Uses RESEND_API_KEY env var (added to Vercel
-Production environment variables, separate from Render). Sends via Resend
-from admin@cosmosmt.com. Logs every attempt to referral_notifications
-(delivery_status: sent/failed, sent_at). Uses two-arg .then(onFulfilled,
-onRejected) — Supabase insert returns PromiseLike<void>; .catch() not
-available.
-
-### actions.ts — Patient appointment confirmation email
-
-scheduleAppointment() — after successful insert, fetches patient.email.
-If present, sends appointment confirmation: subject "Appointment
-Confirmation — {type}", body includes patient name, referral type, date
-(long format), time, location, confirmation number. Confirmed working in
-production.
-
-### actions.ts — Provider assignment notification email
-
-assignProvider() — after successful provider assignment, fetches
-referral_providers.email. If present, sends referral notification: subject
-"New {type} Referral — {patient name}", body includes patient name,
-referral type, urgency, clinical reason. For MRI/Rx/DME types: fetches
-most recent patient_forms row, downloads PDF from patient-forms storage
-bucket, attaches as base64. Confirmed working in production (email received,
-PDF attached).
-
-### RESEND_API_KEY — Vercel env var added
-
-RESEND_API_KEY added to Vercel Production + Preview environment variables.
-Required for actions.ts sendEmail(). Previously only set on Render for
-cosmos-api attorney email feature.
-
-### Superadmin dashboard — CLOSED (already built)
-
-Confirmed: superadmin login lands on role-selector screen with 👑 SUPER
-ADMIN badge and four dashboard tiles. No separate /superadmin route needed.
-Audit log records all logins. Priority closed.
-
-### DEV artifacts — deferred to go-live
-
-DEV fill-all PCE button (VisitTab.tsx) and Dev Tools card (Admin) retained
-during testing. Remove together at go-live.
-
-### Doctor mailing addresses — deferred to pre-production
-
-All current doctor records are test data. Real addresses entered at go-live.
-
-### SMS notifications — deferred
-
-Twilio integration deferred. Email primary channel. sendSMS() will slot
-alongside sendEmail() in actions.ts when Twilio account ready.
-
-### Provider portal — deferred to Phase 2
-
-Token-gated provider referral view page (public route with signed URL).
-MRI/Rx/DME providers receive PDF via email attachment in the interim.
-
-## 2026-07-09 — Session 29
-
-### AI_STYLE_GUIDE.md — shadcn Exception Scope Corrected
-
-§2 updated: exception scope was listed as "Biller dashboard only" — corrected
-to five approved surfaces: Biller (/billing), Admin (/admin), MD V2 (/md-v2),
-MDClient (/md), Referral dashboard (/referrals). Matches SYSTEM_PROMPT.md §9
-and ARCHITECTURE.md §1.
-
-### Provider Assignment — Appointment Tab
-
-app/referrals/ReferralSheet.tsx — Assigned Provider card added to Appointment tab.
-
-Dark custom ProviderDropdown component (useRef outside-click dismiss, Oxanium
-font, #0d1821 background). Providers loaded from referral_providers on mount.
-Filtered by referral category → specialty mapping (CATEGORY_SPECIALTIES dict).
-Show all toggle bypasses filter. Selection calls assignProvider() Server Action
-immediately with optimistic update + revert on error. Assigned provider's
-specialty, address, phone shown below dropdown. Schedule form Location
-pre-fills from assigned provider address when opened empty.
-
-### assignProvider() Server Action
-
-app/referrals/actions.ts — new assignProvider(referralId, providerId | null).
-
-Writes referral_provider_id (confirmed column name — not provider_id). Fetches
-provider address and returns providerAddress for Location pre-fill. Inserts
-provider_assigned timeline event. Returns { ok, providerAddress } or { error }.
-
-### Column Audit — actions.ts
-
-referral_providers: no address composite column — real columns are street, city,
-state, zip. referrals FK is referral_provider_id not provider_id. referral_timeline:
-no occurred_at — uses auto-set created_at. referral_documents: no uploaded_at —
-uses auto-set created_at. All actions.ts inserts corrected accordingly.
-getReferralProviders() return type changed to any[] (ReferralProviderRow stale).
-
-### Document Upload — Documents Tab
-
-app/referrals/ReferralSheet.tsx — Documents tab upload UI added.
-
-Upload card with DarkDropdown doc type selector (Result / Authorization /
-Referral Form / Other), hidden file input, file name + size preview, Upload
-button. Accepted: PDF, JPEG, PNG, TIFF. 25MB limit enforced client-side.
-Storage path: {patientId}/{referralId}/{timestamp}_{filename} in
-referral-documents bucket. On success: calls uploadReferralResult() Server
-Action → inserts referral_documents row + document_uploaded timeline event.
-Document list refreshes on upload. View button generates 15-min signed URL.
-
-### referral-documents Storage Bucket
-
-New Supabase Storage bucket: referral-documents, private, 25MB file limit,
-PDF/JPEG/PNG/TIFF. Created via SQL INSERT INTO storage.buckets. Three RLS
-policies (INSERT/SELECT/UPDATE) for authenticated role.
-
-### Timeline — Fixed End-to-End
-
-referral_timeline query in ReferralSheet.tsx now orders by created_at (was
-occurred_at — column does not exist). Timestamp display uses e.created_at.
-All timeline inserts no longer pass occurred_at. Timeline now records: referral
-created, status changed, provider assigned, appointment scheduled, document
-uploaded. Confirmed working in production.
-
-### Dark Dropdowns — ReferralSheet
-
-All native <select> elements in ReferralSheet.tsx replaced with custom dark
-dropdowns: ProviderDropdown (provider assignment) and DarkDropdown (Record
-Outcome). Eliminates Android OS light-theme native picker.
-
-### Overdue Row Flagging — ReferralDashboard
-
-app/referrals/ReferralDashboard.tsx — isOverdue() helper added.
-
-Definition: status not terminal/completed AND updated_at older than 14 days.
-Patient cell gets ⚠ OVERDUE dark red badge (#7f1d1d bg, #fca5a5 text). Table
-row gets subtle dark red background tint (#7f1d1d18). Overdue metric card
-filter now uses isOverdue() — previously used past appointment date (wrong
-definition). Now matches KPI count exactly.
-
-### Admin Sidebar — Referrals Link Removed
-
-app/admin/page.tsx — Referrals → nav link added then removed. Decision:
-Admin dashboard is configuration-only. Operational dashboards belong to
-Superadmin role-switching.
-## 2026-07-09 — Session 30
-
-### Priority Queue — Full Resolution
-
-All actionable items from the Session 29 priority queue resolved or
-formally deferred this session.
-
-### patient_forms visit_id backfill — CLOSED
-
-Investigation: all 30 null-visit_id rows were dev-seeded ghost records
-with both visit_id and filename null. No real PDF existed. No real patient
-data affected. Billing ZIP correctly excluded them. Resolved:
-DELETE FROM patient_forms WHERE visit_id IS NULL AND filename IS NULL;
-
-### CPT codes provider_type — CLOSED
-
-All 34 CPT codes bulk-updated: MD → General in database.
-VisitTab.tsx filter updated to show codes where
-provider_type === effectiveLicenseType || provider_type === 'General'.
-PA and NP users now see full 34-code set (previously empty picker).
-Product decision: single General code set correct for this practice.
-DC/PT/etc. are referral recipients, not visit coders in Cosmos.
-
-### ReferralProviderRow type cleanup — CLOSED
-
-app/referrals/types.ts fully corrected. All seven interface field names
-updated to match live schema: ReferralProviderRow (street/city/state/zip),
-ReferralRow (referral_provider_id, created_by_user_id), ReferralAppointmentRow
-(location_name), ReferralDocumentRow (uploaded_by_user_id, created_at),
-ReferralStatusHistoryRow (changed_by_user_id, created_at), ReferralTimelineRow
-(actor_user_id, created_at), ReferralNoteRow (author_user_id).
-
-### Migration 027 — patients.email
-
-ALTER TABLE patients ADD COLUMN email text;
-Optional nullable field. FD enters at registration or via edit. If absent,
-FD calls patient manually. Future: SMS via Twilio when ready.
-
-### PatientForm.tsx — Email field
-
-Email field added to Personal Information section after Phone. Optional,
-type="email", inputMode="email". State initialized from patient?.email in
-edit mode. Writes to patients.email on save (both INSERT and UPDATE paths).
-
-### PatientProfile.tsx — Email display
-
-Email conditionally shown in patient info grid when has(patient, 'email')
-is true. Uses spread pattern into the grid array.
-
-### actions.ts — sendEmail() Resend helper
-
-Fire-and-forget email helper. Uses RESEND_API_KEY env var (added to Vercel
-Production environment variables, separate from Render). Sends via Resend
-from admin@cosmosmt.com. Logs every attempt to referral_notifications
-(delivery_status: sent/failed, sent_at). Uses two-arg .then(onFulfilled,
-onRejected) — Supabase insert returns PromiseLike<void>; .catch() not
-available.
-
-### actions.ts — Patient appointment confirmation email
-
-scheduleAppointment() — after successful insert, fetches patient.email.
-If present, sends appointment confirmation: subject "Appointment
-Confirmation — {type}", body includes patient name, referral type, date
-(long format), time, location, confirmation number. Confirmed working in
-production.
-
-### actions.ts — Provider assignment notification email
-
-assignProvider() — after successful provider assignment, fetches
-referral_providers.email. If present, sends referral notification: subject
-"New {type} Referral — {patient name}", body includes patient name,
-referral type, urgency, clinical reason. For MRI/Rx/DME types: fetches
-most recent patient_forms row, downloads PDF from patient-forms storage
-bucket, attaches as base64. Confirmed working in production (email received,
-PDF attached).
-
-### RESEND_API_KEY — Vercel env var added
-
-RESEND_API_KEY added to Vercel Production + Preview environment variables.
-Required for actions.ts sendEmail(). Previously only set on Render for
-cosmos-api attorney email feature.
-
-### Superadmin dashboard — CLOSED (already built)
-
-Confirmed: superadmin login lands on role-selector screen with 👑 SUPER
-ADMIN badge and four dashboard tiles. No separate /superadmin route needed.
-Audit log records all logins. Priority closed.
-
-### DEV artifacts — deferred to go-live
-
-DEV fill-all PCE button (VisitTab.tsx) and Dev Tools card (Admin) retained
-during testing. Remove together at go-live.
-
-### Doctor mailing addresses — deferred to pre-production
-
-All current doctor records are test data. Real addresses entered at go-live.
-
-### SMS notifications — deferred
-
-Twilio integration deferred. Email primary channel. sendSMS() will slot
-alongside sendEmail() in actions.ts when Twilio account ready.
-
-### Provider portal — deferred to Phase 2
-
-Token-gated provider referral view page (public route with signed URL).
-MRI/Rx/DME providers receive PDF via email attachment in the interim.
-
-## 2026-07-09 — Session 29
-
-### AI_STYLE_GUIDE.md — shadcn Exception Scope Corrected
-
-§2 updated: exception scope was listed as "Biller dashboard only" — corrected
-to five approved surfaces: Biller (/billing), Admin (/admin), MD V2 (/md-v2),
-MDClient (/md), Referral dashboard (/referrals). Matches SYSTEM_PROMPT.md §9
-and ARCHITECTURE.md §1.
-
-### Provider Assignment — Appointment Tab
-
-app/referrals/ReferralSheet.tsx — Assigned Provider card added to Appointment tab.
-
-Dark custom ProviderDropdown component (useRef outside-click dismiss, Oxanium
-font, #0d1821 background). Providers loaded from referral_providers on mount.
-Filtered by referral category → specialty mapping (CATEGORY_SPECIALTIES dict).
-Show all toggle bypasses filter. Selection calls assignProvider() Server Action
-immediately with optimistic update + revert on error. Assigned provider's
-specialty, address, phone shown below dropdown. Schedule form Location
-pre-fills from assigned provider address when opened empty.
-
-### assignProvider() Server Action
-
-app/referrals/actions.ts — new assignProvider(referralId, providerId | null).
-
-Writes referral_provider_id (confirmed column name — not provider_id). Fetches
-provider address and returns providerAddress for Location pre-fill. Inserts
-provider_assigned timeline event. Returns { ok, providerAddress } or { error }.
-
-### Column Audit — actions.ts
-
-referral_providers: no address composite column — real columns are street, city,
-state, zip. referrals FK is referral_provider_id not provider_id. referral_timeline:
-no occurred_at — uses auto-set created_at. referral_documents: no uploaded_at —
-uses auto-set created_at. All actions.ts inserts corrected accordingly.
-getReferralProviders() return type changed to any[] (ReferralProviderRow stale).
-
-### Document Upload — Documents Tab
-
-app/referrals/ReferralSheet.tsx — Documents tab upload UI added.
-
-Upload card with DarkDropdown doc type selector (Result / Authorization /
-Referral Form / Other), hidden file input, file name + size preview, Upload
-button. Accepted: PDF, JPEG, PNG, TIFF. 25MB limit enforced client-side.
-Storage path: {patientId}/{referralId}/{timestamp}_{filename} in
-referral-documents bucket. On success: calls uploadReferralResult() Server
-Action → inserts referral_documents row + document_uploaded timeline event.
-Document list refreshes on upload. View button generates 15-min signed URL.
-
-### referral-documents Storage Bucket
-
-New Supabase Storage bucket: referral-documents, private, 25MB file limit,
-PDF/JPEG/PNG/TIFF. Created via SQL INSERT INTO storage.buckets. Three RLS
-policies (INSERT/SELECT/UPDATE) for authenticated role.
-
-### Timeline — Fixed End-to-End
-
-referral_timeline query in ReferralSheet.tsx now orders by created_at (was
-occurred_at — column does not exist). Timestamp display uses e.created_at.
-All timeline inserts no longer pass occurred_at. Timeline now records: referral
-created, status changed, provider assigned, appointment scheduled, document
-uploaded. Confirmed working in production.
-
-### Dark Dropdowns — ReferralSheet
-
-All native <select> elements in ReferralSheet.tsx replaced with custom dark
-dropdowns: ProviderDropdown (provider assignment) and DarkDropdown (Record
-Outcome). Eliminates Android OS light-theme native picker.
-
-### Overdue Row Flagging — ReferralDashboard
-
-app/referrals/ReferralDashboard.tsx — isOverdue() helper added.
-
-Definition: status not terminal/completed AND updated_at older than 14 days.
-Patient cell gets ⚠ OVERDUE dark red badge (#7f1d1d bg, #fca5a5 text). Table
-row gets subtle dark red background tint (#7f1d1d18). Overdue metric card
-filter now uses isOverdue() — previously used past appointment date (wrong
-definition). Now matches KPI count exactly.
-
-### Admin Sidebar — Referrals Link Removed
-
-app/admin/page.tsx — Referrals → nav link added then removed. Decision:
-Admin dashboard is configuration-only. Operational dashboards belong to
-Superadmin role-switching (not yet built). Admin has no operational reason
-to view the referral workflow.
-
-### Superadmin Dashboard — Scoped for Future
-
-Superadmin dashboard fully scoped: identity/access controls, role-switching/
-impersonation (read-only), cross-role KPI executive summary, full audit log,
-system health. Not built this session — documented in HANDOVER.md Open Items.
-## 2026-07-09 — Session 28
-
-### Referral Dashboard — Full FD Scheduling Workflow
-
-app/referrals/ReferralSheet.tsx — Appointment tab rebuilt from read-only
-to fully functional three-state workflow:
-
-Schedule form — shown when no current appointment exists or Reschedule
-tapped. Fields: Date (required), Time, Location, Confirmation #. Calls
-scheduleAppointment() Server Action on submit.
-
-Current appointment card — shows date/time/location/conf# with three action
-buttons: ✓ Patient Confirmed, Record Outcome, 🔄 Reschedule. Patient
-Confirmed writes patient_confirmed + patient_confirmed_at directly via
-Supabase client; auto-advances referral status to patient_confirmed if
-currently scheduled. Record Outcome shows inline dropdown (Completed / No
-Show / Rescheduled) + optional notes; updates referral_appointments.outcome
-and advances referral status to match.
-
-Prior appointments — read-only history cards below current card.
-
-### Referral Actions — Service Key Rewrite + Column Name Corrections
-
-app/referrals/actions.ts — full rewrite:
-
-All DB operations now use supabaseServer (service key). Previously used
-createServerClient with anon key + session cookie — caused silent RLS
-failures for reads and unhandled Server Action errors for writes.
-
-getActorId() replaces getClient() — resolves session user ID for attribution
-only; failure falls back to null rather than throwing. All DB writes use
-supabaseServer regardless of session state.
-
-All write actions now return { error: string } instead of throwing —
-callers check result.error and call toastError() directly. No unhandled
-Server Action exceptions reaching the Next.js error boundary.
-
-listReferrals() now joins patients for first_name/last_name, returning
-patient_name on each summary row.
-
-Column name corrections (confirmed against information_schema.columns):
-- referrals: created_by_user_id (was created_by)
-- referral_status_history: changed_by_user_id (was changed_by)
-- referral_timeline: actor_user_id (was actor_id)
-- referral_notes: author_user_id (was created_by)
-- referral_documents: uploaded_by_user_id (was uploaded_by)
-- referral_appointments: location_name (was location)
-
-### Schema — Attribution Columns Made Nullable
-
-Five attribution columns dropped NOT NULL constraint:
-ALTER TABLE referrals ALTER COLUMN created_by_user_id DROP NOT NULL;
-ALTER TABLE referral_status_history ALTER COLUMN changed_by_user_id DROP NOT NULL;
-ALTER TABLE referral_appointments ALTER COLUMN created_by_user_id DROP NOT NULL;
-ALTER TABLE referral_notes ALTER COLUMN author_user_id DROP NOT NULL;
-ALTER TABLE referral_documents ALTER COLUMN uploaded_by_user_id DROP NOT NULL;
-
-### Referral Dashboard — Patient Name Column + Dark Dropdowns + Metrics Refresh
-
-app/referrals/ReferralDashboard.tsx — rebuilt:
-
-Table recolumned to 4 mobile-first columns: Patient (name + type + urgency
-badge), Status, Appt, Date. Patient name visible without horizontal scroll.
-
-All three <select> filter dropdowns replaced with DarkSelect — custom dark
-pill dropdown with useRef outside-click dismiss. Eliminates OS light-theme
-native picker on Android Chrome.
-
-Refresh button now calls getReferralMetrics() + listReferrals() in parallel —
-metric cards (Total/Open/Pending/Upcoming/etc.) update on refresh, not just
-the table.
-
-resolvedRole derived from sessionStorage.getItem('cosmos_license_type') in
-useEffect — overrides userRole="md" prop from page.tsx for accurate
-role-aware UI.
-
-### Auth — cosmos_license_type Written for All Roles
-
-app/page.tsx line 118 (else branch covering FD/billing/admin/superadmin):
-sessionStorage.setItem('cosmos_license_type', prof.role) now added before
-cosmos_login_marker write. Previously only MD/PA/NP wrote this value (from
-doctors.license_type). FD users now correctly resolve as 'frontdesk'.
-
-### FD Dashboard — Referrals Nav Button
-
-app/dashboard/DashboardClient.tsx — 🔗 Referrals button added to Patients
-tab action row. Routes to /referrals via window.location.href.
-
-### Lifecycle Simplification
-
-types.ts VALID_TRANSITIONS simplified:
-- new: ['cancelled'] — FD schedules directly via Appointment tab
-- scheduling and auth_required preserved in DB but removed from Move To UI
-  on new status (business model has no insurance pre-authorization step)
-
-scheduleAppointment() in actions.ts bypasses VALID_TRANSITIONS for direct
-status update — writes status = 'scheduled' + inserts status history row
-directly via supabaseServer without calling updateReferralStatus.
-
-### CosmosUI — Toast System Fixed
-
-app/components/ui/CosmosUI.tsx — full rewrite:
-
-toastSuccess() now wires to _addToast — auto-dismiss green toast (3.5s,
-✓ icon). Previously incorrectly routed to AlertModal (blocking red modal).
-toastError() correctly routes to AlertModal (blocking red modal, OK required).
-ToastContainer renders bottom-anchored stack of auto-dismiss toasts.
-Toast types: success (green #2ee08a), info (cyan #00cfff), error (red #f87171).
-AlertModal border/text changed to red (#e74c3c) — was cyan.
-
-### Dev Generator — Referral Seeding + FK Fix
-
-app/api/wipe-patients/route.ts — referral subtree deleted before
-patient_visits to satisfy referrals_visit_id_fkey. Correct order:
-referral_notifications → referral_timeline → referral_status_history →
-referral_notes → referral_documents → referral_appointments →
-referrals → visit_line_items → patient_visits → patient_forms → appointments → patients
-
-app/api/seed-referrals/route.ts — new POST endpoint. Accepts
-{ patient_id, visit_id, referral_type_code, clinical_reason }.
-Uses supabaseServer to insert referrals + referral_status_history +
-referral_timeline rows. Called by dev generator after each successful PDF.
-ICD-10 excluded (not a referral type).
-
-app/dev/page.tsx — referral seeding integrated. After each successful PDF
-call, fetches /api/seed-referrals with referral_type_code from map.
-Results log compacted: all referral results per visit on one line
-(MRI ✓ · PT ✓). Intermediate per-referral lines removed.
-
-### Provider Directory — Admin CRUD
-
-app/admin/components/ReferralProvidersSection.tsx — new component. Full
-CRUD for referral_providers table: add, edit, deactivate/activate.
-Fields: Name, Facility Name, Specialty (dropdown), Phone, Fax, Email,
-Street, City, State, ZIP, NPI, Avg Turnaround Days, Preferred Contact,
-Notes, Active toggle. Search bar. Active Only / Show All toggle.
-Deactivate/Activate with confirm modal.
-
-app/admin/page.tsx — 🔗 Ref. Providers tab added to sidebar nav and
-render block.
-
-10 providers seeded via Supabase SQL (one per specialty): Physical Therapy,
-MRI/Radiology, Orthopedic, Pain Management, Neurology, VNG/Vestibular,
-Chiropractic, ANS Autonomic, DME/Equipment, Pharmacy. All providers:
-email = 'referralsout@outlook.com', city = NY metro area.
-
+UPCOMING filter: Appt column now shows `_session_appointment.scheduled_date`
+when row is an expanded session row, not the referral's `current_appointment`.
 ## 2026-07-08 — Session 26
 
 ### Referral Management Module — Phase 1 Route Deployment
