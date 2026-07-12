@@ -1,100 +1,3 @@
-## 2026-07-11 — Session 34
-
-### UPCOMING KPI / Table Row Count Fix
-
-Removed double-expansion bug: `listReferrals()` was expanding MRI sessions
-AND `ReferralDashboard.tsx` was expanding again. Removed expansion from
-`listReferrals()` — base data returns one row per referral with
-`_all_appointments` attached. UPCOMING filter does expansion only, gated
-to future dates + `outcome = null`. Status badge for expanded rows shows
-"Scheduled" via `_session_appointment` flag check.
-
-### Per-Session MD Review Flow (Migrations 031 + 032)
-
-Migration 031: `referral_appointments.needs_review boolean NOT NULL DEFAULT false`.
-Migration 032: `referral_appointments.reviewed_at timestamptz DEFAULT NULL`.
-
-Replaces referral-level `needs_review` status with per-session flags.
-`confirmSessionResults()` removed. `markSessionNeedsReview(referralId,
-appointmentId)` added — sets `needs_review = true`, writes timeline entry.
-`reviewSession()` updated — sets `reviewed_at = now()`, clears `needs_review`,
-no referral status advancement.
-
-FD flow: Upload Result → ✔ Done button appears → tap Done → session shows
-"📋 Sent for MD Review". Delete button hidden once needs_review=true.
-
-MD flow: Review banner on MD dashboard → tap patient → Referrals tab →
-expand referral card → session results table → ✔ Review button per session.
-
-### MD Dashboard Review Banner + Patient Card Badge
-
-`MDClient.tsx`: cyan banner shows count of referrals with `needs_review=true`
-sessions, lists patient name + referral type, taps to `/md-v2/[patientId]`.
-Per-patient card shows 📋 badge with session count. Query:
-`referral_appointments.needs_review = true` joined to MD's patient list.
-
-### ReferralsTabV2 Session Results Table
-
-Fully rebuilt `app/md-v2/[patientId]/ReferralsTabV2.tsx`. Card expands when
-any session has `needs_review=true` or `reviewed_at` set. shadcn Table with
-one row per completed session: Body Parts · Scheduled · Results Received ·
-PDF · Review. Status badge derives from appointment-level state. `needs_review`
-added to `referral_appointments` select.
-
-### REVIEW KPI + Filter
-
-REVIEW KPI now counts `referral_appointments.needs_review = true` (not
-referral status). REVIEW filter expands to one row per `needs_review=true`
-session. Expanded rows show "Needs MD Review" badge via `_session_is_review`
-flag (avoids useMemo closure issue).
-
-### DOB/DOI Client-Side Fetch
-
-`ReferralSheet.tsx`: on open, separate `supabase.from('patients').select('dob,
-doi')` call. Header shows DOB: MM/DD/YYYY · DOI: MM/DD/YYYY in green.
-Bypasses PostgREST inline join limitation that caused listReferrals() to
-return 0 rows when dob/doi were added to nested patients select.
-
-### Body Part Abbreviations
-
-`abbrevBp(bp)` helper: Left→L., Right→R. Applied in ReferralAppointmentTab
-(session cards, unassigned pool, reschedule picker), ReferralDashboard (row
-chips), ReferralsTabV2 (table chips, card summary).
-
-### Font Size Bumps +2pt
-
-ReferralAppointmentTab, ReferralOverviewTab, ReferralTimelineTab, InfoTabV2,
-PatientChartV2 header — all inline fontSize values and Tailwind text classes
-bumped +2pt.
-
-### ReferralOverviewTab Restyled
-
-Provider name → cyan (#00cfff). Facility, phone, email → green (#19a866).
-Email + phone added (referral_providers.email, phone added to listReferrals
-select and ReferralSummary type). No extra spacing between fields. abbrevBp
-on body part chips. Clinical reason → green (#19a866).
-
-### Provider Required Before Scheduling
-
-`handleSchedule()` in `ReferralSheet.tsx` guards on `!assignedId` — toast
-error "Assign a provider before scheduling." and return early.
-
-### CT Session Splitting
-
-`MriReferral.tsx` `createLifecycleRecord()`: CT branch populates `body_parts`
-from `CT_STUDIES` selections. MRI/MRA branches unchanged. CT referrals now
-trigger the same session splitter, upload, Done, and MD review flow as MRI.
-
-### allDone Logic Fix
-
-`ReferralAppointmentTab.tsx`: `allDone = unassignedParts.length === 0`
-(was `schedCount >= reqSessions`). Fixes "4 of 3 scheduled" display bug
-when rescheduled sessions exceeded the formula's session count.
-
-### Appt Column Per-Session Date Fix
-
-UPCOMING filter: Appt column now shows `_session_appointment.scheduled_date`
-when row is an expanded session row, not the referral's `current_appointment`.
 ## 2026-07-10 — Session 33
 
 ### Per-Session Cancel
@@ -2248,3 +2151,244 @@ All accumulated `~/patch_*.py`, `~/remove_*.py`, `~/wire_*.py`,
 `~/write_*.py` scripts from previous sessions deleted.
 
 ---
+
+---
+
+## 2026-07-11 — Session 34
+
+### UPCOMING KPI / Table Row Count Fix
+
+`listReferrals()` was double-expanding MRI sessions. Removed expansion from
+`listReferrals()` — base data returns one row per referral with
+`_all_appointments` attached. UPCOMING filter in `ReferralDashboard.tsx`
+does the expansion, gated to future dates + `outcome = null`. Status badge
+for expanded rows shows "Scheduled".
+
+### Per-Session Review Model (Migrations 031–032)
+
+Migration 031: `referral_appointments.needs_review boolean NOT NULL DEFAULT false`.
+Migration 032: `referral_appointments.reviewed_at timestamptz DEFAULT NULL`.
+
+Per-session review replaces referral-level `needs_review` status. FD uploads
+result → taps Done → `needs_review = true`. MD reviews → `reviewed_at = now()`,
+`needs_review = false`. REVIEW KPI counts distinct referrals with
+`needs_review = true`. `markSessionNeedsReview()` added. `reviewSession()`
+updated — session-level, no referral status advance. `confirmSessionResults()`
+removed.
+
+### MD Dashboard Review Banner + Patient Card Badge
+
+Cyan banner in `MDClient.tsx` shows when any patient has a session with
+`needs_review = true`. Banner lists patient name + referral type with Tap →.
+Per-patient card shows 📋 badge with count.
+
+### ReferralsTabV2 — Session Results Table
+
+`app/md-v2/[patientId]/ReferralsTabV2.tsx` fully rebuilt. For referrals
+where any session has `needs_review = true` or `reviewed_at` set: card expands
+to show shadcn Table with one row per completed session. Columns: Body Parts ·
+Scheduled · Results Received · PDF · Review. Review button writes `reviewed_at`,
+clears `needs_review`.
+
+### DOB/DOI Client-Side Fetch
+
+`ReferralSheet.tsx`: on open, separate `supabase.from('patients')` call sets
+`patientDob`/`patientDoi` state. Bypasses PostgREST inline join limitation.
+
+### Body Part Abbreviations
+
+`abbrevBp(bp)` helper (Left→L., Right→R.) added to `ReferralAppointmentTab.tsx`,
+`ReferralDashboard.tsx`, `ReferralsTabV2.tsx`.
+
+### Font Bumps +2pt
+
+`ReferralAppointmentTab.tsx`, `ReferralOverviewTab.tsx`, `ReferralTimelineTab.tsx`,
+`InfoTabV2.tsx`, `PatientChartV2.tsx` header.
+
+### ReferralOverviewTab Restyled
+
+Provider name → cyan. Facility name, phone, email → green. Email + phone fields
+added. `abbrevBp` applied to body part chips. Clinical reason → green.
+
+### CT Session Splitting
+
+`MriReferral.tsx` `createLifecycleRecord()`: when `modality === 'CT'`,
+`body_parts` populated from `CT_STUDIES` selections. CT referrals now use
+the same session splitter, per-session upload, Done button, and MD review
+flow as MRI.
+
+### allDone Logic Fix
+
+`allDone` in `ReferralAppointmentTab.tsx` now checks
+`unassignedParts.length === 0` instead of `schedCount >= reqSessions`.
+
+### Provider Required Before Scheduling
+
+`handleSchedule()` in `ReferralSheet.tsx` guards: if `!assignedId`, toast
+error and return early.
+
+### UPCOMING Filter Status Badge
+
+Expanded UPCOMING rows show "Scheduled" badge. Expanded REVIEW rows show
+"Needs MD Review" badge via `_session_is_review` flag.
+
+---
+
+## 2026-07-11 — Session 35
+
+### MRI / CT Scan Sessions Label
+
+"MRI Sessions" header in `ReferralAppointmentTab.tsx` renamed to
+"MRI / CT Scan Sessions".
+
+### Session Counter Redesign
+
+`ReferralAppointmentTab.tsx`: counter changes from "X of Y scheduled" to
+"X sessions scheduled · N parts remaining". `reqSessions` formula removed —
+`unassignedParts.length` is the source of truth for done state.
+
+### Provider Info Green in Appointment Tab
+
+Assigned provider specialty/address/phone info color: `#64748b` → `#19a866`.
+
+### Body Parts Removed from Main Table Rows
+
+`ReferralDashboard.tsx`: body parts text removed from non-session rows.
+Date chip removed from UPCOMING expanded session rows.
+
+### Overview Tab Font +2pt
+
+All font sizes in `ReferralOverviewTab.tsx` increased by 2pt.
+
+### SessionLifecycle Enum Refactor
+
+`types.ts`: `SessionLifecycle` type added (`pending` | `uploaded` |
+`sent_review` | `reviewed` | `cancelled`). `computeSessionLifecycle()`
+pure function exported. `actions.ts` `listReferrals()`: `reviewed_at` added
+to `referral_appointments` select; `session_lifecycle` computed per
+appointment. `ReferralSheet.tsx` `refreshDetail()`: same lifecycle
+computation applied to client-fetched appointments. `ReferralDashboard.tsx`,
+`ReferralAppointmentTab.tsx`: all scattered `outcome`/`needs_review`/
+`reviewed_at` checks replaced with `session_lifecycle` reads.
+
+### FD "Awaiting Done" Banner
+
+`ReferralDashboard.tsx`: cyan collapsible banner above KPI cards lists all
+sessions where `session_lifecycle === 'uploaded'`. Inline ✔ Done button per
+row calls `markSessionNeedsReview()` and refreshes. Starts collapsed by default.
+
+### AWAITING KPI Repurposed
+
+AWAITING KPI counts sessions with `outcome = 'completed'` AND
+`needs_review = false`. Tapping expands those sessions in the table with
+"Uploaded" badge and inline Done button.
+
+### CLOSED/MO KPI Tappable
+
+CLOSED/MO card now tappable — filters table to show closed referrals.
+
+### Treating Doctor Name on REVIEW Rows
+
+`listReferrals()` extended: `patients` select includes `doctor_id` +
+nested `doctors(first_name, last_name)`. `treating_doctor_name` mapped onto
+base object. REVIEW filter rows show doctor name in cyan beneath badge.
+
+### MD Review Banner Routing Fixed
+
+`MDClient.tsx`: review banner routes to `/md-v2/[patientId]?tab=referrals&referral_id=xxx`
+with `e.stopPropagation()`. `PatientChartV2.tsx`: reads `?tab` URL param for
+initial tab. `ReferralsTabV2.tsx`: reads `?referral_id` to auto-expand target
+referral. Fallback: auto-expands first referral with `needs_review = true`.
+
+### Expand Preserved After MD Review
+
+`ReferralsTabV2.tsx`: `handleReviewSession()` saves and restores `expandedId`
+across `loadReferrals()` — card no longer collapses on review.
+
+### Auto-Close Referral on Full Completion
+
+`reviewSession()` in `actions.ts`: after marking a session reviewed, checks
+if all body parts assigned and all completed sessions reviewed. If so, advances
+referral to `closed`. MRI/CT only (`body_parts.length > 0` guard).
+
+### Unscheduled Body Parts Warning
+
+`ReferralsTabV2.tsx`: "⚠ Not yet scheduled: X, Y" in red below SESSION RESULTS
+when body parts exist and some are unassigned. `body_parts` added to select.
+
+### Done Button in AWAITING Table + Horizontal Scroll
+
+`ReferralDashboard.tsx`: AWAITING filter table includes inline ✔ Done button
+column. `_session_appointment_id` stored on expanded rows, added to
+`ReferralSummary` type. Main table `Card` has `overflowX: 'auto'`.
+
+### Deferred
+
+Lock icon removal from Closed status (emoji anchor mismatch — 3 sessions
+deferred). Betty Martin SQL reset. DEV artifacts removal. Patient email
+required at intake.
+
+---
+
+## Session 36 — July 11, 2026
+
+### Computed Referral Display Status — Core Architecture
+
+**Problem:** STATUS badge read raw `referrals.status` DB column. Status
+only updated on explicit events (create, schedule, review). `New`/`Scheduled`
+showed incorrectly on referrals with complex session states. No `Upcoming`,
+`Overdue`, `Uploaded`, `Awaiting Review` computed badges existed.
+
+**Solution:** `computeReferralDisplayStatus()` added to `types.ts` — pure
+function deriving display status from `_all_appointments` at read time.
+Priority (highest urgency first): `closed` (terminal) → `overdue` (past
+pending session) → `awaiting_review` (sent_review session) → `uploaded`
+(uploaded session) → `upcoming` (future pending session, no day limit) →
+`new` (no appointments). `Scheduled` absorbed into `Upcoming`. `Review`
+badge dropped (no KPI). `ComputedReferralStatus` type + `_session_computed_status`
+optional field added to `ReferralSummary`.
+
+### getReferralMetrics() Rewrite
+
+Single fetch of all referrals + appointments, then `computeReferralDisplayStatus()`
+applied to each. KPI counts now always match filter results:
+
+- PENDING — referrals with computed status `new`
+- UPCOMING/OVERDUE/REVIEW/AWAITING — individual session counts (session-level)
+- CLOSED/MO — referrals closed this calendar month
+
+`computeReferralDisplayStatus` imported into `actions.ts`.
+
+### Session-Level Badges in KPI Filter Expansions
+
+Each filter expansion tags rows with `_session_computed_status` (Upcoming /
+Awaiting Review / Uploaded / Overdue). STATUS badge cell reads
+`_session_computed_status` first, falls back to `getComputedStatus(r)`.
+OVERDUE filter now expands into individual overdue session rows. REVIEW
+filter shows all referrals with `sent_review` sessions regardless of
+computed status. OVERDUE inline tag (⚠ OVERDUE) suppressed in
+non-overdue filter expansions.
+
+### Body Part Gate on Schedule / Reschedule Forms
+
+`ReferralAppointmentTab.tsx`: Save Appointment and Save Reschedule buttons
+disabled when `isMri && sessionParts/reschedParts.length === 0`. Red warning
+"⚠ Select at least 1 body part to save" shown when date filled but no
+body part selected.
+
+### reschedParts Pre-Population
+
+`ReferralSheet.tsx` `handleOpenReschedule()`: `setReschedParts([])` →
+`setReschedParts(Array.isArray(appt.body_parts) ? appt.body_parts : [])`.
+Existing body parts pre-selected when reschedule form opens.
+
+### Test Data Wipe
+
+All test patients and related data wiped via Dev Tools "Wipe All Patients".
+System clean for real data entry. Betty Martin stale status resolved by deletion.
+
+### Deferred
+
+Lock icon removal from Closed status (emoji anchor mismatch — 4 sessions
+deferred). DEV artifacts removal. Patient email required at intake.
+ReferralSheet header badge shows raw DB status (cosmetic — deferred).
