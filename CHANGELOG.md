@@ -1,3 +1,87 @@
+## 2026-07-12 — Session 37
+
+### MD Review Table Collapse Fix
+
+Silent refresh pattern introduced to `loadReferrals()` in `ReferralsTabV2.tsx`.
+`keepExpandedId` and `silent` params added — silent skips `setLoading(true)`
+so card never collapses during post-review refresh. `fetchResultDocs` stale
+closure bug fixed — early-return guard `if (resultDocs[referralId]) return`
+removed; docs always re-fetched after review. `isReviewed` and `handleCardClick`
+expandable conditions extended to include `status === 'closed'` so reviewed
+referrals remain expandable after auto-close.
+
+### UI Cleanup
+
+Move To status chips removed from `ReferralSheet.tsx`. Awaiting Done banner
+and `bannerExpanded` state removed from `ReferralDashboard.tsx`. `pendingDoneSessions`,
+`donningSessionId`, and `handleDoneFromBanner` retained — still used by
+AWAITING KPI filter expansion.
+
+### Default Tab → Appointment
+
+`ReferralSheet.tsx` `useState<Tab>('overview')` → `useState<Tab>('appointment')`.
+
+### Session Header — Cyan + 12-Hour Time
+
+`ReferralAppointmentTab.tsx`: session number + date + time always `#00cfff`.
+`fmtTime12()` helper converts `HH:MM:SS` DB format to `h:MM AM/PM` display.
+Applied to MRI session cards and new non-imaging session card.
+
+### ANS Referral Module — Full End-to-End
+
+**DB:** `ans_tests TEXT[]` and `ans_symptoms TEXT[]` columns added to
+`referrals` table via Supabase SQL editor.
+
+**Data flow:** `AnsReferral.tsx` saves selected ANS test full labels and
+symptom labels to `ans_tests`/`ans_symptoms` on INSERT. `cpt_codes` and
+`icd10_codes` fetched server-side from `patient_visits` in `page.tsx` and
+passed as props — avoids client RLS ambiguity. `listReferrals()` now selects
+`cpt_codes`, `icd10_codes`, `ans_tests`, `ans_symptoms`.
+
+**Overview:** Testing Requested (full labels ✓), Diagnosis/Symptoms (cyan
+chips), ICD-10 Codes (cyan chips). Clinical reason, symptoms, ICD-10 in cyan.
+CPT codes removed from display.
+
+**Appointment:** MRI-style single session card — `Session 1 · Date · Time`
+header (cyan), ANS test chips, Upload · Reschedule · Cancel. Uploaded state:
+View PDF · Delete · Done → Sent for MD Review. Mirrors MRI exactly.
+
+**Auto-close:** `reviewSession()` extended — non-imaging referrals now
+auto-close when all completed appointments reviewed (previously imaging-only).
+
+**Provider email:** `scheduleAppointment()` provider email includes ICD-10
++ CPT codes for all referral types.
+
+### isImaging Refactor
+
+`isMri` → `isImaging` throughout `ReferralAppointmentTab.tsx`. Gate now
+`category === 'imaging'` instead of `body_parts.length > 0`. Future types
+route correctly by DB category alone.
+
+### Referral Overview Tab
+
+Clinical reason → cyan. Symptom chips → cyan. ICD-10 chips → cyan. ANS
+Testing Requested section (full labels). ANS Symptoms section. CPT section
+removed.
+
+### Audit Trail — Full Actor Attribution
+
+**Root cause:** `@supabase/auth-helpers-nextjs` 0.15 broken for Next.js 16
+server action session propagation. `@supabase/ssr` 0.12 installed.
+
+**Fix:** All exported `actions.ts` functions accept `userId?: string | null`.
+`const actorId = userId ?? await getActorId()`. `ReferralSheet.tsx` and
+`ReferralsTabV2.tsx` call `supabase.auth.getUser()` on mount, store in
+`currentUserId` state, pass to every server action call. Functions covered:
+`updateReferralStatus`, `assignProvider`, `scheduleAppointment`,
+`cancelSession`, `rescheduleSession`, `reviewSession`, `uploadReferralResult`,
+`markSessionNeedsReview`, `addReferralNote`, `createReferral`,
+`confirmSessionResults`, `deleteSessionResult`.
+
+**Timeline display:** `user_profiles` fetched separately after timeline load
+(no FK — client-side merge). Format: `ROLE · Full Name` (role uppercase cyan).
+Historical events remain unattributed — no backfill.
+
 ## 2026-07-10 — Session 33
 
 ### Per-Session Cancel
