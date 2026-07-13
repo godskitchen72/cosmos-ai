@@ -1,3 +1,100 @@
+## 2026-07-13 — Session 38
+
+### MRI/VNG/Ortho/Pain-Mgmt/PT — CPT + ICD-10 Codes from patient_visits
+
+**Root cause:** All referral creation pages hardcoded `cpt_codes: []` and
+`icd10_codes: []`. `patient_visits` stores codes as comma-separated `text`,
+not `text[]` — Supabase insert type mismatch silently threw in `try/catch`,
+lifecycle record never created.
+
+**Fix:** Each referral `page.tsx` now fetches codes server-side from
+`patient_visits` using `Promise.all`. Normalised at boundary:
+`Array.isArray()` check first, then `.split(',').map(s => s.trim())` for
+string format, default `[]`. Passed as `cptCodes`/`icd10Codes` props and
+wired into each referral INSERT.
+
+**Files:** `mri/page.tsx`, `mri/MriReferral.tsx`, `vng/page.tsx`,
+`ortho/page.tsx`, `pain-mgmt/page.tsx`, `pt/page.tsx`, `VngReferral.tsx`,
+`OrthoReferral.tsx`, `PainMgmtReferral.tsx`, `PtReferral.tsx`.
+
+DME and RX excluded — different lifecycle insert pattern.
+
+### Referral Selections Storage + Overview Display
+
+**DB columns added:**
+`vng_tests text[]`, `vng_symptoms text[]`, `ortho_referral_types text[]`,
+`ortho_regions text[]`, `pain_mgmt_testing text[]`, `pain_mgmt_treating text[]`,
+`pt_goals text[]`, `pt_modalities text[]`, `pt_frequency text`.
+
+Each referral component maps UI state → label arrays on INSERT. `listReferrals()`
+select extended. `ReferralOverviewTab.tsx` displays: Testing Requested,
+Symptoms, Referral Requested, Body Part/Region, Testing For, Treating For,
+Treatment Goals, Modalities, Frequency.
+
+### Referral Lifecycle Redesign — Auto-Close + NEW RESULTS Badge
+
+**Old flow:** Upload → `needs_review` → MD reviews → Closed.
+**New flow:** Upload → Auto-close → `results_viewed_at = null` (flagged
+types only) → green "● NEW RESULTS" badge on MD patient chart → MD opens
+referral → `results_viewed_at = now()` → badge clears on next reload.
+
+**Flagged types** (badge shown): MRI, MRA, CT, ORTHO, PAIN-MGMT.
+All other types: auto-close, no badge.
+
+**DB:** `results_viewed_at timestamptz` added to `referrals`.
+
+**MRI session auto-close:** `uploadReferralResult()` now checks if all
+non-cancelled sessions are `outcome = 'completed'` after session upload.
+If so, auto-closes referral and sets `results_viewed_at = null` for flagged
+types. Previously MRI never auto-closed from the session upload path.
+
+**Badge dismissal:** `markResultsViewed()` new action sets
+`results_viewed_at = now()`. Fires in `ReferralSheet.tsx` on open.
+`ReferralsTabV2.tsx` silently reloads on `visibilitychange` to clear badge
+after user returns from referral sheet.
+
+### Review UI Removal
+
+All MD review workflow artifacts removed across the codebase:
+
+- **`MDClient.tsx`:** "Referral Results — Review Required" banner removed.
+  Patient card review badge removed. `reviewReferrals` state + query removed.
+- **`ReferralAppointmentTab.tsx`:** Done button removed (imaging + non-imaging).
+  "Sent for MD Review" label removed. "✔ MD Reviewed" label removed.
+- **`ReferralsTabV2.tsx`:** "Reviewed" badge, "Review" column, "✔ Review"
+  button, "✔ Reviewed" cell, `handleReviewSession()`, `reviewingId` state,
+  `reviewSession` import — all removed.
+- **`ReferralDashboard.tsx`:** REVIEW KPI count set to 0, card shell retained.
+- **`types.ts`:** `awaiting_review` stage removed from
+  `computeReferralDisplayStatus()`.
+
+### referral_submitted_at — Auto-Set on Provider Email
+
+**DB:** `referral_submitted_at timestamptz` added to `referrals`.
+
+Set automatically in `assignProvider()` / `actions.ts` immediately after
+Resend provider notification email succeeds. Added to `listReferrals()` select.
+
+### MD Patient Chart — All Referrals Summary Table
+
+Summary table rendered above referral cards in `ReferralsTabV2.tsx`.
+
+**Columns:** Type | Status | Provider | Created | Submitted | Appointment | Results
+
+- Type: category-colored label + green "● NEW" badge for unviewed flagged results
+- Created: `referral.created_at` (MD ordered date)
+- Submitted: `referral_submitted_at` (provider email date), `—` if not sent
+- Results: `📄 PDF` button if result doc exists; `—` if none
+
+**Bulk doc fetch:** All result docs loaded on referral list load via
+`.in('referral_id', allIds)` so PDF buttons are populated immediately without
+requiring card expand.
+
+### MRI/MRA/CT Incomplete Parts Warning
+
+`ReferralsTabV2.tsx`: red warning banner above summary table when any open
+MRI, MRA, or CT referral has `body_parts` not yet assigned to a session.
+Previously only triggered for MRI — extended to MRA and CT.
 ## 2026-07-12 — Session 37
 
 ### MD Review Table Collapse Fix
