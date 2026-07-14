@@ -1,3 +1,69 @@
+## 2026-07-13 — Session 39
+
+### Done/Awaiting/Review Workflow — Removed
+
+Simplified referral lifecycle: FD uploads result → auto-close fires (when all
+body parts assigned + all sessions completed). No more Done button, no more
+Awaiting/Review queue.
+
+Removed: AWAITING + REVIEW KPI cards, Done button (imaging + non-imaging),
+`markSessionNeedsReview`, `donningSessionId`, `pendingDoneSessions`,
+`handleDoneFromBanner`, `done_action` dashboard column, metric filter blocks
+for awaiting/review, `needs_review`/`isReviewed` delete gate, review-tinted
+session card border/bg.
+
+Delete button on uploaded sessions is now always visible.
+
+**Files:** `ReferralDashboard.tsx`, `ReferralSheet.tsx`, `ReferralAppointmentTab.tsx`
+
+### MRA Body Parts Fix
+
+`MriReferral.tsx` `createLifecycleRecord()` had no MRA branch — fell through
+to MRI spine/extremity path. Added `if (modality === 'MRA')` branch reading
+`MRA_STUDIES` labels. Existing MRA referrals with `body_parts = null` need
+regeneration.
+
+**File:** `app/md/[patientId]/mri/MriReferral.tsx`
+
+### Auto-Close body_parts Select Bug Fixed
+
+`uploadReferralResult()` queried appointments with `.select('id, outcome')` —
+omitted `body_parts`. `assignedParts` was always `[]`, `allPartsAssigned`
+always false, auto-close never fired for imaging. Fixed: `.select('id, outcome, body_parts')`.
+
+**File:** `app/referrals/actions.ts`
+
+### MRI/MRA/CT Auto-Close — All Parts Must Be Assigned
+
+Added pre-close check: fetch `referrals.body_parts`, verify every part appears
+in at least one appointment. Prevents premature close when FD has only scheduled
+some sessions and plans to return for remaining body parts later.
+
+**File:** `app/referrals/actions.ts`
+
+### Referral Dashboard — MRI/MRA/CT Per-Appointment Row Expansion
+
+Default dashboard list now shows one row per appointment for MRI/MRA/CT
+referrals. Non-imaging types remain one row per referral. Metric filter
+expansions unchanged.
+
+**File:** `app/referrals/ReferralDashboard.tsx`
+
+### MD ALL REFERRALS Table — Major Overhaul
+
+- MRI/MRA/CT expand to one row per session (was one row per referral)
+- Summary table now iterates `filtered` (was `referrals` — bug causing expansion to have no effect)
+- Per-session status: Upcoming / Overdue / Uploaded computed from session data; Closed always wins
+- Card header warning: per-type red lines inside table card above column headers (replaces standalone banner)
+- Tap-to-sort on Type, Status, Provider, Created, Appointment columns
+- Body Parts column added after Type; chips moved out of Type cell
+- Individual referral cards below table removed entirely
+- NEW badge removed from table rows
+- Row tap disabled — PDF button in Results column is sole interactive element
+- All expandedId / keepExpandedId / autoExpandId state removed
+
+**File:** `app/md-v2/[patientId]/ReferralsTabV2.tsx`
+
 ## 2026-07-13 — Session 38
 
 ### MRI/VNG/Ortho/Pain-Mgmt/PT — CPT + ICD-10 Codes from patient_visits
