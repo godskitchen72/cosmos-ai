@@ -33,8 +33,12 @@ Supabase project URL: `https://ttudxnzmybcwrtqlbtta.supabase.co` — never
 change without explicit instruction (`SYSTEM_PROMPT.md` §3).
 
 **Styling note**: Tailwind CSS is present in `package.json` but was
-unused until the Biller dashboard. Five deliberate, scoped exceptions
+unused until the Biller dashboard. Six deliberate, scoped exceptions
 now exist — all approved explicitly after the tradeoff was presented:
+6. **FD Dashboard V2** (`/dashboard-v2`, `app/dashboard-v2/`) — shadcn/
+   Tailwind with same CSS-variable bridge and Oxanium font; TanStack Table
+   for work queue; Realtime subscription on `patients`, `patient_visits`,
+   `patient_forms` (Session 41).
 1. **Biller dashboard** (`/billing`, §8) — the first exception.
 2. **Admin page** (`/admin`, `app/admin/page.tsx`) — full shadcn/ui
    rebuild; same CSS-variable bridge and Oxanium font as the Biller

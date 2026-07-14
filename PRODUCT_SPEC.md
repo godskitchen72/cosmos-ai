@@ -24,7 +24,9 @@ tiers for convenience (`SYSTEM_PROMPT.md` §7).
 
 | Tier | Documents | Trigger |
 |---|---|---|
-| FD-gated, fully manual | NF-2, NF-3, AOB | Front desk explicitly generates |
+| FD-gated, fully manual | NF-2, AOB | Front desk explicitly generates |
+| FD role: preflight only | NF-3 | FD runs preflight check; Biller generates PDF from Biller dashboard |
+| Automatic | ICD-10 Diagnosis PDF, PCE | Fire on visit save; PCE only when pce_data non-empty |
 | MD-discretionary, fully manual | MRI, Rx, DME, ANS, VNG, PT, Ortho, Pain Mgmt (referrals) | MD chooses to generate, per visit |
 | Automatic | ICD-10 Diagnosis PDF | Fires on visit save, no tap required |
 | Automatic (finalization, not a document) | Billing (`visit_line_items`) | Auto-finalizes on visit save when codes/pairings are valid; manual "Finalize Billing" button remains as a retry/safety net, not removed |
