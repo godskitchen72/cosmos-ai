@@ -1,3 +1,52 @@
+## 2026-07-14 — Session 40
+
+### FD Dashboard V2 — Full Build (Phases 1–4)
+
+New enterprise front desk dashboard at `/dashboard-v2`. Existing `/dashboard`
+untouched. Approved as 6th shadcn/Tailwind exception. Framer Motion rejected.
+
+**Phase 1 — Shell:**
+Sidebar (desktop fixed, mobile slide-in), sticky header (search, bell,
+New Patient, Schedule, FD avatar), 8 KPI cards (5 real data, 3 stubbed with
+COMING SOON tag), KPI cards filter work queue on tap.
+
+**Phase 2 — TanStack Work Queue:**
+11-column TanStack Data Table. Column sorting, global search, column visibility
+toggle, row selection + bulk action bar, CSV export (all filtered rows),
+custom PageSizePicker (no native select per AI_STYLE_GUIDE §5), pagination.
+
+**Phase 3 — Patient Sheet:**
+Tab reset on new patient open. Alert banners for missing AOB/NF-2/carrier/claim.
+Document Status checklist (confirmed columns only). Workflow stage badges
+(Intake Incomplete through Billing Ready). Carrier in sheet header subtitle.
+
+**Phase 4 — Patient Sheet Tabs:**
+Overview (demographics + activity summary), Insurance, Referrals (FK join data
++ "Manage in Referral Dashboard →" link), Visits, Appointments, Documents,
+Timeline (9-step), Notes (session-only textarea).
+
+**Font + Mobile Search:**
+Oxanium via `className={oxanium.className}` on root. Mobile search in dedicated
+full-width row below header on screens < 768px.
+
+**Files:** `app/dashboard-v2/page.tsx`, `app/dashboard-v2/FDDashboardV2.tsx`,
+`app/dashboard-v2/components/FDPatientSheet.tsx`, `app/page.tsx`
+
+### Referral Dashboard — Patient Pre-Filter
+
+`search` state in `ReferralDashboard.tsx` now initializes from
+`useSearchParams().get('patient') ?? ''`. Navigating to
+`/referrals?patient=Name` pre-populates search and filters table immediately.
+
+**File:** `app/referrals/ReferralDashboard.tsx`
+
+### Schema Lessons (no migrations)
+
+Confirmed column names via existing working code:
+- `patients` PK: `patient_id` · DOI field: `doi` · claim field: `claim_num`
+- `patient_visits` PK: `id` · `appointments` PK: `id`
+- `patients.carrier`: plain text (no FK to insurance_carriers table)
+- `referrals`: has `patient_id` directly; mirror `ReferralsTabV2` query for FK joins
 ## 2026-07-13 — Session 39
 
 ### Done/Awaiting/Review Workflow — Removed

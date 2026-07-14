@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 13, 2026, Session 39)
+# Cosmos Medical Technologies — HANDOVER (July 14, 2026, Session 40)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -14,139 +14,97 @@ self-contained.
 ## Current Status
 
 All `cosmos-dashboard` commits confirmed deployed and live on
-`cosmos-dashboard-nu.vercel.app`. Session 39 completed the referral
-lifecycle simplification (Done/Awaiting/Review workflow removed),
-MRI/MRA/CT per-session row expansion in both dashboards, MRA body parts
-fix, auto-close body_parts select bug fix, MD referrals table overhaul
-(sort, body parts column, card header warning, no row tap), and removal
-of individual referral cards from MD patient chart.
+`cosmos-dashboard-nu.vercel.app`. Session 40 completed the Front Desk
+Dashboard V2 — a full enterprise-grade dashboard rebuild across four phases,
+covering KPI cards, TanStack work queue, patient detail sheet, referral
+integration, Oxanium font, and mobile search. The new dashboard is accessible
+at `/dashboard-v2` and linked from the superadmin picker.
 
 ---
 
-## Completed This Session (Session 39)
+## Completed This Session (Session 40)
 
-### Done/Awaiting/Review Workflow — Removed ✅ CLOSED
+### FD Dashboard V2 — Full Build ✅ CLOSED
 
-**Old flow:** Upload result → FD taps Done → sent_review → MD review queue → Closed.
-**New flow:** Upload result → Auto-close (when all parts assigned + all sessions completed).
+New enterprise front desk dashboard built from scratch at `/dashboard-v2`.
+Existing `/dashboard` is completely untouched and preserved.
 
-**Removed:**
-- AWAITING and REVIEW KPI cards from `ReferralDashboard.tsx`
-- Done button from `ReferralAppointmentTab.tsx` (imaging + non-imaging)
-- `markSessionNeedsReview` import and handler from `ReferralSheet.tsx`
-- `donningSessionId` state and `handleDoneSession` from `ReferralSheet.tsx`
-- `pendingDoneSessions` memo and `handleDoneFromBanner` from `ReferralDashboard.tsx`
-- `done_action` column from dashboard table
-- `metricFilter === 'review'` and `metricFilter === 'awaiting'` blocks
-- `needs_review`/`isReviewed` gates on Delete button — Delete now always visible on uploaded sessions
-- Review-tinted orange border/bg on session cards
+**Technology decisions locked:**
+- shadcn/Tailwind approved as 6th exception (alongside existing 5 dashboard surfaces)
+- Framer Motion explicitly rejected — not added to project
+- TanStack Table (already in project) used for work queue
+- Oxanium font applied via `className={oxanium.className}` on root wrapper
 
-**Delete button:** Now always shown for uploaded sessions — no longer gated on review state.
+**Phase 1 — Shell + Header + KPI Cards:**
+- New route `app/dashboard-v2/page.tsx` (server component, `revalidate: 0`)
+- Sidebar (desktop fixed, mobile slide-in with backdrop + overlay)
+- Header: search, date, notifications bell (lights up on NF-2 queue), New Patient, Schedule, FD avatar
+- 8 KPI cards: 5 real (Today's Patients, Appointments Today, Documents Missing, NF-2 Queue, Billing Ready), 3 stubbed (Patients Waiting, Insurance Verification, Tasks Due Today) with COMING SOON tag
+- KPI cards filter work queue on tap
 
-**Files changed:** `ReferralDashboard.tsx`, `ReferralSheet.tsx`, `ReferralAppointmentTab.tsx`
+**Phase 2 — TanStack Work Queue:**
+- Full TanStack Data Table with 11 columns
+- Column sorting (click header, arrow indicators)
+- Global search wired to TanStack `globalFilter`
+- Column visibility toggle (custom dark dropdown, no native select)
+- Row selection with bulk action bar
+- CSV export (all filtered rows, not just current page)
+- Custom `PageSizePicker` (25/50/100) — no native `<select>` per AI_STYLE_GUIDE §5
+- Server-side pagination (50 rows default)
+- Row hover + selected row highlight
 
-### MRA Body Parts Fix ✅ CLOSED
+**Phase 3 — Patient Sheet Polish:**
+- Tab reset to Overview when new patient opens
+- Alert banners for missing AOB, NF-2, carrier, claim number
+- Document Status checklist using confirmed columns only (AOB, NF-2, Insurance, Claim #)
+- Workflow stage badges: Intake Incomplete, NF-2 Pending, No Visit, Needs Appt, Appt Today, In Progress, Billing Ready
+- Carrier name shown in sheet header subtitle
 
-**Bug:** `MriReferral.tsx` `createLifecycleRecord()` had no `MRA` branch in
-`body_parts` IIFE — fell through to `mriOnly` path which reads `MRI_SPINE`
-and extremities only. MRA studies never saved to `referrals.body_parts`.
+**Phase 4 — Patient Sheet Tabs:**
+- **Overview tab**: Demographics, Accident & Claim, Document Status checklist, Activity Summary (visits/appointments/referrals counts)
+- **Insurance tab**: Carrier, claim number, date of loss
+- **Referrals tab**: Real referral data via FK joins (referral_types, referral_providers, referral_appointments). "Manage in Referral Dashboard →" button links to `/referrals?patient=Name` pre-filtered
+- **Visits tab**: Full visit history with billing status and NF-3 preflight result
+- **Appointments tab**: All appointments with date, time, status
+- **Documents tab**: AOB on file with View link
+- **Timeline tab**: 9-step workflow timeline with real completion dates
+- **Notes tab**: Session-only text area (not persisted to DB — roadmap item)
 
-**Fix:** Added `if (modality === 'MRA')` branch that reads `MRA_STUDIES` labels.
+**Font + Mobile Search:**
+- Entire dashboard now uses Oxanium via `className={oxanium.className}` — matches all other Cosmos dashboards
+- Mobile search: dedicated full-width search row below header buttons on screens < 768px; inline in header on md+
 
-**File changed:** `app/md/[patientId]/mri/MriReferral.tsx`
+**Superadmin picker:**
+- FD Dashboard V2 card added to `app/page.tsx` dashboard picker
 
-**Note:** Existing MRA referrals created before fix have `body_parts = null`.
-Regenerate those referrals to get body parts tracked.
+**Key schema lessons learned this session:**
+- `patients` PK is `patient_id` (not `id`)
+- `patient_visits` PK is `id`
+- `appointments` PK is `id`
+- `patients.date_of_accident` → actual column is `doi`
+- `patients.claim_number` → actual column is `claim_num`
+- `patients.carrier` is a plain text field (not FK to insurance_carriers)
+- `referrals` table has `patient_id` directly; use `select('*')` or mirror `ReferralsTabV2` query exactly
+- Always use `select('*')` for discovery; never assume column names not confirmed in existing working code
+- FK joins on `supabaseServer` silently return null when PostgREST FK relationship not configured — use flat selects + client-side lookup maps instead
 
-### Auto-Close body_parts Select Bug ✅ CLOSED
+### Referral Dashboard — Patient Pre-Filter ✅ CLOSED
 
-**Bug:** `uploadReferralResult()` in `actions.ts` queried appointments with
-`.select('id, outcome')` — omitted `body_parts`. `allPartsAssigned` check
-always returned false (undefined body_parts on appointment rows). Auto-close
-never fired for imaging referrals regardless of completion state.
+`ReferralDashboard.tsx` `search` state now initializes from `useSearchParams().get('patient') ?? ''`.
+Linking to `/referrals?patient=David+Anderson` pre-populates the search bar and
+immediately filters the table to that patient. No changes to `referrals/page.tsx`
+needed — `useSearchParams` reads URL client-side automatically.
 
-**Fix:** Changed select to `.select('id, outcome, body_parts')`.
-
-**File changed:** `app/referrals/actions.ts`
-
-### MRI/MRA/CT Auto-Close — All Parts Must Be Assigned ✅ CLOSED
-
-**Bug:** Auto-close fired when all existing sessions were completed, even if
-unscheduled body parts remained (FD schedules sessions on different dates).
-
-**Fix:** Before `allComplete` check, fetch `referrals.body_parts` and verify
-every part appears in at least one appointment's `body_parts`. Only then close.
-
-**File changed:** `app/referrals/actions.ts`
-
-### Referral Dashboard — MRI/MRA/CT Per-Appointment Row Expansion ✅ CLOSED
-
-MRI/MRA/CT referrals now show one row per appointment in the Full Referral
-Dashboard list (default view, no metric filter). Non-imaging types remain one
-row per referral. Existing metric filter expansions (upcoming/overdue/awaiting/
-review) unchanged.
-
-**File changed:** `app/referrals/ReferralDashboard.tsx`
-
-### MD Patient Chart — ALL REFERRALS Table Overhaul ✅ CLOSED
-
-**Changes to `ReferralsTabV2.tsx`:**
-
-1. **MRI/MRA/CT per-session expansion** — imaging referrals expand to one row
-   per appointment in the summary table. `filtered` IIFE handles expansion.
-   Summary table iterates `filtered` (was iterating `referrals` directly — bug).
-
-2. **Per-session status for imaging rows** — Upcoming / Overdue / Uploaded
-   computed from session appointment date and result presence. Closed referrals
-   always show Closed regardless of session state.
-
-3. **Card header warning** — per-type red lines inside the ALL REFERRALS table
-   card, above column headers: `⚠ MRI  L. Shoulder, L. Elbow not yet scheduled`.
-   One line per imaging type with unscheduled parts. Replaces old standalone
-   red banner above the table.
-
-4. **Tap-to-sort** — Type, Status, Provider, Created, Appointment columns
-   sortable. Active column header turns white with ▲/▼ arrow. Default sort:
-   Created desc.
-
-5. **Body Parts column** — added after Type column. Body part chips displayed
-   there, not in the Type cell. Type cell shows label only.
-
-6. **Individual referral cards removed** — the expandable card list below the
-   summary table is gone. Summary table is the sole referral display.
-
-7. **NEW badge removed** — `● NEW` badge removed from summary table rows.
-   `results_viewed_at` badge logic removed (badge was never clearing correctly
-   due to navigation pattern).
-
-8. **Row tap disabled** — rows are not tappable. PDF button in Results column
-   is the sole interactive element.
-
-9. **`expandedId` / `keepExpandedId` / `autoExpandId` fully removed** — all
-   expand state, auto-expand logic, and `fetchResultDocs` per-referral loading
-   removed. Bulk doc fetch on load retained.
-
-**File changed:** `app/md-v2/[patientId]/ReferralsTabV2.tsx`
-
-### MD Referral Detail Page — Abandoned ✅ CLOSED (not needed)
-
-Attempted to build `app/md-v2/[patientId]/ref/[rid]/page.tsx` to give MD
-access to ReferralSheet. Blocked by Android/Termux case-insensitive filesystem
-preventing git from tracking bracket-named folders correctly. Abandoned after
-determining MD only needs the summary table + PDF button — no referral detail
-view required for MD workflow.
-
-**Leftover:** `app/md-v2/[patientId]/ref/` and `app/md-v2/[patientId]/referral/`
-folders exist in repo with empty or broken content. Safe to delete next session.
+**Files changed:** `app/referrals/ReferralDashboard.tsx`, `app/dashboard-v2/components/FDPatientSheet.tsx`
 
 ---
 
 ## Open Items, Priority Order
 
 1. **Lock icon removal from Closed status** (`types.ts` icon field).
-   Python patch anchor failed Sessions 33–36 due to emoji Unicode encoding
-   mismatch. Not attempted this session. Fix: pull `types.ts` fresh, inspect
-   exact bytes around the icon field, use Python byte-level replace.
+   Python patch anchor failed Sessions 33–39 due to emoji Unicode encoding
+   mismatch. Fix: pull `types.ts` fresh, inspect exact bytes around the icon
+   field, use Python byte-level replace.
 
 2. **DEV artifacts removal.** Remove DEV fill-all PCE button from
    `VisitTab.tsx` and Dev Tools card from Admin panel before go-live.
@@ -159,33 +117,43 @@ folders exist in repo with empty or broken content. Safe to delete next session.
    Standard plan ($25/mo, 2GB RAM).
 
 5. **Cleanup leftover route folders.** Delete `app/md-v2/[patientId]/ref/`
-   and `app/md-v2/[patientId]/referral/` — both are abandoned and contain
-   broken/empty content. Use `git rm -rf` via GitHub web UI or a fresh clone.
+   and `app/md-v2/[patientId]/referral/` — both abandoned, broken content.
+   Use `git rm -rf` via GitHub web UI or fresh clone.
 
-6. **ReferralSheet header badge.** Still shows raw DB status (`New`,
+6. **Dashboard V2 — Appointments tab shows 0.** `appointments` table
+   `patient_id` filter may not be matching due to column name mismatch. Verify
+   `appointments` table FK column name against working code before next fix.
+
+7. **Dashboard V2 — Notes tab persistence.** Notes are session-only.
+   Requires a new `patient_notes` table or column. Roadmap item.
+
+8. **Dashboard V2 — Stub KPIs.** Patients Waiting, Insurance Verification,
+   Tasks Due Today require new DB tables/columns. Future work.
+
+9. **ReferralSheet header badge.** Still shows raw DB status (`New`,
    `Scheduled`) instead of computed status. Cosmetic only.
 
-7. **Add FK: `referral_timeline.actor_user_id → user_profiles.id`.**
-   Currently no FK — timeline join done client-side as workaround.
-
-8. **DME and RX referral codes.** `DmeReferral.tsx` and `RxReferral.tsx`
-   have a different lifecycle insert pattern and were excluded from the
-   Session 38 codes refactor. Handle separately.
-
-9. **Psych referral type.** No `psych/` route exists. New build required.
-
-10. **`patients.doctor_id` NOT NULL.** Deferred to pre-production.
+10. **`/referrals/page.tsx` `userRole` hardcoded to `"md"`.** Relies on
+    sessionStorage override. Hard refresh without re-login exposes wrong role.
 
 11. **HIPAA BAAs.** Supabase, Render, Vercel, Resend — all unsigned.
     Pre-go-live blocker.
 
 12. **SPF/DKIM for cosmosmt.com.** Not yet configured. Pre-go-live blocker.
 
+13. **DME and RX referral codes.** Excluded from Session 38 codes refactor.
+
+14. **Psych referral type.** No `psych/` route exists. New build required.
+
 ---
 
 ## DB Schema Changes This Session
 
 No new migrations this session. All schema from Session 38 remains current.
+
+`referral_appointments.needs_review` and `reviewed_at` columns (migrations
+031–032) are now vestigial — the workflow that wrote to them was removed in
+Session 39. No code writes to them in the current flow.
 
 ---
 
@@ -196,65 +164,42 @@ last deploy:
 
 | File | Changes |
 |---|---|
-| `app/referrals/actions.ts` | Auto-close: `body_parts` added to select, all-parts-assigned check added, session-scope auto-close fixed |
-| `app/referrals/ReferralDashboard.tsx` | AWAITING/REVIEW KPI cards removed, Done column removed, pendingDoneSessions removed, awaiting/review metric filter blocks removed, MRI/MRA/CT per-appointment expansion added |
-| `app/referrals/ReferralSheet.tsx` | `markSessionNeedsReview` import removed, `donningSessionId` state removed, `handleDoneSession` removed, toast message updated, `onDoneSession` prop removed |
-| `app/referrals/components/ReferralAppointmentTab.tsx` | Done button removed (imaging + non-imaging), `donningSessionId`/`onDoneSession` props removed, `needsReview`/`isReviewed` variables removed, review-gated delete removed, review border/bg removed |
-| `app/md/[patientId]/mri/MriReferral.tsx` | MRA body_parts branch added in `createLifecycleRecord()` |
-| `app/md-v2/[patientId]/ReferralsTabV2.tsx` | Full overhaul — see Completed section above |
+| `app/dashboard-v2/page.tsx` | Server component — patients (flat select), visits (select *), appointments (select *), doctors, referrals (FK joins + deleted_at filter) |
+| `app/dashboard-v2/FDDashboardV2.tsx` | Full new file — TanStack table, KPI cards, sidebar, header, Oxanium font, mobile search |
+| `app/dashboard-v2/components/FDPatientSheet.tsx` | Full new file — 8 tabs, referral integration, Oxanium font, patient pre-filter link |
+| `app/page.tsx` | FD Dashboard V2 card added to superadmin picker |
+| `app/referrals/ReferralDashboard.tsx` | `search` state initialized from `useSearchParams().get('patient') ?? ''` |
 
 ---
 
 ## Known Architecture Gaps
 
 - `getReferralProviders()` return type is still `any[]`.
-- `/referrals/page.tsx` `userRole` hardcoded to `"md"` — relies on
-  sessionStorage override; hard refresh without re-login can expose wrong role.
-- `referral_notifications` table schema mismatch — designed for internal
-  user notifications, not outbound Resend emails.
-- ReferralSheet header badge reads raw `referrals.status` — shows
-  `New`/`Scheduled` instead of computed status. Cosmetic gap only.
+- `/referrals/page.tsx` `userRole` hardcoded to `"md"` — sessionStorage override only.
+- ReferralSheet header badge reads raw `referrals.status` — cosmetic gap.
 - Body parts missing on sessions rescheduled before Session 36 — data issue.
 - Lock icon emoji in `types.ts` cannot be patched via Python string anchors.
 - No FK between `referral_timeline.actor_user_id` and `user_profiles.id`.
-- `(referral as any).cpt_codes` cast in `ReferralOverviewTab` — new type
-  columns (`vng_tests`, `ortho_regions`, etc.) also use `as any` cast.
-  Add all new columns to `ReferralSummary` in `types.ts`.
+- `(referral as any).cpt_codes` cast in `ReferralOverviewTab` — new type columns use `as any`.
 - Render Starter (512MB) insufficient for PDF generation under load.
 - DME and RX referral pages still hardcode `cpt_codes: []`/`icd10_codes: []`.
-- `app/md-v2/[patientId]/ref/` and `app/md-v2/[patientId]/referral/` are
-  abandoned folders that should be deleted.
-- Android/Termux filesystem is case-insensitive — git cannot track folder
-  renames involving bracket characters (`[param]`). Always create new route
-  folders via `cat >` or heredoc, never `mv`. If casing is wrong, use GitHub
-  web UI to delete and recreate.
+- `app/md-v2/[patientId]/ref/` and `app/md-v2/[patientId]/referral/` abandoned folders to delete.
+- Android/Termux filesystem is case-insensitive — git cannot track folder renames with bracket characters.
+- `dashboard-v2` Appointments tab shows 0 — `appointments.patient_id` FK column name unverified.
+- `patients.patient_signature_url` unreliable — not used by existing FD dashboard; removed from doc status logic in V2.
+- `dashboard-v2` notes are session-only — not persisted to DB.
 
 ---
 
 ## Technical Lessons This Session
 
-- Android/Termux uses a case-insensitive filesystem. Git tracks `[referralId]`
-  and `[referraLId]` as the same path — renames are invisible to git. Never
-  attempt folder renames with bracket characters on Termux. Use GitHub web UI
-  for any bracket-named folder operations, or avoid the problem by choosing
-  route param names with no ambiguous characters (`[rid]` not `[referralId]`).
-- GitHub web UI also rejects bracket characters in file paths via the web
-  editor ("malformed path component"). The only reliable way to create
-  Next.js dynamic route folders from Termux is to write files directly with
-  `cat >` or heredoc in the correct directory from the start.
-- `git add -f` and `git update-index --add --cacheinfo` both silently fail
-  on case-insensitive filesystems when the index already has a conflicting
-  entry — `git status` shows "nothing to commit" even though the new files
-  are not tracked.
-- When a patch script assertion fails with "Expected 1, got 0", always pull
-  the live file fresh before writing the patch — Chrome often serves a cached
-  stale download. Use a unique filename (`_live2`, `_live3`) on each pull to
-  force a fresh download.
-- `sed` with complex replacement strings fails silently on Android — use
-  Python `str.replace` patches instead.
-- Auto-close for imaging referrals requires both: (a) all body parts assigned
-  to sessions AND (b) all sessions completed. Either condition alone is
-  insufficient.
+- Never assume column names on tables not previously queried in the session. Always grep existing working code or use `select('*')` first.
+- `supabaseServer` FK joins silently return `null` for the entire query when PostgREST FK relationship is not configured — symptoms look identical to RLS block. Use flat selects + client-side lookup maps for new queries.
+- `patients` table PK is `patient_id`, not `id`. `patient_visits` and `appointments` use `id`. Confirm PKs before writing any select.
+- Regex `re.sub` on multi-line TypeScript interface blocks with `| null` union types corrupts the file — use exact `str.replace` on known content instead.
+- Always pull fresh files from git HEAD before patching — never base patches on files already in the outputs directory from earlier in the same session.
+- Python heredoc `<< 'EOF'` inside a `cat` command fails in Termux when the outer shell is also using `EOF` as a delimiter. Use `cat > file << 'ENDOFFILE'` with a unique delimiter.
+- `useSearchParams()` reads URL query params client-side automatically in Next.js App Router — no `searchParams` prop needed on server component parent when the client component reads params itself.
 
 ---
 
@@ -282,30 +227,41 @@ last deploy:
 - [x] MRI/MRA/CT all-parts-assigned gate for auto-close (Session 39)
 - [x] Referral dashboard MRI/MRA/CT per-appointment expansion (Session 39)
 - [x] MD referrals table — per-session expansion, sort, body parts column (Session 39)
+- [x] Referral dashboard patient pre-filter via ?patient= (Session 40)
 - [ ] DME and RX codes from patient_visits
 - [ ] Psych referral type (new build)
-- [ ] Lock icon removal from Closed status (anchor mismatch — deferred x5)
+- [ ] Lock icon removal from Closed status (anchor mismatch — deferred x6)
 - [ ] ReferralSheet header badge — raw DB status (cosmetic)
 - [ ] Patient email required at intake — PatientForm.tsx
 - [ ] DEV artifacts removal — VisitTab.tsx PCE button + Admin Dev Tools card
 - [ ] Add FK: referral_timeline.actor_user_id → user_profiles.id
-- [ ] Sidebar rollout — FD, MD, Biller dashboards
 - [ ] Cleanup abandoned route folders (ref/, referral/)
 
-### Stage 3 — Billing
+### Stage 3 — Front Desk Dashboard V2
+- [x] Shell, header, sidebar, KPI cards (Session 40)
+- [x] TanStack work queue — sorting, pagination, search, CSV export, column visibility (Session 40)
+- [x] Patient detail sheet — 8 tabs, real data (Session 40)
+- [x] Referrals tab — real FK join data, links to Referral Dashboard (Session 40)
+- [x] Oxanium font, mobile search (Session 40)
+- [x] Superadmin picker integration (Session 40)
+- [ ] Appointments tab — verify patient_id FK column name, fix 0 count
+- [ ] Notes tab persistence — patient_notes table
+- [ ] Stub KPIs — Patients Waiting, Insurance Verification, Tasks Due Today
+
+### Stage 4 — Billing
 - [ ] Billing packet generation improvements
 - [ ] Attorney email workflow
 
-### Stage 4 — Infrastructure
+### Stage 5 — Infrastructure
 - [ ] Render upgrade to Standard plan — pre-go-live blocker
-- [ ] PDF migration to client-side @react-pdf/renderer (Phase 2)
+- [ ] PDF migration to client-side @react-pdf/renderer (Phase 2, long-term)
 
-### Stage 5 — Scale
+### Stage 6 — Scale
 - [ ] Holistic UX audit
 - [ ] Accessibility (ARIA, keyboard nav)
 - [ ] Multi-tenancy for commercial SaaS
 
-### Stage 6 — Compliance
+### Stage 7 — Compliance
 - [ ] HIPAA compliance review
 - [ ] BAA with Supabase, Render, Vercel, Resend
 - [ ] Data retention and deletion policy
