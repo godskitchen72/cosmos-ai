@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 13, 2026, Session 38)
+# Cosmos Medical Technologies — HANDOVER (July 13, 2026, Session 39)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -14,125 +14,130 @@ self-contained.
 ## Current Status
 
 All `cosmos-dashboard` commits confirmed deployed and live on
-`cosmos-dashboard-nu.vercel.app`. Session 38 completed the referral
-codes refactor (MRI/VNG/Ortho/Pain-Mgmt/PT), referral selections
-storage and display (VNG/Ortho/Pain-Mgmt/PT), full referral lifecycle
-redesign (upload → auto-close → NEW RESULTS badge → MD views → badge
-clears), and MD patient chart all-referrals summary table.
+`cosmos-dashboard-nu.vercel.app`. Session 39 completed the referral
+lifecycle simplification (Done/Awaiting/Review workflow removed),
+MRI/MRA/CT per-session row expansion in both dashboards, MRA body parts
+fix, auto-close body_parts select bug fix, MD referrals table overhaul
+(sort, body parts column, card header warning, no row tap), and removal
+of individual referral cards from MD patient chart.
 
 ---
 
-## Completed This Session (Session 38)
+## Completed This Session (Session 39)
 
-### MRI/VNG/Ortho/Pain-Mgmt/PT — CPT + ICD-10 from patient_visits ✅ CLOSED
+### Done/Awaiting/Review Workflow — Removed ✅ CLOSED
 
-**Root cause:** All referral type creation pages hardcoded `cpt_codes: []`
-and `icd10_codes: []` in `createLifecycleRecord()`. `patient_visits` stores
-codes as comma-separated `text`, not `text[]` — Supabase insert type mismatch
-silently threw and lifecycle record was never created.
+**Old flow:** Upload result → FD taps Done → sent_review → MD review queue → Closed.
+**New flow:** Upload result → Auto-close (when all parts assigned + all sessions completed).
 
-**Fix:** Each referral `page.tsx` now fetches `cpt_codes`/`icd10_codes` from
-`patient_visits` server-side using `Promise.all`. Normalisation applied at
-the server component boundary: `Array.isArray()` check first, then
-`.split(',').map(s => s.trim())` for string format, default `[]`. Passed as
-`cptCodes`/`icd10Codes` props to each referral component and wired into the
-referral `INSERT`.
+**Removed:**
+- AWAITING and REVIEW KPI cards from `ReferralDashboard.tsx`
+- Done button from `ReferralAppointmentTab.tsx` (imaging + non-imaging)
+- `markSessionNeedsReview` import and handler from `ReferralSheet.tsx`
+- `donningSessionId` state and `handleDoneSession` from `ReferralSheet.tsx`
+- `pendingDoneSessions` memo and `handleDoneFromBanner` from `ReferralDashboard.tsx`
+- `done_action` column from dashboard table
+- `metricFilter === 'review'` and `metricFilter === 'awaiting'` blocks
+- `needs_review`/`isReviewed` gates on Delete button — Delete now always visible on uploaded sessions
+- Review-tinted orange border/bg on session cards
 
-**Files changed:** `mri/page.tsx`, `mri/MriReferral.tsx`, `vng/page.tsx`,
-`ortho/page.tsx`, `pain-mgmt/page.tsx`, `pt/page.tsx`, `VngReferral.tsx`,
-`OrthoReferral.tsx`, `PainMgmtReferral.tsx`, `PtReferral.tsx`.
+**Delete button:** Now always shown for uploaded sessions — no longer gated on review state.
 
-**DME and RX excluded** — different lifecycle insert pattern, separate task.
+**Files changed:** `ReferralDashboard.tsx`, `ReferralSheet.tsx`, `ReferralAppointmentTab.tsx`
 
-### Referral Selections Storage + Overview Display ✅ CLOSED
+### MRA Body Parts Fix ✅ CLOSED
 
-**DB migrations applied:**
-- `vng_tests text[]`, `vng_symptoms text[]`
-- `ortho_referral_types text[]`, `ortho_regions text[]`
-- `pain_mgmt_testing text[]`, `pain_mgmt_treating text[]`
-- `pt_goals text[]`, `pt_modalities text[]`, `pt_frequency text`
+**Bug:** `MriReferral.tsx` `createLifecycleRecord()` had no `MRA` branch in
+`body_parts` IIFE — fell through to `mriOnly` path which reads `MRI_SPINE`
+and extremities only. MRA studies never saved to `referrals.body_parts`.
 
-**Data flow:** Each referral component maps state → label arrays on INSERT.
-`listReferrals()` select extended. `ReferralOverviewTab.tsx` displays new
-sections: Testing Requested, Symptoms, Referral Requested, Body Part/Region,
-Testing For, Treating For, Treatment Goals, Modalities, Frequency.
+**Fix:** Added `if (modality === 'MRA')` branch that reads `MRA_STUDIES` labels.
 
-### Referral Lifecycle Redesign — Auto-Close + NEW RESULTS Badge ✅ CLOSED
+**File changed:** `app/md/[patientId]/mri/MriReferral.tsx`
 
-**Old flow:** Upload result → `needs_review` → MD reviews → Closed.
-**New flow:** Upload result → Auto-close → `results_viewed_at = null` for
-flagged types → green "NEW RESULTS" badge on MD patient chart → MD opens
-referral → `results_viewed_at = now()` → badge clears on next reload.
+**Note:** Existing MRA referrals created before fix have `body_parts = null`.
+Regenerate those referrals to get body parts tracked.
 
-**Flagged types** (badge shown): MRI, MRA, CT, ORTHO, PAIN-MGMT.
-**All other types**: auto-close, no badge.
+### Auto-Close body_parts Select Bug ✅ CLOSED
 
-**DB migration:** `results_viewed_at timestamptz` added to `referrals`.
+**Bug:** `uploadReferralResult()` in `actions.ts` queried appointments with
+`.select('id, outcome')` — omitted `body_parts`. `allPartsAssigned` check
+always returned false (undefined body_parts on appointment rows). Auto-close
+never fired for imaging referrals regardless of completion state.
 
-**MRI session auto-close:** After session result upload, checks if all
-non-cancelled sessions are `outcome = 'completed'`. If so, auto-closes
-referral (previously MRI never auto-closed from session upload path).
+**Fix:** Changed select to `.select('id, outcome, body_parts')`.
 
-**Badge dismissal:** `markResultsViewed()` action fires when MD opens
-`ReferralSheet`. `ReferralsTabV2.tsx` silently reloads on
-`visibilitychange` event to clear badge when user returns to tab.
+**File changed:** `app/referrals/actions.ts`
 
-**Files changed:** `actions.ts` (upload action, new `markResultsViewed`,
-select), `types.ts` (removed `awaiting_review` stage), `ReferralSheet.tsx`
-(dismissal on open), `ReferralDashboard.tsx` (REVIEW KPI zeroed),
-`ReferralsTabV2.tsx` (NEW RESULTS badge, visibilitychange reload).
+### MRI/MRA/CT Auto-Close — All Parts Must Be Assigned ✅ CLOSED
 
-### Review UI Removal ✅ CLOSED
+**Bug:** Auto-close fired when all existing sessions were completed, even if
+unscheduled body parts remained (FD schedules sessions on different dates).
 
-All MD review workflow artifacts removed:
+**Fix:** Before `allComplete` check, fetch `referrals.body_parts` and verify
+every part appears in at least one appointment's `body_parts`. Only then close.
 
-- `MDClient.tsx`: "Referral Results — Review Required" banner removed.
-  Patient card review badge removed. `reviewReferrals` state + query removed.
-- `ReferralAppointmentTab.tsx`: "Done" button removed (both imaging and
-  non-imaging variants). "Sent for MD Review" label removed (both instances).
-  `✔ MD Reviewed` label removed.
-- `ReferralsTabV2.tsx`: "Reviewed" badge removed. "Review" column header
-  and `TableCell` removed. `✔ Review` button removed. `✔ Reviewed` cell
-  removed. `handleReviewSession()` function removed. `reviewingId` state
-  removed. `reviewSession` import removed.
-- `ReferralDashboard.tsx`: REVIEW KPI count set to 0, card left as shell.
-  `awaiting_review` meta entry updated to degrade gracefully.
-- `computeReferralDisplayStatus()` in `types.ts`: `awaiting_review` stage
-  removed entirely.
+**File changed:** `app/referrals/actions.ts`
 
-### referral_submitted_at — Provider Email Timestamp ✅ CLOSED
+### Referral Dashboard — MRI/MRA/CT Per-Appointment Row Expansion ✅ CLOSED
 
-**DB migration:** `referral_submitted_at timestamptz` added to `referrals`.
+MRI/MRA/CT referrals now show one row per appointment in the Full Referral
+Dashboard list (default view, no metric filter). Non-imaging types remain one
+row per referral. Existing metric filter expansions (upcoming/overdue/awaiting/
+review) unchanged.
 
-**Set when:** `assignProvider()` in `actions.ts` fires provider notification
-email (Resend). `referral_submitted_at = now()` written immediately after
-successful email send. Added to `listReferrals()` select.
+**File changed:** `app/referrals/ReferralDashboard.tsx`
 
-### MD Patient Chart — All Referrals Summary Table ✅ CLOSED
+### MD Patient Chart — ALL REFERRALS Table Overhaul ✅ CLOSED
 
-Summary table rendered above referral cards in `ReferralsTabV2.tsx`.
+**Changes to `ReferralsTabV2.tsx`:**
 
-**Columns:** Type | Status | Provider | Created | Submitted | Appointment | Results
+1. **MRI/MRA/CT per-session expansion** — imaging referrals expand to one row
+   per appointment in the summary table. `filtered` IIFE handles expansion.
+   Summary table iterates `filtered` (was iterating `referrals` directly — bug).
 
-- **Type**: referral label in category color + green "● NEW" badge for
-  unviewed flagged results
-- **Status**: styled badge matching existing status meta
-- **Provider**: provider name
-- **Created**: `referral.created_at` — date MD ordered the referral
-- **Submitted**: `referral_submitted_at` — date provider email was sent; `—` if not yet sent
-- **Appointment**: next non-cancelled session date
-- **Results**: `📄 PDF` button if result doc exists, opens signed URL; `—` if none
+2. **Per-session status for imaging rows** — Upcoming / Overdue / Uploaded
+   computed from session appointment date and result presence. Closed referrals
+   always show Closed regardless of session state.
 
-**Bulk doc fetch:** All result docs loaded on referral list load (not on
-card expand) so PDF buttons are immediately available.
+3. **Card header warning** — per-type red lines inside the ALL REFERRALS table
+   card, above column headers: `⚠ MRI  L. Shoulder, L. Elbow not yet scheduled`.
+   One line per imaging type with unscheduled parts. Replaces old standalone
+   red banner above the table.
 
-**Row click:** Opens referral card in expanded state via `handleCardClick`.
+4. **Tap-to-sort** — Type, Status, Provider, Created, Appointment columns
+   sortable. Active column header turns white with ▲/▼ arrow. Default sort:
+   Created desc.
 
-### MRI/MRA/CT Incomplete Parts Warning ✅ CLOSED
+5. **Body Parts column** — added after Type column. Body part chips displayed
+   there, not in the Type cell. Type cell shows label only.
 
-`ReferralsTabV2.tsx`: red warning banner above summary table when any open
-MRI, MRA, or CT referral has `body_parts` not yet assigned to a session.
-Warning includes all unscheduled part names. Previously only showed for MRI.
+6. **Individual referral cards removed** — the expandable card list below the
+   summary table is gone. Summary table is the sole referral display.
+
+7. **NEW badge removed** — `● NEW` badge removed from summary table rows.
+   `results_viewed_at` badge logic removed (badge was never clearing correctly
+   due to navigation pattern).
+
+8. **Row tap disabled** — rows are not tappable. PDF button in Results column
+   is the sole interactive element.
+
+9. **`expandedId` / `keepExpandedId` / `autoExpandId` fully removed** — all
+   expand state, auto-expand logic, and `fetchResultDocs` per-referral loading
+   removed. Bulk doc fetch on load retained.
+
+**File changed:** `app/md-v2/[patientId]/ReferralsTabV2.tsx`
+
+### MD Referral Detail Page — Abandoned ✅ CLOSED (not needed)
+
+Attempted to build `app/md-v2/[patientId]/ref/[rid]/page.tsx` to give MD
+access to ReferralSheet. Blocked by Android/Termux case-insensitive filesystem
+preventing git from tracking bracket-named folders correctly. Abandoned after
+determining MD only needs the summary table + PDF button — no referral detail
+view required for MD workflow.
+
+**Leftover:** `app/md-v2/[patientId]/ref/` and `app/md-v2/[patientId]/referral/`
+folders exist in repo with empty or broken content. Safe to delete next session.
 
 ---
 
@@ -149,86 +154,54 @@ Warning includes all unscheduled part names. Previously only showed for MRI.
 3. **Patient email required at intake.** `PatientForm.tsx` `email` field
    must be made required. Patient confirmation emails dead until fixed.
 
-4. **ReferralSheet header badge.** Still shows raw DB status (`New`,
-   `Scheduled`) instead of computed status. Cosmetic only.
-
-5. **Render memory limit — cosmos-api.** Render Starter (512MB) crashes
+4. **Render memory limit — cosmos-api.** Render Starter (512MB) crashes
    during PDF generation under load. Pre-go-live blocker. Upgrade to
    Standard plan ($25/mo, 2GB RAM).
 
-6. **Add FK: `referral_timeline.actor_user_id → user_profiles.id`.**
+5. **Cleanup leftover route folders.** Delete `app/md-v2/[patientId]/ref/`
+   and `app/md-v2/[patientId]/referral/` — both are abandoned and contain
+   broken/empty content. Use `git rm -rf` via GitHub web UI or a fresh clone.
+
+6. **ReferralSheet header badge.** Still shows raw DB status (`New`,
+   `Scheduled`) instead of computed status. Cosmetic only.
+
+7. **Add FK: `referral_timeline.actor_user_id → user_profiles.id`.**
    Currently no FK — timeline join done client-side as workaround.
 
-7. **DME and RX referral codes.** `DmeReferral.tsx` and `RxReferral.tsx`
+8. **DME and RX referral codes.** `DmeReferral.tsx` and `RxReferral.tsx`
    have a different lifecycle insert pattern and were excluded from the
    Session 38 codes refactor. Handle separately.
 
-8. **Psych referral type.** No `psych/` route exists. New build required.
+9. **Psych referral type.** No `psych/` route exists. New build required.
 
-9. **Body parts missing on pre-Session-36 rescheduled sessions.** Data
-   issue only — new reschedules are gated correctly.
+10. **`patients.doctor_id` NOT NULL.** Deferred to pre-production.
 
-10. **Doctor mailing address data.** All current records are test data.
-    Real provider data entered at go-live onboarding.
-
-11. **`patients.doctor_id` NOT NULL.** Deferred to pre-production.
-
-12. **HIPAA BAAs.** Supabase, Render, Vercel, Resend — all unsigned.
+11. **HIPAA BAAs.** Supabase, Render, Vercel, Resend — all unsigned.
     Pre-go-live blocker.
 
-13. **SPF/DKIM for cosmosmt.com.** Not yet configured. Pre-go-live blocker.
+12. **SPF/DKIM for cosmosmt.com.** Not yet configured. Pre-go-live blocker.
 
 ---
 
 ## DB Schema Changes This Session
 
-All applied via Supabase SQL editor (no `.sql` migration files — consistent
-with Sessions 20+):
-
-```sql
--- Referral selections
-ALTER TABLE referrals ADD COLUMN IF NOT EXISTS vng_tests text[];
-ALTER TABLE referrals ADD COLUMN IF NOT EXISTS vng_symptoms text[];
-ALTER TABLE referrals ADD COLUMN IF NOT EXISTS ortho_referral_types text[];
-ALTER TABLE referrals ADD COLUMN IF NOT EXISTS ortho_regions text[];
-ALTER TABLE referrals ADD COLUMN IF NOT EXISTS pain_mgmt_testing text[];
-ALTER TABLE referrals ADD COLUMN IF NOT EXISTS pain_mgmt_treating text[];
-ALTER TABLE referrals ADD COLUMN IF NOT EXISTS pt_goals text[];
-ALTER TABLE referrals ADD COLUMN IF NOT EXISTS pt_modalities text[];
-ALTER TABLE referrals ADD COLUMN IF NOT EXISTS pt_frequency text;
-
--- Lifecycle
-ALTER TABLE referrals ADD COLUMN IF NOT EXISTS results_viewed_at timestamptz;
-ALTER TABLE referrals ADD COLUMN IF NOT EXISTS referral_submitted_at timestamptz;
-```
+No new migrations this session. All schema from Session 38 remains current.
 
 ---
 
 ## File Confidence
 
-All files below were modified this session and are confirmed on disk as of
+All files below were modified this session and confirmed on disk as of
 last deploy:
 
 | File | Changes |
 |---|---|
-| `app/referrals/actions.ts` | Upload auto-close, MRI session auto-close, `markResultsViewed`, `referral_submitted_at` on email, select updates |
-| `app/referrals/types.ts` | Removed `awaiting_review` from `computeReferralDisplayStatus`, added `results_viewed_at` to `ReferralSummary` |
-| `app/referrals/ReferralDashboard.tsx` | REVIEW KPI zeroed, NEW RESULTS badge removed |
-| `app/referrals/ReferralSheet.tsx` | `markResultsViewed` on open |
-| `app/referrals/components/ReferralAppointmentTab.tsx` | Done/Sent for MD Review/MD Reviewed labels removed |
-| `app/referrals/components/ReferralOverviewTab.tsx` | VNG/Ortho/Pain-Mgmt/PT/Frequency sections added |
-| `app/md/MDClient.tsx` | Review banner and patient badge removed |
-| `app/md-v2/[patientId]/ReferralsTabV2.tsx` | Summary table, NEW RESULTS badge, bulk doc fetch, MRI/MRA/CT warning, visibilitychange reload, review UI removed |
-| `app/md/[patientId]/mri/page.tsx` | Server-side codes fetch + normalisation |
-| `app/md/[patientId]/mri/MriReferral.tsx` | cptCodes/icd10Codes props |
-| `app/md/[patientId]/vng/page.tsx` | Full rewrite with codes fetch |
-| `app/md/[patientId]/ortho/page.tsx` | Full rewrite with codes fetch |
-| `app/md/[patientId]/pain-mgmt/page.tsx` | Full rewrite with codes fetch |
-| `app/md/[patientId]/pt/page.tsx` | Full rewrite with codes fetch |
-| `app/md/[patientId]/vng/VngReferral.tsx` | Props, insert: vng_tests, vng_symptoms |
-| `app/md/[patientId]/ortho/OrthoReferral.tsx` | Props, insert: ortho_referral_types, ortho_regions |
-| `app/md/[patientId]/pain-mgmt/PainMgmtReferral.tsx` | Props, insert: pain_mgmt_testing, pain_mgmt_treating |
-| `app/md/[patientId]/pt/PtReferral.tsx` | Props, insert: pt_goals, pt_modalities, pt_frequency |
+| `app/referrals/actions.ts` | Auto-close: `body_parts` added to select, all-parts-assigned check added, session-scope auto-close fixed |
+| `app/referrals/ReferralDashboard.tsx` | AWAITING/REVIEW KPI cards removed, Done column removed, pendingDoneSessions removed, awaiting/review metric filter blocks removed, MRI/MRA/CT per-appointment expansion added |
+| `app/referrals/ReferralSheet.tsx` | `markSessionNeedsReview` import removed, `donningSessionId` state removed, `handleDoneSession` removed, toast message updated, `onDoneSession` prop removed |
+| `app/referrals/components/ReferralAppointmentTab.tsx` | Done button removed (imaging + non-imaging), `donningSessionId`/`onDoneSession` props removed, `needsReview`/`isReviewed` variables removed, review-gated delete removed, review border/bg removed |
+| `app/md/[patientId]/mri/MriReferral.tsx` | MRA body_parts branch added in `createLifecycleRecord()` |
+| `app/md-v2/[patientId]/ReferralsTabV2.tsx` | Full overhaul — see Completed section above |
 
 ---
 
@@ -249,28 +222,39 @@ last deploy:
   Add all new columns to `ReferralSummary` in `types.ts`.
 - Render Starter (512MB) insufficient for PDF generation under load.
 - DME and RX referral pages still hardcode `cpt_codes: []`/`icd10_codes: []`.
+- `app/md-v2/[patientId]/ref/` and `app/md-v2/[patientId]/referral/` are
+  abandoned folders that should be deleted.
+- Android/Termux filesystem is case-insensitive — git cannot track folder
+  renames involving bracket characters (`[param]`). Always create new route
+  folders via `cat >` or heredoc, never `mv`. If casing is wrong, use GitHub
+  web UI to delete and recreate.
 
 ---
 
 ## Technical Lessons This Session
 
-- `patient_visits` stores `cpt_codes`/`icd10_codes` as comma-separated
-  `text`, not `text[]`. Inserting a plain string into a `text[]` column
-  silently fails in a `try/catch` — no visible error, record not created.
-  Always normalise at the server component boundary before passing as props.
-- Silent failures in `createLifecycleRecord()` are hard to debug because
-  the referral PDF generates successfully — the button flips to "View" —
-  but the `referrals` row is never inserted. Check DB directly when the
-  referral doesn't appear on the dashboard.
-- `resultDocs` populated lazily (on card expand) means the summary table
-  PDF column is always empty on first render. Bulk-fetch all docs on load
-  using `.in('referral_id', allIds)` to populate immediately.
-- `visibilitychange` event is the correct hook for refreshing data after
-  the user navigates away (to ReferralSheet) and returns — avoids polling
-  and works reliably on mobile Chrome.
-- When removing a JSX expression like `{condition && <Component />}`, Python
-  `str.replace` may leave an empty `{condition && }` which fails TypeScript.
-  Always verify with `npx tsc --noEmit` before committing.
+- Android/Termux uses a case-insensitive filesystem. Git tracks `[referralId]`
+  and `[referraLId]` as the same path — renames are invisible to git. Never
+  attempt folder renames with bracket characters on Termux. Use GitHub web UI
+  for any bracket-named folder operations, or avoid the problem by choosing
+  route param names with no ambiguous characters (`[rid]` not `[referralId]`).
+- GitHub web UI also rejects bracket characters in file paths via the web
+  editor ("malformed path component"). The only reliable way to create
+  Next.js dynamic route folders from Termux is to write files directly with
+  `cat >` or heredoc in the correct directory from the start.
+- `git add -f` and `git update-index --add --cacheinfo` both silently fail
+  on case-insensitive filesystems when the index already has a conflicting
+  entry — `git status` shows "nothing to commit" even though the new files
+  are not tracked.
+- When a patch script assertion fails with "Expected 1, got 0", always pull
+  the live file fresh before writing the patch — Chrome often serves a cached
+  stale download. Use a unique filename (`_live2`, `_live3`) on each pull to
+  force a fresh download.
+- `sed` with complex replacement strings fails silently on Android — use
+  Python `str.replace` patches instead.
+- Auto-close for imaging referrals requires both: (a) all body parts assigned
+  to sessions AND (b) all sessions completed. Either condition alone is
+  insufficient.
 
 ---
 
@@ -292,6 +276,12 @@ last deploy:
 - [x] referral_submitted_at — set on provider email (Session 38)
 - [x] MD all-referrals summary table (Session 38)
 - [x] MRI/MRA/CT incomplete parts warning (Session 38)
+- [x] Done/Awaiting/Review workflow removed (Session 39)
+- [x] MRA body_parts fix (Session 39)
+- [x] Auto-close body_parts select bug fixed (Session 39)
+- [x] MRI/MRA/CT all-parts-assigned gate for auto-close (Session 39)
+- [x] Referral dashboard MRI/MRA/CT per-appointment expansion (Session 39)
+- [x] MD referrals table — per-session expansion, sort, body parts column (Session 39)
 - [ ] DME and RX codes from patient_visits
 - [ ] Psych referral type (new build)
 - [ ] Lock icon removal from Closed status (anchor mismatch — deferred x5)
@@ -300,6 +290,7 @@ last deploy:
 - [ ] DEV artifacts removal — VisitTab.tsx PCE button + Admin Dev Tools card
 - [ ] Add FK: referral_timeline.actor_user_id → user_profiles.id
 - [ ] Sidebar rollout — FD, MD, Biller dashboards
+- [ ] Cleanup abandoned route folders (ref/, referral/)
 
 ### Stage 3 — Billing
 - [ ] Billing packet generation improvements
