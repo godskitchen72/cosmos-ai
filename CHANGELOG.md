@@ -1,3 +1,109 @@
+## 2026-07-14 — Session 42
+
+### FD Dashboard V2 — Visits Tab Simplified
+
+CPT code chips changed to cyan on both pending and billed rows. Visit rows
+tap-to-expand with document drawer briefly added then removed — documents
+consolidated to Documents tab exclusively. Billed rows simplified (no expand,
+flat grid layout). `patient_forms` fetch reverted to PCE-only in `FDVisitsTab`.
+
+**File:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### FD Dashboard V2 — Documents Tab Full Rebuild
+
+Documents tab expanded from NF-2/AOB only to a full document hub:
+
+**MD Records** — single collapsible card (purple accent). One row per visit
+with per-visit checkbox, green "Visit" label, cyan date, and pill buttons for
+PCE and ICD-10. Checkbox selects all forms for that visit.
+
+**Referral Results** — one collapsible card per referral type. Per-result row:
+cyan checkbox, green "Result N" label, "Received:" label, cyan date, View button.
+Select All above MD Records selects everything. Sticky action bar when items
+selected: "Download ZIP" and "Email Attorney".
+
+All forms from `patient-forms` bucket; referral results from `referral-documents`
+bucket. Both tracked as `{ path, bucket }` pairs in selection state.
+
+**File:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### cosmos-api — Records ZIP and Email Endpoints
+
+Two new endpoints:
+
+`POST /generate-records-zip` — accepts `{ patient_id, files: [{path, bucket}] }`.
+Downloads from correct Supabase Storage bucket per file. Zips in memory.
+Returns binary ZIP. Filename: `{patient_id}_{doa}_records.zip`.
+
+`POST /email-records` — same file list + `recipient_email` + `patient_name`.
+Builds ZIP, sends via Resend as attachment. From: `records@cosmosmt.com`.
+Attorney email pre-filled from `patients.attorney_email`, editable by FD.
+
+Both: JWT-verified, skip failed files rather than aborting.
+
+**File:** `cosmos-api/main.py`
+
+### FD Dashboard V2 — Reports Link in Sidebar
+
+`BarChart2` icon imported. Reports item added to `NAV_ITEMS` pointing to `/reports`.
+
+**File:** `app/dashboard-v2/FDDashboardV2.tsx`
+
+### Referral Dashboard — Awaiting KPI + Overdue Redefined
+
+**Awaiting** (orange `#fb923c`) — new KPI card. Counts sessions where
+appointment date has passed and no result uploaded. Session-level. Expands
+per-session rows with `⏳ AWAITING` badge and orange row tint.
+
+**Overdue** — redefined. Now fires on new referrals with no appointment
+scheduled for 2+ days (FD inaction). Referral-level count.
+
+`computeReferralDisplayStatus()` in `types.ts`: new `'awaiting'` status added
+to `ComputedReferralStatus`. No-appointment branch checks `created_at` age ≥ 2
+days → `'overdue'`. Past pending session → `'awaiting'` (was `'overdue'`).
+
+`getReferralMetrics()` in `actions.ts`: fetches `created_at`, passes to status
+function. Overdue counts referrals; awaiting counts sessions.
+
+**Files:** `app/referrals/types.ts`, `app/referrals/actions.ts`,
+`app/referrals/ReferralDashboard.tsx`
+
+### Referral Dashboard — Results Received Column
+
+`listReferrals()` joins `referral_documents ( id, created_at, doc_type,
+deleted_at )`. `_results_received_at` = earliest non-deleted result doc
+`created_at`. New "Results" column shows green date or `—`. Positioned between
+Appt and Ref. Created.
+
+**Files:** `app/referrals/actions.ts`, `app/referrals/ReferralDashboard.tsx`
+
+### Referral Dashboard — Ref. Created Column
+
+"Date" column renamed to "Ref. Created". Moved immediately after Status.
+Date format updated to `Mon DD, YY`. Column order: Patient → Status →
+Ref. Created → Appt → Results.
+
+**File:** `app/referrals/ReferralDashboard.tsx`
+
+### FD Reports Page — New Route
+
+New `/reports` page. FD-only access via Dashboard V2 sidebar.
+
+**Monthly Summary** — month picker (last 12 months). Table by referral type:
+Opened / Closed / Results Received. Totals row. CSV export.
+
+**Awaiting Results** — open referrals with past appointment and no result,
+sorted oldest first. Days Waiting column, red after 14 days. CSV export.
+
+**Provider Performance** — per provider: Assigned, Results Received, Result
+Rate % (color-coded), Avg Turnaround appointment→result in days (color-coded),
+N/A when no results. Unassigned shows "Unassigned". CSV export.
+
+**Open Aging** — four bucket cards (0–7 / 8–14 / 15–30 / 30+ days). Tap to
+filter table. Age column color-coded. Show all to reset. CSV export.
+
+**Files:** `app/reports/page.tsx` (new), `app/reports/ReportsClient.tsx` (new)
+
 ## 2026-07-14 — Session 41
 
 ### FD Dashboard V2 — Referrals Tab Full Rebuild

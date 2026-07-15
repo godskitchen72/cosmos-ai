@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 14, 2026, Session 41)
+# Cosmos Medical Technologies — HANDOVER (July 14, 2026, Session 42)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -13,120 +13,138 @@ self-contained.
 
 ## Current Status
 
-All `cosmos-dashboard` commits confirmed deployed and live on
-`cosmos-dashboard-nu.vercel.app`. Session 41 completed a major FD Dashboard
-V2 capability expansion — Referrals tab rebuilt to match MD view exactly,
-Documents tab rebuilt (NF-2/AOB only), Visits tab rebuilt as full billing
-workflow surface, Realtime subscriptions added, and PCE auto-generation
-added to MD visit save.
+All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed and live
+on `cosmos-dashboard-nu.vercel.app`. Session 42 completed a major capability
+expansion across four areas: FD Dashboard V2 Documents and Visits tabs
+redesigned, Referral Dashboard KPI and column improvements, and a new
+FD-only `/reports` page with four report types.
 
 ---
 
-## Completed This Session (Session 41)
+## Completed This Session (Session 42)
 
-### Item 1 — Lock Icon (Closed status) ✅ CLOSED AS NON-ISSUE
+### FD Dashboard V2 — Visits Tab: Tap-to-Expand + Document Drawer ✅ CLOSED
 
-`REFERRAL_STATUS_META` `icon` field is never rendered by any component —
-`StatusBadge` only outputs `m.label`. The 🔒 is invisible to users.
-No code change needed. Removed from open items permanently.
-
-### Item 6 — Dashboard V2 Appointments Tab Shows 0 ✅ CLOSED AS NON-ISSUE
-
-`appointments` table is empty — all test data wiped in Session 36, no real
-bookings yet. RLS correct, filter logic correct, column name correct.
-Will self-resolve when appointments are booked.
-
-### FD Dashboard V2 — Referrals Tab Full Rebuild ✅ CLOSED
-
-Replaced card-based referrals tab with full client-side fetch table matching
-`ReferralsTabV2` exactly. Per-session rows for imaging referrals, 8 columns
-(Type, Body Parts, Status, Provider, Created, Submitted, Appointment, Results),
-Results PDF button opens signed URL from `referral-documents` bucket,
-abbreviated body parts (`abbrevBp`), status filter strip (All/Open/Closed),
-"Full Dashboard →" pre-populates patient name in referral dashboard search.
+Visit rows now expand on tap (chevron indicator). Per-visit document drawer
+shows PCE, ICD-10, and referral PDFs via signed URL from `patient-forms`
+bucket. CPT code chips changed to cyan. Billed rows simplified (no expand —
+nothing to show). Document drawer subsequently removed from Visits tab per
+product decision — documents moved to Documents tab exclusively.
 
 **Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
 
-### FD Dashboard V2 — Documents Tab Simplified ✅ CLOSED
+### FD Dashboard V2 — Documents Tab Full Rebuild ✅ CLOSED
 
-Documents tab stripped to NF-2 and AOB only — signature capture, generate,
-view, regenerate, mail confirmation with receipt upload. PCE, NF-3 preflight,
-visit selector, and submit to billing moved out. Documents is now purely a
-no-fault form generation surface.
-
-**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
-
-### FD Dashboard V2 — Visits Tab Full Billing Workflow ✅ CLOSED
-
-Visits tab rebuilt as the primary FD billing workflow surface:
-- Lazy client-side fetch: `patient_visits` (with `cpt_codes`), `visit_line_items`,
-  `patient_forms` (PCE check), full patient row
-- Pending visits: date, CPT code chips, billed amount, readiness indicator
-- Red background = locked (PCE missing / NF-3 preflight not passed / AOB missing / no line items)
-- Green background = ready for billing
-- 🔒 tap → NF-3 Preflight modal for that specific visit
-- Preflight modal: 8-field checklist, PCE removed from gate (MD responsibility),
-  "Confirm Ready" writes `nf3_preflight_passed = true`
-- Custom cyan checkbox on ready visits — tap to select
-- "Submit X Visits to Billing" button appears when ready visits selected
-- Batch submit: `submitted_to_billing_at = now()` on all selected visit IDs
-- Submitted visits shown in separate "Submitted to Billing" section below
+Documents tab expanded from NF-2/AOB only to a full document hub:
+- **No-Fault Forms** — NF-2 and AOB (unchanged)
+- **MD Records** — single collapsible card; one row per visit showing PCE
+  and ICD-10 pill buttons with visit date in cyan; per-visit checkbox
+- **Referral Results** — one collapsible card per referral type (MRI, CT,
+  Pain Mgmt, etc.); per-result row with green "Result N" label, cyan
+  received date, View button, and cyan checkbox
+- **Select All** — above MD Records section, selects all MD forms + all
+  referral results
+- **Action bar** — appears when any items selected: "Download ZIP" and
+  "Email Attorney" buttons
+- Download: calls `/generate-records-zip` on cosmos-api, returns ZIP binary
+- Email: pre-fills `patients.attorney_email`, editable before send, calls
+  `/email-records` on cosmos-api via Resend
+- Both endpoints support dual-bucket routing: `patient-forms` for MD records,
+  `referral-documents` for referral results
 
 **Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
 
-### FD Dashboard V2 — Realtime Subscriptions ✅ CLOSED
+### cosmos-api — Records ZIP and Email Endpoints ✅ CLOSED
 
-`FDDashboardV2` converted from static server props to live local state.
-Supabase Realtime subscription on `patients`, `patient_visits`, `patient_forms`
-— UPDATE and INSERT events patch local arrays instantly. KPI counts recompute
-automatically. Sheet-level `selectedPatient` also patched on UPDATE so
-Timeline and Overview reflect live data without sheet close/reopen.
+Two new endpoints added to `main.py`:
+- `POST /generate-records-zip` — accepts `{ patient_id, files: [{path, bucket}] }`,
+  downloads from correct Supabase Storage bucket per file, zips in memory,
+  returns binary ZIP. Filename: `{patient_id}_{doa}_records.zip`
+- `POST /email-records` — same file list + `recipient_email` + `patient_name`,
+  builds ZIP, sends as Resend attachment. From: `records@cosmosmt.com`
 
-**DB change:** `ALTER PUBLICATION supabase_realtime ADD TABLE patients, patient_visits, patient_forms` — confirmed via `pg_publication_tables`.
+Both endpoints: JWT-verified, skip failed files rather than aborting,
+log skipped files to console.
+
+**Files:** `cosmos-api/main.py`
+
+### FD Dashboard V2 — Reports Link in Sidebar ✅ CLOSED
+
+`BarChart2` icon added to imports. Reports nav item added to `NAV_ITEMS`
+array pointing to `/reports`.
 
 **Files:** `app/dashboard-v2/FDDashboardV2.tsx`
 
-### FD Dashboard V2 — Search Bar Moved Below KPI Cards ✅ CLOSED
+### Referral Dashboard — Awaiting KPI ✅ CLOSED
 
-Search removed from sticky header (both desktop and mobile). Single search
-bar placed between KPI cards and Work Queue in the body. Always visible,
-consistent position on all screen sizes.
+New **Awaiting** KPI card (orange, `#fb923c`) added between Overdue and
+Closed/Mo. Counts sessions where appointment date has passed and no result
+uploaded — session-level count, same expansion pattern as Upcoming.
 
-**Files:** `app/dashboard-v2/FDDashboardV2.tsx`
+**Overdue redefined:** Now fires on new referrals with no appointment
+scheduled for 2+ days (FD inaction, referral-level count). Previously fired
+on past-appointment sessions — that is now Awaiting.
 
-### FD Dashboard V2 — KPI Cards Oxanium Font ✅ CLOSED
+`computeReferralDisplayStatus()` updated in `types.ts`: new `'awaiting'`
+status added to `ComputedReferralStatus` type. No-appointment path checks
+`created_at` age; 2+ days → `'overdue'`. Past pending session → `'awaiting'`
+(was `'overdue'`).
 
-`<button>` wrapper on KPI cards now has `fontFamily: oxanium.style.fontFamily`
-explicitly set — preflight gap rule, bare buttons don't inherit.
+`getReferralMetrics()` updated in `actions.ts`: fetches `created_at`, passes
+it to `computeReferralDisplayStatus()`. Overdue counts referrals; awaiting
+counts sessions.
 
-**Files:** `app/dashboard-v2/FDDashboardV2.tsx`
+`ReferralDashboard.tsx`: `COMPUTED_STATUS_META` updated with awaiting entry,
+`isAwaiting()` helper added, Awaiting metric card added, Overdue filter now
+shows unscheduled 2+ day referrals, Awaiting filter expands per-session rows,
+table row background tints orange for awaiting rows, `⏳ AWAITING` inline
+badge added.
 
-### FD Dashboard V2 — Quick Actions Updated ✅ CLOSED
+**Files:** `app/referrals/types.ts`, `app/referrals/actions.ts`,
+`app/referrals/ReferralDashboard.tsx`
 
-"Upload" and "NF-2" quick action buttons now navigate to Documents tab.
-"Documents" quick action added. "NF-2" button jumps directly to Documents tab.
+### Referral Dashboard — Results Received Column ✅ CLOSED
 
-**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+`listReferrals()` now joins `referral_documents ( id, created_at, doc_type,
+deleted_at )`. `_results_received_at` computed as earliest result-type doc
+`created_at` (deleted docs excluded). Green date shown in new "Results"
+column between Appt and Date. `—` when no result exists.
 
-### PCE Auto-Generation on Visit Save ✅ CLOSED
+**Files:** `app/referrals/actions.ts`, `app/referrals/ReferralDashboard.tsx`
 
-`VisitTab.tsx` `handleSave` now calls `generatePcePdf(visitId)` after
-`generateIcd10Pdf` on both save paths (new visit INSERT and existing visit
-UPDATE). Guard: only fires when `Object.keys(pceData).length > 0` — empty
-PCE wizard skips generation silently. Errors logged to console, never block save.
+### Referral Dashboard — Column Rename and Reorder ✅ CLOSED
 
-**Product decision:** PCE is MD-generated (MD fills wizard, auto-generates on
-save). FD verifies existence via visit row indicator. PCE removed from NF-3
-preflight check — it is a document check, not a data completeness check.
+"Date" column renamed to "Ref. Created" and moved immediately after Status.
+Date format updated to `Mon DD, YY` (consistent with Results column).
+Column order: Patient → Status → Ref. Created → Appt → Results.
 
-**Files:** `app/md/[patientId]/components/VisitTab.tsx`
+**Files:** `app/referrals/ReferralDashboard.tsx`
 
-### Role Clarification — PCE and NF-3 ✅ RESOLVED
+### FD Reports Page ✅ CLOSED
 
-- **NF-3** — generated by Biller dashboard. FD runs preflight check only.
-- **PCE** — generated automatically on MD visit save (this session). FD verifies existence.
-- **NF-2, AOB** — FD-generated (Documents tab).
-- **Referral PDFs** — MD-discretionary, Save→View pattern, unchanged.
+New route `/reports` — FD-only, linked from Dashboard V2 sidebar.
+Server component `page.tsx` fetches all referrals with appointments,
+documents, type, and provider. Client component `ReportsClient.tsx` renders
+four tabs:
+
+**Monthly Summary** — month picker (last 12 months), table by referral type:
+Opened (by `created_at`), Closed (by `updated_at` when `status=closed`),
+Results Received (by first result doc date). Totals row. CSV export.
+
+**Awaiting Results** — open referrals where appointment passed and no result
+uploaded; sorted oldest appointment first. Days Waiting column turns red
+after 14 days. CSV export.
+
+**Provider Performance** — per provider: Assigned count, Results Received,
+Result Rate % (green ≥80%, yellow ≥50%, red <50%), Avg Turnaround from
+appointment to result received in days (green ≤7d, yellow ≤14d, red >14d,
+N/A when no results). Unassigned referrals show "Unassigned". CSV export.
+
+**Open Aging** — four bucket cards (0–7 / 8–14 / 15–30 / 30+ days), color-
+coded green → yellow → orange → red. Tapping a card filters the table.
+Age column color-coded per bucket. "Show all" resets. CSV export.
+
+**Files:** `app/reports/page.tsx` (new), `app/reports/ReportsClient.tsx` (new)
 
 ---
 
@@ -175,26 +193,34 @@ preflight check — it is a document check, not a data completeness check.
     non-empty `pce_data`. A more robust guard would require minimum fields
     (accident type + at least one complaint). Product decision needed.
 
+15. **Provider Performance avg turnaround — always N/A.** Turnaround
+    calculation finds appointment date but result may be zero or negative
+    when appointments are marked cancelled. Needs investigation against
+    real closed referral data.
+
 ---
 
 ## DB Schema Changes This Session
 
-No new migrations. One publication change:
-- `supabase_realtime` publication now includes `patients`, `patient_visits`,
-  `patient_forms` — added via `ALTER PUBLICATION supabase_realtime ADD TABLE`.
+No new migrations. No publication changes.
 
 ---
 
 ## File Confidence
 
-All files below were modified this session and confirmed on disk as of
-last deploy:
+All files below were modified or created this session and confirmed on disk
+as of last deploy:
 
 | File | Changes |
 |---|---|
-| `app/dashboard-v2/FDDashboardV2.tsx` | Local state for patients/visits, Realtime subscription, search moved below KPIs, KPI card Oxanium font |
-| `app/dashboard-v2/components/FDPatientSheet.tsx` | Full rebuild — Referrals tab (client fetch, ReferralsTabV2-style table), Visits tab (billing workflow, preflight modal, checkbox selection, submit to billing), Documents tab (NF-2/AOB only), custom cyan checkbox, quick actions updated |
-| `app/md/[patientId]/components/VisitTab.tsx` | `generatePcePdf()` function added, called from `handleSave` on both save paths |
+| `app/dashboard-v2/FDDashboardV2.tsx` | BarChart2 import, Reports nav item added |
+| `app/dashboard-v2/components/FDPatientSheet.tsx` | Visits tab simplified (no doc drawer), Documents tab full rebuild (MD Records + Referral Results collapsible cards, checkboxes, Select All, Download ZIP, Email Attorney) |
+| `app/referrals/types.ts` | `'awaiting'` added to `ComputedReferralStatus`; `computeReferralDisplayStatus()` split overdue/awaiting logic, accepts `created_at` |
+| `app/referrals/actions.ts` | `getReferralMetrics()` fetches `created_at`, counts overdue/awaiting separately; `listReferrals()` joins `referral_documents`, computes `_results_received_at` |
+| `app/referrals/ReferralDashboard.tsx` | Awaiting KPI card, COMPUTED_STATUS_META updated, Results column, Ref. Created column renamed/reordered, awaiting filter, row tints, inline badge |
+| `app/reports/page.tsx` | New file — server component, fetches referral data |
+| `app/reports/ReportsClient.tsx` | New file — four-tab reports client component |
+| `cosmos-api/main.py` | `/generate-records-zip` and `/email-records` endpoints added |
 
 ---
 
@@ -216,19 +242,18 @@ last deploy:
 - Realtime subscription covers `patients`, `patient_visits`, `patient_forms` only — `referrals` and `appointments` not yet subscribed.
 - PCE auto-generation guard fires on any non-empty `pce_data` — minimum field threshold not enforced.
 - `hasPceLocal` variable remains in `PreflightModal` but is no longer used in `allOk` — dead variable, harmless, clean up next touch.
+- Provider Performance avg turnaround shows N/A for all providers — turnaround calculation may not be finding valid appointment/result pairs on closed referrals; needs investigation with real data.
+- `/generate-records-zip` and `/email-records` use `records@cosmosmt.com` as sender — verify this address is configured in Resend before testing email flow end-to-end.
 
 ---
 
 ## Technical Lessons This Session
 
-- `REFERRAL_STATUS_META` `icon` field is defined in `types.ts` but never rendered by any consuming component — always verify actual usage before patching UI-adjacent constants.
-- `appointments` table being empty is indistinguishable from a filter bug — always check DB row count before debugging filter logic.
-- Bash history expansion (`!f.ok`) breaks inline Python `-c` strings on Termux — always use a script file for any string containing `!`.
-- `outline` CSS on native checkboxes does not reliably render on Android Chrome — use a custom div-based checkbox instead.
-- `React.useState` inside a non-component function (e.g. inside `PreflightModal` which is a component but was being treated as a utility) requires the default React import — `import React from 'react'` — not just named imports.
-- Supabase Realtime requires tables to be added to `supabase_realtime` publication via `ALTER PUBLICATION` — not enabled by default per table.
-- `pce_data: {}` (empty object) means MD saved visit without filling PCE wizard — PCE auto-generation correctly skips. FD sees "PCE missing" on visit row.
-- `/generate-pce` API call body is `{ patient_id, visit_id }` — no additional fields required, backend reads `pce_data` from DB directly.
+- TypeScript `Record<string, string>` state must be updated to `Record<string, { path: string; bucket: string }>` when storing structured objects — TS2322 caught at compile time, not runtime.
+- Chrome on Android does not overwrite same-named downloads — always check `ls -lt` before `cp` when re-downloading a file with the same name (SYSTEM_PROMPT.md §3 standing rule, reinforced).
+- Next.js route files must be named exactly `page.tsx` — `reports-page.tsx` does not register as a route; always use the deploy command pattern `cp downloads/X.tsx app/route/page.tsx` not `cp ... page.tsx` blindly.
+- `computeReferralDisplayStatus()` splitting overdue (FD inaction) from awaiting (provider inaction) required passing `created_at` to the function — always thread new fields through the full call chain (type signature → caller → consumer).
+- Supabase PostgREST nested select on `referral_documents` returns an array even when no results — always guard with `Array.isArray()` before filtering.
 
 ---
 
@@ -257,6 +282,10 @@ last deploy:
 - [x] Referral dashboard MRI/MRA/CT per-appointment expansion (Session 39)
 - [x] MD referrals table — per-session expansion, sort, body parts column (Session 39)
 - [x] Referral dashboard patient pre-filter via ?patient= (Session 40)
+- [x] Awaiting KPI — past appointment, no result (Session 42)
+- [x] Overdue KPI — redefined as unscheduled 2+ days (Session 42)
+- [x] Results Received column in referral dashboard (Session 42)
+- [x] Ref. Created column renamed and reordered (Session 42)
 - [ ] DME and RX codes from patient_visits
 - [ ] Psych referral type (new build)
 - [ ] ReferralSheet header badge — raw DB status (cosmetic)
@@ -278,9 +307,21 @@ last deploy:
 - [x] Realtime subscriptions — patients, patient_visits, patient_forms (Session 41)
 - [x] Search bar moved below KPI cards (Session 41)
 - [x] KPI cards Oxanium font (Session 41)
+- [x] Documents tab — MD Records + Referral Results collapsible cards (Session 42)
+- [x] Documents tab — Select All, Download ZIP, Email Attorney (Session 42)
+- [x] Visits tab — CPT chips cyan, simplified (Session 42)
+- [x] Reports link in sidebar (Session 42)
 - [ ] Notes tab persistence — patient_notes table
 - [ ] Stub KPIs — Patients Waiting, Insurance Verification, Tasks Due Today
 - [ ] Realtime — referrals and appointments tables
+
+### Stage 3b — FD Reports
+- [x] /reports page — server component + client component (Session 42)
+- [x] Monthly Summary tab — by type: opened/closed/results (Session 42)
+- [x] Awaiting Results tab — oldest first, days waiting (Session 42)
+- [x] Provider Performance tab — assigned/results/rate/turnaround (Session 42)
+- [x] Open Aging tab — 4 bucket cards, filterable table (Session 42)
+- [ ] Provider Performance turnaround — investigate N/A issue with real data
 
 ### Stage 4 — Billing
 - [ ] Billing packet generation improvements
