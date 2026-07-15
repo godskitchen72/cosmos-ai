@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 14, 2026, Session 42)
+# Cosmos Medical Technologies — HANDOVER (July 15, 2026, Session 43)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -14,137 +14,192 @@ self-contained.
 ## Current Status
 
 All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed and live
-on `cosmos-dashboard-nu.vercel.app`. Session 42 completed a major capability
-expansion across four areas: FD Dashboard V2 Documents and Visits tabs
-redesigned, Referral Dashboard KPI and column improvements, and a new
-FD-only `/reports` page with four report types.
+on `cosmos-dashboard-nu.vercel.app`. Session 43 completed a major UI/UX
+expansion: new patient intake form wizard, FD sheet overview restructure,
+INTAKE PDF auto-generation, shared DashboardNav hamburger across all
+dashboards, and Valar Morghulis (Ghost Mode) full JWT superadmin
+impersonation system.
 
 ---
 
-## Completed This Session (Session 42)
+## Completed This Session (Session 43)
 
-### FD Dashboard V2 — Visits Tab: Tap-to-Expand + Document Drawer ✅ CLOSED
+### Email Notifications — Fixes and Enhancements ✅ CLOSED
 
-Visit rows now expand on tap (chevron indicator). Per-visit document drawer
-shows PCE, ICD-10, and referral PDFs via signed URL from `patient-forms`
-bucket. CPT code chips changed to cyan. Billed rows simplified (no expand —
-nothing to show). Document drawer subsequently removed from Visits tab per
-product decision — documents moved to Documents tab exclusively.
+Provider-assigned email removed entirely (was Item 1 equivalent — provider
+no longer notified on assignment, only on session schedule). Session emails
+(patient confirmation + provider session) fixed:
+- Font changed from Oxanium (web font, not supported in email clients) to
+  Arial — eliminates Outlook font blowup
+- Layout changed from `display:flex;justify-content:space-between` to
+  single-row `Label: Value` format — no wrapping on mobile
+- AM/PM conversion: `HH:MM` → `h:MM AM/PM` via `fmt12h()` helper
+- ICD-10 codes and Referral Type added to provider session email
+- `referral_submitted_at` still set on provider assignment (unchanged)
 
-**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+**Files:** `app/referrals/actions.ts`
 
-### FD Dashboard V2 — Documents Tab Full Rebuild ✅ CLOSED
+### FD Patient Sheet — Overview Tab Restructure ✅ CLOSED
 
-Documents tab expanded from NF-2/AOB only to a full document hub:
-- **No-Fault Forms** — NF-2 and AOB (unchanged)
-- **MD Records** — single collapsible card; one row per visit showing PCE
-  and ICD-10 pill buttons with visit date in cyan; per-visit checkbox
-- **Referral Results** — one collapsible card per referral type (MRI, CT,
-  Pain Mgmt, etc.); per-result row with green "Result N" label, cyan
-  received date, View button, and cyan checkbox
-- **Select All** — above MD Records section, selects all MD forms + all
-  referral results
-- **Action bar** — appears when any items selected: "Download ZIP" and
-  "Email Attorney" buttons
-- Download: calls `/generate-records-zip` on cosmos-api, returns ZIP binary
-- Email: pre-fills `patients.attorney_email`, editable before send, calls
-  `/email-records` on cosmos-api via Resend
-- Both endpoints support dual-bucket routing: `patient-forms` for MD records,
-  `referral-documents` for referral results
+Overview tab sections redesigned to match new information architecture:
+- **Demographics** — Full Name, DOB, Phone, Email, Patient ID
+- **Accident** — Date of Accident (cyan accent), Type of Accident
+  (`accident_description` column)
+- **Insurance** — Insurance Co, Policy (`policy_num`), Claim, Provider
+- **Document Status** — unchanged
 
-**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+Section headers → bright green `#19a866`. Field labels → cyan `#00cfff`.
+`accident_description` and `policy_num` added to `Patient` interface in
+both `FDPatientSheet.tsx` and `FDDashboardV2.tsx`. Both columns added to
+patients select in `app/dashboard-v2/page.tsx`.
 
-### cosmos-api — Records ZIP and Email Endpoints ✅ CLOSED
+Insurance tab in FD sheet updated to match: Insurance Co → Policy → Claim
+→ Date of Loss → Provider. Stale "extended fields coming soon" placeholder
+removed.
 
-Two new endpoints added to `main.py`:
-- `POST /generate-records-zip` — accepts `{ patient_id, files: [{path, bucket}] }`,
-  downloads from correct Supabase Storage bucket per file, zips in memory,
-  returns binary ZIP. Filename: `{patient_id}_{doa}_records.zip`
-- `POST /email-records` — same file list + `recipient_email` + `patient_name`,
-  builds ZIP, sends as Resend attachment. From: `records@cosmosmt.com`
+**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`,
+`app/dashboard-v2/FDDashboardV2.tsx`, `app/dashboard-v2/page.tsx`
 
-Both endpoints: JWT-verified, skip failed files rather than aborting,
-log skipped files to console.
+### FD Patient Sheet — Edit Patient Button ✅ CLOSED
 
-**Files:** `cosmos-api/main.py`
+Quick action button added to FD sheet action bar: **Edit** (purple `#a78bfa`,
+User icon) links to `/patients/${patient_id}/edit`. Edit route
+(`EditPatientForm.tsx`) now imports `PatientFormV2` instead of legacy
+`PatientForm`.
 
-### FD Dashboard V2 — Reports Link in Sidebar ✅ CLOSED
+**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`,
+`app/patients/[patientId]/edit/EditPatientForm.tsx`
 
-`BarChart2` icon added to imports. Reports nav item added to `NAV_ITEMS`
-array pointing to `/reports`.
+### PatientFormV2 — Tabbed Intake Wizard ✅ CLOSED
 
-**Files:** `app/dashboard-v2/FDDashboardV2.tsx`
+New `app/components/PatientFormV2.tsx` — full patient intake/edit form
+styled to match FD Dashboard V2. Replaces `PatientForm.tsx` for new patient
+and edit flows. Key design decisions:
+- 5-tab wizard: Personal → Accident → Insurance → Attorney → Signature
+- Tab bar identical to FD Patient Sheet tabs (cyan active underline, green
+  completion dot, Oxanium font)
+- Thin cyan progress bar under tab bar
+- Per-tab validation: Personal requires name/DOB, Accident requires DOI,
+  Signature requires sig before save
+- Next button shows next tab name; Save only on final tab (green/amber per
+  completeness)
+- Attorney tab optional notice — can skip if not yet assigned
+- After save → redirects to `/dashboard-v2`
+- Auto-generates INTAKE PDF on new patient save (fire-and-forget)
+- All save/insert/update logic identical to `PatientForm.tsx`
+- `app/patients/new/page.tsx` updated to use `PatientFormV2`
 
-### Referral Dashboard — Awaiting KPI ✅ CLOSED
+**Files:** `app/components/PatientFormV2.tsx`,
+`app/patients/new/page.tsx`
 
-New **Awaiting** KPI card (orange, `#fb923c`) added between Overdue and
-Closed/Mo. Counts sessions where appointment date has passed and no result
-uploaded — session-level count, same expansion pattern as Upcoming.
+### INTAKE PDF Auto-Generation (CMT-INTAKE-001) ✅ CLOSED
 
-**Overdue redefined:** Now fires on new referrals with no appointment
-scheduled for 2+ days (FD inaction, referral-level count). Previously fired
-on past-appointment sessions — that is now Awaiting.
+Patient Intake Form PDF (CMT-INTAKE-001 v1.4) auto-fills on patient save
+and can be regenerated from the Documents tab.
 
-`computeReferralDisplayStatus()` updated in `types.ts`: new `'awaiting'`
-status added to `ComputedReferralStatus` type. No-appointment path checks
-`created_at` age; 2+ days → `'overdue'`. Past pending session → `'awaiting'`
-(was `'overdue'`).
+- 38 fillable AcroForm fields — filled via `pypdf` (no annotation overlay)
+- Field mapping: all patient demographics, contact, accident type checkboxes,
+  insurance, attorney, treating provider, intake date
+- Accident type: `accident_description` text mapped to Motor Vehicle / Work
+  Related / Slip & Fall / Other checkboxes via keyword detection
+- New endpoint: `POST /generate/intake` in `cosmos-api/main.py`
+- New generator: `cosmos-api/generate_intake.py`
+- Template: `cosmos-api/PATIENT_INTAKE.pdf` (bundled in repo)
+- New column: `patients.intake_url text` (migration applied manually via
+  Supabase SQL editor)
+- Documents tab: **Intake Form** card (purple `#a78bfa`) added above NF-2
+  with View and Regen buttons
+- `patient_forms` table: upsert row on each generation (delete old, insert
+  new with `form_type: 'INTAKE'`)
 
-`getReferralMetrics()` updated in `actions.ts`: fetches `created_at`, passes
-it to `computeReferralDisplayStatus()`. Overdue counts referrals; awaiting
-counts sessions.
+**Files:** `cosmos-api/main.py`, `cosmos-api/generate_intake.py`,
+`cosmos-api/PATIENT_INTAKE.pdf`,
+`app/dashboard-v2/components/FDPatientSheet.tsx`,
+`app/components/PatientFormV2.tsx`
 
-`ReferralDashboard.tsx`: `COMPUTED_STATUS_META` updated with awaiting entry,
-`isAwaiting()` helper added, Awaiting metric card added, Overdue filter now
-shows unscheduled 2+ day referrals, Awaiting filter expands per-session rows,
-table row background tints orange for awaiting rows, `⏳ AWAITING` inline
-badge added.
+### DashboardNav — Shared Hamburger Switcher ✅ CLOSED
 
-**Files:** `app/referrals/types.ts`, `app/referrals/actions.ts`,
-`app/referrals/ReferralDashboard.tsx`
+New shared component `app/components/DashboardNav.tsx` — hamburger button
++ slide-out drawer deployed on all dashboards.
 
-### Referral Dashboard — Results Received Column ✅ CLOSED
+Drawer contains:
+- Currently Viewing (highlighted card with role color)
+- Switch Dashboard: Front Desk / MD / Clinical / Referrals / Billing /
+  Reports / Admin (with icons and subtitles)
+- Quick Links: Patients, Calendar
+- User email + Sign Out button
 
-`listReferrals()` now joins `referral_documents ( id, created_at, doc_type,
-deleted_at )`. `_results_received_at` computed as earliest result-type doc
-`created_at` (deleted docs excluded). Green date shown in new "Results"
-column between Appt and Date. `—` when no result exists.
+Wired to: FD Dashboard V2, MD (MDClient), Billing (BillerDashboard),
+Referrals (ReferralDashboard), Reports (ReportsClient), Admin (admin/page.tsx).
 
-**Files:** `app/referrals/actions.ts`, `app/referrals/ReferralDashboard.tsx`
+**backdrop-blur removed** from MD and Billing sticky headers — was creating
+CSS stacking context that prevented the drawer from rendering above page
+content on Android Chrome. Replaced with solid opaque backgrounds.
 
-### Referral Dashboard — Column Rename and Reorder ✅ CLOSED
+Admin sidebar converted from flex push-layout to fixed overlay — content
+now always takes full screen width; sidebar slides over on top with dark
+backdrop. Tapping a nav item auto-closes the sidebar.
 
-"Date" column renamed to "Ref. Created" and moved immediately after Status.
-Date format updated to `Mon DD, YY` (consistent with Results column).
-Column order: Patient → Status → Ref. Created → Appt → Results.
+**Iron coin** (`/public/iron-coin.jpg`) used as profile image:
+- Superadmin badge on login page
+- FD header role badge replaces "FD" text circle
 
-**Files:** `app/referrals/ReferralDashboard.tsx`
+**Files:** `app/components/DashboardNav.tsx`, `app/dashboard-v2/FDDashboardV2.tsx`,
+`app/md/MDClient.tsx`, `app/billing/BillerDashboard.tsx`,
+`app/referrals/ReferralDashboard.tsx`, `app/reports/ReportsClient.tsx`,
+`app/admin/page.tsx`, `public/iron-coin.jpg`
 
-### FD Reports Page ✅ CLOSED
+### Valar Morghulis — Superadmin Ghost Mode ✅ CLOSED
 
-New route `/reports` — FD-only, linked from Dashboard V2 sidebar.
-Server component `page.tsx` fetches all referrals with appointments,
-documents, type, and provider. Client component `ReportsClient.tsx` renders
-four tabs:
+Full JWT impersonation system for superadmin. Complete implementation:
 
-**Monthly Summary** — month picker (last 12 months), table by referral type:
-Opened (by `created_at`), Closed (by `updated_at` when `status=closed`),
-Results Received (by first result doc date). Totals row. CSV export.
+**Backend (`cosmos-api/main.py`):**
+- `GET /impersonate/users` — fetches all auth users via Supabase Admin API,
+  joins `user_profiles` by UUID to get role/name, excludes superadmin.
+  Returns `{ users: [{id, email, full_name, role, active}] }`
+- `POST /impersonate` — verifies caller is superadmin, finds target in
+  `auth.users` by email, calls Supabase Admin API
+  `POST /auth/v1/admin/generate_link` with `type: magiclink` + target email.
+  Returns `{ token_hash, type, target_email, target_role, target_id }`.
+  Logs to `audit_logs` with superadmin ID + target info.
+- Both endpoints: JWT-verified, superadmin-gated
 
-**Awaiting Results** — open referrals where appointment passed and no result
-uploaded; sorted oldest appointment first. Days Waiting column turns red
-after 14 days. CSV export.
+**Frontend (`app/page.tsx`):**
+- Superadmin dashboard picker gains second tab: **Valar Morghulis**
+  (anonymous mask icon + iron coin)
+- Ghost tab loads user list via `/impersonate/users`
+- Tapping **Enter** calls `/impersonate`, gets `token_hash`, calls
+  `supabase.auth.verifyOtp({ token_hash, type: 'magiclink' })` — full JWT
+  swap, real session as target user
+- Sets `sessionStorage`: `cosmos_ghost_origin = 'superadmin'`,
+  `cosmos_ghost_role = '{role} ({email})'`
+- MD/PA/NP users: skips location picker, navigates directly to
+  `/md?doctor_id=...`
+- All other roles: `window.location.href = meta.path`
 
-**Provider Performance** — per provider: Assigned count, Results Received,
-Result Rate % (green ≥80%, yellow ≥50%, red <50%), Avg Turnaround from
-appointment to result received in days (green ≤7d, yellow ≤14d, red >14d,
-N/A when no results). Unassigned referrals show "Unassigned". CSV export.
+**Ghost banner (`DashboardNav.tsx`):**
+- Reads `cosmos_ghost_origin` on mount
+- If set: renders fixed amber banner at top of every page (z-index 99999):
+  iron coin + "Valar Morghulis — {role} ({email})" + Exit ✕ button
+- Exit: clears ghost flags, signs out, redirects to `/`
 
-**Open Aging** — four bucket cards (0–7 / 8–14 / 15–30 / 30+ days), color-
-coded green → yellow → orange → red. Tapping a card filters the table.
-Age column color-coded per bucket. "Show all" resets. CSV export.
+**Superadmin picker:**
+- FD Dashboard V2 removed as separate card (Front Desk now points to
+  `/dashboard-v2` directly)
+- Dashboard grid: Front Desk / MD / Billing / Admin (4 cards)
+- Anonymous mask image (`/public/ghost-mask.jpg`) on Valar Morghulis tab
+- Iron coin on Enter buttons and loading indicator
 
-**Files:** `app/reports/page.tsx` (new), `app/reports/ReportsClient.tsx` (new)
+**Files:** `cosmos-api/main.py`, `app/page.tsx`,
+`app/components/DashboardNav.tsx`, `public/ghost-mask.jpg`,
+`public/iron-coin.jpg`
+
+### Provider Performance Turnaround N/A Bug ✅ CLOSED
+
+Item 15 resolved this session. Turnaround calculation now correctly finds
+valid appointment/result pairs on closed referrals.
+
+**Files:** `app/reports/ReportsClient.tsx`
 
 ---
 
@@ -153,8 +208,9 @@ Age column color-coded per bucket. "Show all" resets. CSV export.
 1. **DEV artifacts removal.** Remove DEV fill-all PCE button from
    `VisitTab.tsx` and Dev Tools card from Admin panel before go-live.
 
-2. **Patient email required at intake.** `PatientForm.tsx` `email` field
+2. **Patient email required at intake.** `PatientFormV2.tsx` email field
    must be made required. Patient confirmation emails dead until fixed.
+   (`PatientForm.tsx` legacy form also still has this gap.)
 
 3. **Render memory limit — cosmos-api.** Render Starter (512MB) crashes
    during PDF generation under load. Pre-go-live blocker. Upgrade to
@@ -193,34 +249,41 @@ Age column color-coded per bucket. "Show all" resets. CSV export.
     non-empty `pce_data`. A more robust guard would require minimum fields
     (accident type + at least one complaint). Product decision needed.
 
-15. **Provider Performance avg turnaround — always N/A.** Turnaround
-    calculation finds appointment date but result may be zero or negative
-    when appointments are marked cancelled. Needs investigation against
-    real closed referral data.
-
 ---
 
 ## DB Schema Changes This Session
 
-No new migrations. No publication changes.
+- `patients.intake_url TEXT` — added manually via Supabase SQL editor
+  (`ALTER TABLE patients ADD COLUMN IF NOT EXISTS intake_url text`)
+- No new migrations. No publication changes.
 
 ---
 
 ## File Confidence
 
-All files below were modified or created this session and confirmed on disk
-as of last deploy:
+All files below were modified or created this session and confirmed deployed:
 
 | File | Changes |
 |---|---|
-| `app/dashboard-v2/FDDashboardV2.tsx` | BarChart2 import, Reports nav item added |
-| `app/dashboard-v2/components/FDPatientSheet.tsx` | Visits tab simplified (no doc drawer), Documents tab full rebuild (MD Records + Referral Results collapsible cards, checkboxes, Select All, Download ZIP, Email Attorney) |
-| `app/referrals/types.ts` | `'awaiting'` added to `ComputedReferralStatus`; `computeReferralDisplayStatus()` split overdue/awaiting logic, accepts `created_at` |
-| `app/referrals/actions.ts` | `getReferralMetrics()` fetches `created_at`, counts overdue/awaiting separately; `listReferrals()` joins `referral_documents`, computes `_results_received_at` |
-| `app/referrals/ReferralDashboard.tsx` | Awaiting KPI card, COMPUTED_STATUS_META updated, Results column, Ref. Created column renamed/reordered, awaiting filter, row tints, inline badge |
-| `app/reports/page.tsx` | New file — server component, fetches referral data |
-| `app/reports/ReportsClient.tsx` | New file — four-tab reports client component |
-| `cosmos-api/main.py` | `/generate-records-zip` and `/email-records` endpoints added |
+| `app/referrals/actions.ts` | Provider-assigned email removed; session emails fixed (Arial font, AM/PM, single-row layout, ICD-10 + type added) |
+| `app/dashboard-v2/page.tsx` | `policy_num`, `accident_description` added to patients select |
+| `app/dashboard-v2/FDDashboardV2.tsx` | `policy_num`, `accident_description` added to Patient interface; Edit button added; iron coin profile image; DashboardNav wired; old sidebar removed |
+| `app/dashboard-v2/components/FDPatientSheet.tsx` | Overview restructured (Demographics/Accident/Insurance); Insurance tab updated; Edit quick action; Intake Form card; `intake_url` + `accident_description` + `policy_num` in FullPatient interface; handleGenerate/handleRegenerate support `intake_url` |
+| `app/components/PatientFormV2.tsx` | New file — 5-tab intake/edit wizard, FD dark theme, auto-generates INTAKE on save |
+| `app/components/DashboardNav.tsx` | New file — shared hamburger drawer with dashboard switcher, ghost mode banner |
+| `app/patients/new/page.tsx` | Uses `PatientFormV2` |
+| `app/patients/[patientId]/edit/EditPatientForm.tsx` | Uses `PatientFormV2` |
+| `app/md/MDClient.tsx` | DashboardNav wired; backdrop-blur removed; Sign Out moved to drawer |
+| `app/billing/BillerDashboard.tsx` | DashboardNav wired; backdrop-blur removed; Sign Out moved to drawer |
+| `app/referrals/ReferralDashboard.tsx` | DashboardNav wired |
+| `app/reports/ReportsClient.tsx` | DashboardNav wired; Provider Performance turnaround N/A fixed |
+| `app/admin/page.tsx` | DashboardNav wired; solid header bg; sidebar converted to fixed overlay |
+| `app/page.tsx` | Superadmin picker: Valar Morghulis tab, ghost mode impersonation flow, iron coin, FD Dashboard V2 card removed, 4-card grid |
+| `cosmos-api/main.py` | `/generate/intake`, `/generate-records-zip`, `/impersonate`, `/impersonate/users` endpoints |
+| `cosmos-api/generate_intake.py` | New file — CMT-INTAKE-001 PDF fill logic, 38 AcroForm fields |
+| `cosmos-api/PATIENT_INTAKE.pdf` | New file — intake form template bundled in repo |
+| `public/ghost-mask.jpg` | New file — anonymous mask logo for Valar Morghulis tab |
+| `public/iron-coin.jpg` | New file — iron coin (GoT) for superadmin profile and ghost UI |
 
 ---
 
@@ -242,18 +305,22 @@ as of last deploy:
 - Realtime subscription covers `patients`, `patient_visits`, `patient_forms` only — `referrals` and `appointments` not yet subscribed.
 - PCE auto-generation guard fires on any non-empty `pce_data` — minimum field threshold not enforced.
 - `hasPceLocal` variable remains in `PreflightModal` but is no longer used in `allOk` — dead variable, harmless, clean up next touch.
-- Provider Performance avg turnaround shows N/A for all providers — turnaround calculation may not be finding valid appointment/result pairs on closed referrals; needs investigation with real data.
 - `/generate-records-zip` and `/email-records` use `records@cosmosmt.com` as sender — verify this address is configured in Resend before testing email flow end-to-end.
+- `user_profiles` table has no `email` column — email lives only in `auth.users`. Any query joining user identity to email must go through the Supabase Admin API (service role), not the public client.
+- Ghost mode (`/impersonate`) uses Supabase Admin API `generate_link` which generates a one-time magic link. Token is single-use — a second Enter tap on same user requires a new API call.
+- `PatientForm.tsx` (legacy) still exists and is used nowhere after Session 43 edit wiring — candidate for removal next session.
 
 ---
 
 ## Technical Lessons This Session
 
-- TypeScript `Record<string, string>` state must be updated to `Record<string, { path: string; bucket: string }>` when storing structured objects — TS2322 caught at compile time, not runtime.
-- Chrome on Android does not overwrite same-named downloads — always check `ls -lt` before `cp` when re-downloading a file with the same name (SYSTEM_PROMPT.md §3 standing rule, reinforced).
-- Next.js route files must be named exactly `page.tsx` — `reports-page.tsx` does not register as a route; always use the deploy command pattern `cp downloads/X.tsx app/route/page.tsx` not `cp ... page.tsx` blindly.
-- `computeReferralDisplayStatus()` splitting overdue (FD inaction) from awaiting (provider inaction) required passing `created_at` to the function — always thread new fields through the full call chain (type signature → caller → consumer).
-- Supabase PostgREST nested select on `referral_documents` returns an array even when no results — always guard with `Array.isArray()` before filtering.
+- `backdrop-blur` on sticky headers creates a CSS compositor layer on Android Chrome that ignores `z-index` from outside its stacking context. Fixed overlays (drawers, modals) cannot render above it regardless of z-index value. Remove `backdrop-blur` and use solid opaque backgrounds instead.
+- Supabase `generate_link` correct endpoint is `POST /auth/v1/admin/generate_link` with `{ type: 'magiclink', email }` in body — NOT `POST /auth/v1/admin/users/{id}/generate_link`. The user-specific path returns 404.
+- `user_profiles` has no `email` column — always use `auth.users` via Admin API for email lookups. Never assume profile tables mirror auth fields.
+- Ghost mode for MD users must bypass `handlePostLogin` entirely — that function triggers location picker stage which hangs when called post-impersonation. Use `window.location.href` directly after `verifyOtp` for all ghost navigation.
+- `pypdf` fills AcroForm checkboxes with `/Yes` (on) and `/Off` (off) — confirm via `field.get('/_States_')` before writing. `auto_regenerate=False` required or Acrobat re-renders and drops values.
+- TypeScript `Record<string, string>` state must be updated to `Record<string, { path: string; bucket: string }>` when storing structured objects — TS2322 caught at compile time (Session 42 lesson reinforced).
+- Chrome on Android does not overwrite same-named downloads — always check `ls -lt` before `cp` when re-downloading.
 
 ---
 
@@ -272,7 +339,7 @@ as of last deploy:
 - [x] Auto-close on result upload — all types (Session 38)
 - [x] NEW RESULTS badge — MD patient chart (Session 38)
 - [x] results_viewed_at dismissal (Session 38)
-- [x] referral_submitted_at — set on provider email (Session 38)
+- [x] referral_submitted_at — set on provider assign (Session 38)
 - [x] MD all-referrals summary table (Session 38)
 - [x] MRI/MRA/CT incomplete parts warning (Session 38)
 - [x] Done/Awaiting/Review workflow removed (Session 39)
@@ -286,10 +353,11 @@ as of last deploy:
 - [x] Overdue KPI — redefined as unscheduled 2+ days (Session 42)
 - [x] Results Received column in referral dashboard (Session 42)
 - [x] Ref. Created column renamed and reordered (Session 42)
+- [x] Provider Performance turnaround N/A fixed (Session 43)
 - [ ] DME and RX codes from patient_visits
 - [ ] Psych referral type (new build)
 - [ ] ReferralSheet header badge — raw DB status (cosmetic)
-- [ ] Patient email required at intake — PatientForm.tsx
+- [ ] Patient email required at intake — PatientFormV2.tsx
 - [ ] DEV artifacts removal — VisitTab.tsx PCE button + Admin Dev Tools card
 - [ ] Add FK: referral_timeline.actor_user_id → user_profiles.id
 - [ ] Cleanup abandoned route folders (ref/, referral/)
@@ -311,9 +379,15 @@ as of last deploy:
 - [x] Documents tab — Select All, Download ZIP, Email Attorney (Session 42)
 - [x] Visits tab — CPT chips cyan, simplified (Session 42)
 - [x] Reports link in sidebar (Session 42)
+- [x] Overview tab — Demographics/Accident/Insurance restructure (Session 43)
+- [x] Insurance tab — matches overview structure, policy_num (Session 43)
+- [x] Edit Patient quick action button (Session 43)
+- [x] Intake Form card in Documents tab (Session 43)
+- [x] DashboardNav shared hamburger (Session 43)
 - [ ] Notes tab persistence — patient_notes table
 - [ ] Stub KPIs — Patients Waiting, Insurance Verification, Tasks Due Today
 - [ ] Realtime — referrals and appointments tables
+- [ ] Remove legacy PatientForm.tsx
 
 ### Stage 3b — FD Reports
 - [x] /reports page — server component + client component (Session 42)
@@ -321,7 +395,24 @@ as of last deploy:
 - [x] Awaiting Results tab — oldest first, days waiting (Session 42)
 - [x] Provider Performance tab — assigned/results/rate/turnaround (Session 42)
 - [x] Open Aging tab — 4 bucket cards, filterable table (Session 42)
-- [ ] Provider Performance turnaround — investigate N/A issue with real data
+- [x] Provider Performance turnaround N/A fixed (Session 43)
+
+### Stage 3c — Patient Intake
+- [x] PatientFormV2 — 5-tab wizard, FD dark theme (Session 43)
+- [x] INTAKE PDF auto-generation on save (Session 43)
+- [x] INTAKE Regen button in Documents tab (Session 43)
+- [x] Edit patient wired to PatientFormV2 (Session 43)
+- [ ] Patient email required in PatientFormV2
+- [ ] intake_url added to migration file (currently manual SQL only)
+
+### Stage 3d — Superadmin & Ghost Mode
+- [x] DashboardNav on all dashboards (Session 43)
+- [x] Valar Morghulis — full JWT impersonation (Session 43)
+- [x] Audit log on impersonation (Session 43)
+- [x] Ghost banner on all pages (Session 43)
+- [x] Iron coin + anonymous mask branding (Session 43)
+- [ ] Ghost mode for PA/NP users — location selection currently skipped
+- [ ] Impersonation session timeout (ghost sessions have timeout=0)
 
 ### Stage 4 — Billing
 - [ ] Billing packet generation improvements
