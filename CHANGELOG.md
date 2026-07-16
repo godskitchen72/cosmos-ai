@@ -1,3 +1,128 @@
+## 2026-07-15 — Session 44
+
+### Navigation — Back Button Audit and Full Fix
+
+Full audit of back-button behavior across all pages. Two root causes
+identified and fixed:
+
+- `PatientFormV2.tsx` — header ← Back button and tab-0 Cancel button
+  changed from `router.back()` to `router.push('/dashboard-v2')`. Eliminates
+  accidental logout when browser history reached root `/`.
+- `FDDashboardV2.tsx` — patient sheet now uses URL hash
+  (`/dashboard-v2#patient`). System back pops the hash and closes the sheet
+  via `popstate` listener. User stays on `/dashboard-v2`.
+- `ReferralDashboard.tsx` — same hash pattern (`/referrals#referral`).
+
+**Files:** `app/components/PatientFormV2.tsx`,
+`app/dashboard-v2/FDDashboardV2.tsx`, `app/referrals/ReferralDashboard.tsx`
+
+### DashboardNav — Patients Link Fixed + Search Focus
+
+Patients quick link changed from `/patients` (404) to `/dashboard-v2`.
+Now scrolls to work queue table and auto-focuses the search input.
+
+**Files:** `app/components/DashboardNav.tsx`,
+`app/dashboard-v2/FDDashboardV2.tsx`
+
+### FD Work Queue — Table UI Overhaul
+
+- Headers → bright green `#19a866` (all except select checkbox)
+- Data cells → cyan `#00cfff` (all except Workflow Stage and Documents)
+- Page size options: 10 (default), 15, 25, 50, 100
+- Export CSV on same row as Work Queue title (right side)
+- Columns button → cyan styling
+- Search input `id="patientsearch"` for Patients link focus targeting
+- Work Queue div `id="workqueue"` for scroll targeting
+
+**Files:** `app/dashboard-v2/FDDashboardV2.tsx`
+
+### FD Work Queue — Doc Status Logic Fix
+
+**Docs OK** now requires signature + AOB + NF-2 generated (`nf2_url`).
+New **NF-2 Missing** doc status badge (orange). `nf2_url` added to Patient
+interface and dashboard-v2 select query.
+
+**Files:** `app/dashboard-v2/FDDashboardV2.tsx`,
+`app/dashboard-v2/page.tsx`
+
+### FD Work Queue — Workflow Stage Logic Fix
+
+Workflow Stage now uses `nf2_url` (generated) instead of `nf2_mailed_at`.
+Once NF-2 is generated, patient advances past this stage. Mailing tracked
+separately via KPI cards.
+
+New labels:
+- **NF-2 Missing Stage** (red) — NF-2 not yet generated
+- **Book Appointment** — replaces "No Visit"; tapping opens Appointments tab
+
+NF-2 KPI split into **NF-2 Pending Mail** and **NF-2 Missing**.
+
+**Files:** `app/dashboard-v2/FDDashboardV2.tsx`
+
+### FD Work Queue — Badge-to-Tab Navigation
+
+Clicking any Workflow Stage or Documents badge opens the patient sheet
+directly on the relevant tab. All badge-to-tab mappings wired.
+`FDPatientSheet` accepts `initialTab?: Tab` prop.
+
+**Files:** `app/dashboard-v2/FDDashboardV2.tsx`,
+`app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### Shared SignatureCaptureModal — Optimistic UI
+
+New `app/components/SignatureCaptureModal.tsx` — shared across
+`FDPatientSheet` and `PatientProfile`. Modal closes immediately on Save;
+upload happens in background. Eliminates multi-second wait after signing.
+
+**Files:** `app/components/SignatureCaptureModal.tsx` (new),
+`app/dashboard-v2/components/FDPatientSheet.tsx`,
+`app/patients/[patientId]/PatientProfile.tsx`
+
+### Signature On File — Cyan Card + View Button
+
+All signature status surfaces now show a cyan card when signature is on file:
+- Thin cyan border (`1px solid #00cfff30`)
+- "✅ Signature on file" in cyan
+- Re-sign button
+- 👁 View Signature button (Supabase signed URL, 1800s expiry)
+
+Applied to: `FDPatientSheet`, `PatientProfile`, `PatientFormV2`,
+`DoctorsSection` (Admin — doctor signatures).
+
+**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`,
+`app/patients/[patientId]/PatientProfile.tsx`,
+`app/components/PatientFormV2.tsx`,
+`app/admin/components/DoctorsSection.tsx`
+
+### FD Patient Sheet — Book Appointment CTA
+
+Appointments tab now shows Book Appointment button (top right) and a
+prominent Schedule First Appointment CTA when empty. Both navigate to
+`/calendar?patient=${patient_id}`.
+
+**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### Calendar — Full Redesign
+
+Complete rebuild of `app/calendar/page.tsx`:
+
+- Full FD Dashboard V2 palette (`#0d1821`, Oxanium, cyan/green)
+- Booking moved to **bottom-sheet modal** — date field (editable), all
+  dropdowns custom dark (no native select)
+- **Smart booking:** arriving via `?patient=` auto-opens modal, auto-fills
+  patient's assigned MD (green AUTO badge), auto-advances date to next
+  available per doctor's schedule
+- If FD changes doctor, date re-calculates to next available
+- FD can override doctor freely
+- **Adaptive doctor filter:** chips for ≤5 doctors, custom dark dropdown
+  for >5 (scales to large practices)
+- Day cards: capacity bar (green→amber→red), brighter text
+- Month view preserved with status dots per day
+- View Chart → `/md-v2/[patientId]`
+- `+ Book` button always active (defaults to today if no day selected)
+
+**File:** `app/calendar/page.tsx` (full rebuild)
+
 ## 2026-07-15 — Session 43
 
 ### Email Notifications — Font Fix, AM/PM, Single-Row Layout, ICD-10 Added
