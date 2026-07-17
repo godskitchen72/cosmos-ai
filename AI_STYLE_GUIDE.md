@@ -103,11 +103,12 @@ only:
 - Palette: background `#0d1821`, accent `#00cfff`, borders `#1a3a4a`,
   success/section-headers `#19a866`.
 - Mobile-first; every screen hand-rolled inline `style={{...}}` —
-  **five explicit, scoped exceptions, all approved by the product owner
+  **six explicit, scoped exceptions, all approved by the product owner
   after the tradeoff was presented**: (1) shadcn/ui + Tailwind, bridged
   onto the same palette via CSS variables (`ARCHITECTURE.md` §8), approved
   on: Biller dashboard (`/billing`), Admin (`/admin`), MD V2 chart
-  (`/md-v2`), MDClient list (`/md`), and Referral dashboard (`/referrals`);
+  (`/md-v2`), MDClient list (`/md`), Referral dashboard (`/referrals`),
+  and FD Dashboard V2 (`/dashboard-v2`, Session 41);
   (2) a brighter success/accent green, `#2ee08a`, scoped to the Biller
   dashboard only. Don't extend either to any other surface without the
   same explicit approval — see `ARCHITECTURE.md` §1 for the authoritative

@@ -1,3 +1,127 @@
+## 2026-07-16 — Session 45
+
+### Visit Packet Merge — FD Documents Tab
+
+New `/generate-visit-packet` endpoint in `cosmos-api`. Merges all per-visit
+PDFs (PCE + all referral types + ICD-10) into one file using `merge_pdfs()`
+added to `forms/base.py`. FD Documents tab shows "Build Visit Packet" button
+per visit; "View Packet" and "Rebuild" on success. `visitPacketMap` tracks
+each visit independently. `form_type = VISIT_PACKET`, filename
+`{pid}_{doa}_{dos}_visit_packet.pdf`. Individual files preserved intact.
+Blocked on Render Standard upgrade for production load.
+
+**Files:** `cosmos-api/main.py`, `cosmos-api/forms/base.py`,
+`app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### FD Dashboard V2 — DB-Persisted Column Preferences
+
+`user_profiles.fd_column_prefs JSONB` migration applied. Column picker:
+centered dropdown, custom mobile-visible checkbox UI, "Columns" header +
+Reset button (clears UI + writes null to DB). Prefs loaded on mount,
+debounced save on toggle.
+
+**DB:** `ALTER TABLE user_profiles ADD COLUMN fd_column_prefs jsonb DEFAULT null`
+**Files:** `app/dashboard-v2/FDDashboardV2.tsx`
+
+### FD Dashboard V2 — Search Bar X Clear Button
+
+`✕` button inside search bar clears `globalFilter` and resets pagination.
+
+**Files:** `app/dashboard-v2/FDDashboardV2.tsx`
+
+### FD Dashboard V2 — Activity Summary Tab Navigation
+
+Visits / Appointments / Referrals summary cards navigate to their
+respective tabs on tap. Each card now tappable (button element).
+
+**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### SONO / FC / PSY — New Referral Types (Generic Form)
+
+Three new referral types using `GENERIC_REFERRAL_FORM.pdf` (CMT-REF-MD-001 v2.0):
+- **SONO** — Sonography / Ultrasound; body parts: L. Shoulder, R. Shoulder,
+  Neck, Mid Back, Lower Back (multi-select)
+- **FC** — Functional Capacity Evaluation; pre-filled reason text
+- **PSY** — Psychology / Behavioral Health; pre-filled reason text
+
+`referral_types` updated: ULTRASOUND code → SONO; FC and PSY inserted.
+Full lifecycle tracking (referrals, status_history, timeline, notifications).
+Facility/Provider field removed. No. of Visits removed. Requested Date removed.
+
+**DB:** `UPDATE referral_types SET code = 'SONO' WHERE code = 'ULTRASOUND'`
+`INSERT INTO referral_types (label, category, code) VALUES ('Functional Capacity', 'specialist', 'FC'), ('Psychology', 'specialist', 'PSY')`
+**Files:** `cosmos-api/forms/sono.py`, `fc.py`, `psy.py`, `main.py`,
+`pdf_engine.py`, `app/md/[patientId]/sono/`, `fc/`, `psy/`,
+`app/md/[patientId]/components/ReferralGrid.tsx`,
+`app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### EMG — New Referral Type (Generic Form)
+
+New EMG referral type using `GENERIC_REFERRAL_FORM.pdf`. Body parts:
+Upper / Lower (multi-select, stored in `referrals.body_parts`). Full
+lifecycle tracking. Pre-filled reason text.
+
+**Files:** `cosmos-api/forms/emg.py`, `main.py`, `pdf_engine.py`,
+`app/md/[patientId]/emg/`, `ReferralGrid.tsx`, `FDPatientSheet.tsx`
+
+### Psych Referral Button — Removed
+
+Old `Psych Referral` toggle (writing `psych_referral` to `patient_visits`)
+removed. Replaced by PSY referral type with full tracking.
+
+**Files:** `app/md/[patientId]/components/ReferralGrid.tsx`,
+`app/md/[patientId]/components/VisitTab.tsx`
+
+### MRI Selector — MRI / MRA / CT Radio Buttons
+
+Replaced YES/NO metal implant binary with three mutually exclusive radio
+buttons (MRI | MRA | CT Scan). Selecting one disables the other two sections.
+Submit guard requires selection before generating.
+
+**Files:** `app/md/[patientId]/mri/MriReferral.tsx`
+
+### MRI Session Splitter — Gated to MRI/MRA/CT Only
+
+`isImaging` in `ReferralAppointmentTab.tsx` now checks `typeCode` —
+SONO/EMG excluded from session splitter UI. `actions.ts` auto-advance
+also gated by `isMriType`. Fixes false "MRI / CT Scan Sessions" block
+on Ultrasound referrals.
+
+**Files:** `app/referrals/components/ReferralAppointmentTab.tsx`,
+`app/referrals/actions.ts`
+
+### Session Card — Above Schedule Form
+
+Existing session card now renders above the Schedule Appointment form
+in `ReferralAppointmentTab.tsx`.
+
+**Files:** `app/referrals/components/ReferralAppointmentTab.tsx`
+
+### Auto-Close SONO/FC/PSY/EMG on Result Upload
+
+After uploading a result, referral auto-advances to `closed` when type code
+is in `['SONO', 'FC', 'PSY', 'EMG']`. Writes status_history and timeline.
+
+**Files:** `app/referrals/actions.ts`
+
+### Provider Email — Clinical Reason + Body Parts
+
+Provider session notification email now includes Body Parts (when set)
+and Clinical Reason (when set) rows.
+
+**Files:** `app/referrals/actions.ts`
+
+### Referral Pipeline — New Report Tab
+
+New **Referral Pipeline** tab in Reports. KPI strip: Total / Pending /
+Upcoming / Overdue / Completed. Summary table by referral type with drill-down
+to individual referral detail. All columns color-coded. Totals row all green.
+Export CSV for both views.
+
+**Files:** `app/reports/ReportsClient.tsx`
+
+---
+
 ## 2026-07-15 — Session 44
 
 ### Navigation — Back Button Audit and Full Fix

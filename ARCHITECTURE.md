@@ -126,6 +126,7 @@ exist for these.**
 - 028 — Performance indexes: `idx_patient_visits_patient_id`, `idx_patient_visits_submitted_to_billing` (partial WHERE NOT NULL), `idx_patient_visits_location_id`, `idx_biller_md_flags_visit_id`, `idx_biller_md_flags_patient_id`, `idx_referrals_referral_provider_id` (Session 31)
 - 029 — `referrals.body_parts text[] DEFAULT '{}'`; `referral_appointments.body_parts text[] DEFAULT '{}'` — MRI session splitting; body parts pool per referral, per-appointment body parts assignment (Session 31)
 - 030 — `referral_documents.appointment_id uuid REFERENCES referral_appointments(id)` nullable; `idx_ref_docs_appointment_id` index — links uploaded result documents to specific MRI sessions (Session 31)
+- 031 — `user_profiles.fd_column_prefs jsonb DEFAULT null` — FD Dashboard V2 per-user column visibility preferences; nullable, null = default (all visible) (Session 45)
 
 Key tables referenced throughout the codebase: `patients`,
 `patient_visits` (visit-scoped data, including `cpt_codes`/`icd10_codes`,
@@ -228,7 +229,7 @@ FastAPI on Render. File ownership:
   **Always check `database.py` `_build_doctor_fields()` for the exact
   prefixed key name before referencing a doctor field in any `forms/*.py`.**
 - `forms/*.py` — one module per document/referral type; PDF field-fill logic only
-- `forms/base.py` — shared PDF helpers only (signature injection, field filling);
+- `forms/base.py` — shared PDF helpers only (signature injection, field filling, `merge_pdfs()` for Visit Packet merge);
   no database logic
 - `pdf_engine.py` — pure router; re-exports each `forms/*.py` module's
   generator function for `main.py` to call by name
@@ -238,7 +239,7 @@ Referral-type documents share one generic dispatch path: a
 `tag` (DB `form_type` value) + `fn_type` (filename token) + labels.
 Adding a new referral type means touching `forms/<type>.py`, the config
 entry + route in `main.py`, and the import/`__all__` entry in
-`pdf_engine.py` — all three, every time. **`tag` and `fn_type` are
+`pdf_engine.py` — all three, every time. Current referral types: MRI, MRA, CT, DME, VNG, ANS, PT, Ortho, Pain Mgmt, Rx, SONO, FC, PSY, EMG — SONO/FC/PSY/EMG all use `GENERIC_REFERRAL_FORM.pdf` (CMT-REF-MD-001 v2.0) stored in `cosmos-api/forms/`. **`tag` and `fn_type` are
 separate keys** — `tag` is stored in `patient_forms.form_type` and read
 by `ReferralGrid.tsx`; `fn_type` is used only in the filename. Never
 conflate them.
