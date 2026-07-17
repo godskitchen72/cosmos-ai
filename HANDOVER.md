@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 16, 2026, Session 45)
+# Cosmos Medical Technologies — HANDOVER (July 17, 2026, Session 46)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -14,187 +14,143 @@ self-contained.
 ## Current Status
 
 All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed and live.
-Session 45 was a major feature sprint: Visit Packet Merge, FD Dashboard V2
-improvements, 4 new referral types (SONO/FC/PSY/EMG), MRI selector redesign,
-referral workflow logic fixes, Referral Pipeline report, and multiple
-provider email enhancements.
+Session 46 was a major FD workflow sprint: complete Workflow Stage redesign,
+booking modal improvements, FD Documents tab overhaul (MD Clinical removed,
+visit packet checkboxes, manual referral result upload, named ZIP downloads),
+Needs Scheduling KPI card, Dev Tools enhancements, and Admin scroll-to-edit
+across all sections.
 
 ---
 
-## Completed This Session (Session 45)
+## Completed This Session (Session 46)
 
-### Visit Packet Merge — FD Documents Tab ✅ CLOSED
+### SONO/FC/PSY/EMG PDF Visual Verification ✅ CLOSED
 
-New `/generate-visit-packet` endpoint in `cosmos-api`. Merges all per-visit
-PDFs (PCE + all referral types + ICD-10) into a single file using
-`merge_pdfs()` helper added to `forms/base.py`.
+NPI and license number field population on SONO/FC/PSY/EMG PDFs visually
+verified against real generated PDFs. Fields confirmed populating correctly.
+Open Item #19 from Session 45 closed.
 
-- **Trigger:** FD explicit tap — "Build Visit Packet" button in Documents tab
-- **Filename:** `{patient_id}_{doa}_{dos}_visit_packet.pdf`
-- **form_type:** `VISIT_PACKET`
-- **Individual files:** preserved intact — this is additive, not destructive
-- **State:** `visitPacketMap` — per-visit packet tracking (each visit card
-  independently tracks its own packet filename)
-- **Blocked on:** Render Standard plan upgrade for production load safety
-  (still on 512MB Starter — pre-go-live blocker, see Open Items)
+### Workflow Stage — Complete Redesign ✅ CLOSED
 
-**Files:** `cosmos-api/main.py`, `cosmos-api/forms/base.py`,
-`app/dashboard-v2/components/FDPatientSheet.tsx`
+FD work queue Workflow Stage column fully redesigned with clinical lifecycle
+stages. Computed in `getWorkflowStage()` in `FDDashboardV2.tsx`.
 
-### FD Dashboard V2 — Column Preferences (DB-Persisted) ✅ CLOSED
+**Stage map (priority order):**
+| Stage | Color | Condition |
+|---|---|---|
+| `Discharged` | Green | `patients.status === 'Discharged'` |
+| `NF-2 Missing` | Red | No `nf2_url` |
+| `Book Init Visit` | Orange | Has `nf2_url`, zero visits |
+| `Cancelled / Rebook` | Red | Most recent appointment is `cancelled` |
+| `Book Follow Up N` | Orange | Has visits, no future appointment; N = visit count |
+| `Upcoming · MMM D` | Cyan | Has future non-cancelled appointment |
 
-- `user_profiles.fd_column_prefs JSONB DEFAULT NULL` — migration applied
-- Column picker dropdown: centered on screen (was off-screen left), custom
-  checkbox UI (cyan fill, visible on mobile), "Columns" header + Reset button
-- **Reset:** clears UI to all-visible + writes `null` to DB
-- Load on mount: fetches `fd_column_prefs`, applies to `columnVisibility`
-- Debounced save (800ms) on every column toggle
+- `patients.status` column confirmed as the discharge field (values: `Active`, `Active Treatment`, `Discharged`)
+- `Active` and `Active Treatment` both treated as non-discharged
+- Booking-action stages (Book Init Visit, Book Follow Up N, Cancelled/Rebook) tap directly to `/calendar?patient=ID` — booking modal auto-opens with patient + doctor pre-filled
+- `Upcoming` and `Discharged` open patient sheet
+
+**Files:** `app/dashboard-v2/FDDashboardV2.tsx`, `app/dashboard-v2/page.tsx`
+
+### Needs Scheduling KPI Card ✅ CLOSED
+
+New KPI card counting all patients in booking-action stages (Book Init Visit +
+Book Follow Up N + Cancelled/Rebook). Tapping filters work queue to those
+patients only.
 
 **Files:** `app/dashboard-v2/FDDashboardV2.tsx`
-**DB:** `ALTER TABLE user_profiles ADD COLUMN fd_column_prefs jsonb DEFAULT null`
 
-### FD Dashboard V2 — Search Bar X Clear Button ✅ CLOSED
+### Booking Modal — Patient Pre-fill Fix ✅ CLOSED
 
-`✕` button appears inside the search bar when text is present. Clears
-`globalFilter` and resets pagination to page 0. Uses lucide `X` icon.
+Calendar patient query was `.eq('status','Active Treatment')` — excluded
+`Active` patients, causing empty patient dropdown when arriving from FD
+dashboard. Fixed to `.neq('status','Discharged')` — all non-discharged
+patients now appear.
 
-**Files:** `app/dashboard-v2/FDDashboardV2.tsx`
+**Files:** `app/calendar/page.tsx`
 
-### FD Dashboard V2 — Activity Summary Tab Navigation ✅ CLOSED
+### Booking Modal — Duplicate Button Removed ✅ CLOSED
 
-Activity Summary cards (Visits / Appointments / Referrals) on the Overview
-tab now navigate to their respective tabs on tap. Uses `setTab()` with
-tab keys `'visits'`, `'appointments'`, `'referrals'`.
+Removed redundant "Schedule First Appointment" empty-state button from
+Appointments tab. Single "Book Appointment" header button remains.
 
 **Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
 
-### SONO / FC / PSY Referral Types ✅ CLOSED
+### Booking Modal — Location Date Chips ✅ CLOSED
 
-Three new referral types using `GENERIC_REFERRAL_FORM.pdf` (CMT-REF-MD-001 v2.0):
+When a location is selected in the booking modal, a row of available date
+chips appears showing the next 6 dates for that location's `days_of_week`.
+Tapping a chip sets the appointment date. Left/right arrows page through
+additional dates (6 per page, up to 60 total). `LocationDateChips` is a
+standalone React component with its own page state.
 
-| Type | Code | Specialty printed on form |
-|---|---|---|
-| Sonogram | SONO | Sonography / Ultrasound |
-| Functional Capacity | FC | Functional Capacity Evaluation |
-| Psychology | PSY | Psychology / Behavioral Health |
+**Files:** `app/calendar/page.tsx`
 
-- `referral_types` table: SONO updated from ULTRASOUND code; FC and PSY inserted
-- Backend: `forms/sono.py`, `forms/fc.py`, `forms/psy.py`; routes `/generate-sono`,
-  `/generate-fc`, `/generate-psy`; config entries in `REFERRAL_FORM_CONFIG`
-- Frontend: `app/md/[patientId]/sono/`, `fc/`, `psy/` — `page.tsx` + client component each
-- Pre-filled reason text per type; Facility/Provider field removed (FD decides routing)
-- No. of Visits field removed (FD assigns)
-- Requested Date field removed
-- Full lifecycle tracking: `referrals`, `referral_status_history`,
-  `referral_timeline`, `referral_notifications` — TRACKED badge on save
+### FD Documents Tab — Complete Overhaul ✅ CLOSED
 
-**Files:** `cosmos-api/forms/sono.py`, `fc.py`, `psy.py`, `main.py`,
-`pdf_engine.py`, `forms/GENERIC_REFERRAL_FORM.pdf` (added to forms/),
-`app/md/[patientId]/sono/`, `fc/`, `psy/`,
-`app/md/[patientId]/components/ReferralGrid.tsx`,
-`app/dashboard-v2/components/FDPatientSheet.tsx`
+Multiple changes to `FDPatientSheet.tsx` Documents tab:
 
-### EMG Referral Type ✅ CLOSED
+- **Section header** renamed to "No-Fault Forms & Requirements", moved above
+  signature card
+- **Signature card** restyled to match DocCard pattern (green dot indicator,
+  View button right-aligned, Re-sign as underline link — no emoji, no
+  full-width button)
+- **NF-2 Confirm Mailed** moved inline with the NF-2 title row (subtitle
+  row shows mailed status or the button)
+- **MD Clinical table** (PCE/ICD-10 per visit collapsible card) removed —
+  replaced by Visit Packet as the primary per-visit document collection
+- **Visit Packet checkboxes** — each visit packet card now has an individual
+  checkbox for manual selection; `download_name` computed at selection time
+- **Select All** moved above Visit Packet section; now selects visit packets
+  + referral results (replaces old MD forms selection)
+- **Manual upload** — each Referral Results card has an Upload Result button
+  for uploading documents received outside the system. Inserts
+  `referral_documents` row (no `patient_id` column on that table).
+  Storage path: `referral-results/{patientId}/{safeLabel}-manual-{ts}.{ext}`
+- **Referral Results** now show below Visit Packet with Select All on same row
 
-New EMG referral type using `GENERIC_REFERRAL_FORM.pdf`:
+**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
 
-- `referral_types` row already existed (code: EMG, neurology) — no DB insert needed
-- Backend: `forms/emg.py`, route `/generate-emg`, config entry in `REFERRAL_FORM_CONFIG`
-- Frontend: `app/md/[patientId]/emg/` — `page.tsx` + `EmgReferral.tsx`
-- **Body parts:** Upper, Lower (multi-select); stored in `referrals.body_parts`
-- Full lifecycle tracking including body_parts in `referral_timeline`
+### Named ZIP Downloads ✅ CLOSED
 
-**Files:** `cosmos-api/forms/emg.py`, `main.py`, `pdf_engine.py`,
-`app/md/[patientId]/emg/`, `ReferralGrid.tsx`, `FDPatientSheet.tsx`
+Files inside the downloaded ZIP now use meaningful names instead of
+`record_01.pdf` etc.
 
-### SONO — Body Part Multi-Select ✅ CLOSED
+**Naming convention:**
+- Visit Packet: `VisitPacket_N_MMDDYYYY.pdf` (N = oldest visit = 1)
+- Referral result: `ReferralType_N_MMDDYYYY.pdf` (N = result number within type)
+- Date format: `MMDDYYYY` (human-readable for medical staff / attorneys)
 
-Sonogram referral screen now has body part multi-select:
-- Options: L. Shoulder, R. Shoulder, Neck, Mid Back, Lower Back
-- Stored in `referrals.body_parts` on lifecycle creation
-- Validation: at least one part required before save
-- Selection summary shown below chips
+`download_name` is computed client-side at selection time and sent to the
+API alongside `path` and `bucket`. API uses it as the ZIP entry name,
+falling back to `record_NN.ext` if absent.
 
-**Files:** `app/md/[patientId]/sono/SonoReferral.tsx`
+**Files:** `cosmos-api/main.py`, `app/dashboard-v2/components/FDPatientSheet.tsx`
 
-### Psych Referral Button — Removed ✅ CLOSED
+### Dev Tools — Fixed Email/Phone + New Referral Types ✅ CLOSED
 
-Old `Psych Referral` toggle button (which wrote `psych_referral` directly to
-`patient_visits`) removed from `ReferralGrid.tsx` and `VisitTab.tsx`.
-Replaced by the new PSY referral type with full lifecycle tracking.
+- All generated test patients now use fixed email `arcchemies@gmail.com` and
+  phone `9297683179` so notifications reach the developer during testing
+- SONO, FC, PSY, EMG added to `ALL_REFERRAL_TYPES` with labels, type codes,
+  and clinical reasons
+- "All" chip updated from "All 9" to "All 13"
 
-**Files:** `app/md/[patientId]/components/ReferralGrid.tsx`,
-`app/md/[patientId]/components/VisitTab.tsx`
+**Files:** `app/dev/page.tsx`
 
-### MRI Selector — Redesigned to MRI/MRA/CT Radio Buttons ✅ CLOSED
+### Admin — Scroll to Edit Form ✅ CLOSED
 
-Replaced YES/NO metal implant binary selector with three mutually exclusive
-radio buttons: **MRI | MRA | CT Scan** in one row.
+Tapping Edit on any admin card now scrolls the edit form into view
+automatically (`scrollIntoView({ behavior: 'smooth', block: 'start' })` with
+50ms delay). Applied to all four sections with edit forms:
+- CarriersSection
+- LawyersSection
+- UsersSection
+- ReferralProvidersSection
 
-- Selecting one modality disables and clears the other two sections
-- Warning text shown when CT or MRA selected ("MRI and MRA sections disabled")
-- `isImaging` flag scoped to MRI/MRA/CT only — SONO/EMG excluded from session splitter
-- Submit guard: must select modality before generating
-- `handleModalityChoice()` replaces `handleMetalToggle()`
-
-**Files:** `app/md/[patientId]/mri/MriReferral.tsx`
-
-### MRI Session Splitter — Gated to MRI/MRA/CT Only ✅ CLOSED
-
-`isImaging` in `ReferralAppointmentTab.tsx` now checks `typeCode` against
-`['MRI', 'MRA', 'CT']` — SONO/EMG `body_parts` no longer trigger the
-session splitter UI. Fixing false MRI Sessions display on Ultrasound referrals.
-
-`actions.ts` `scheduleAppointment()` also gated: `isMriType` check before
-`requiredSessions` calculation — SONO/EMG appointments schedule as single
-sessions with no body-part split logic.
-
-**Files:** `app/referrals/components/ReferralAppointmentTab.tsx`,
-`app/referrals/actions.ts`
-
-### Session Card — Moved Above Schedule Form ✅ CLOSED
-
-In `ReferralAppointmentTab.tsx`, the existing session card (showing prior
-appointment result) now renders above the Schedule Appointment form.
-Previous order was reversed — FD saw the form before seeing the existing session.
-
-**Files:** `app/referrals/components/ReferralAppointmentTab.tsx`
-
-### Auto-Close SONO/FC/PSY/EMG on Result Upload ✅ CLOSED
-
-`uploadReferralResult()` in `actions.ts`: after uploading a result document,
-auto-advances referral to `closed` when `referral_types.code` is in
-`['SONO', 'FC', 'PSY', 'EMG']`. Writes `referral_status_history` and
-`referral_timeline` entries. Non-fatal (wrapped in try/catch).
-
-**Files:** `app/referrals/actions.ts`
-
-### Provider Email — Clinical Reason + Body Parts ✅ CLOSED
-
-Provider session notification email (`actions.ts`) now includes:
-- **Body Parts** row — shown when `referral.body_parts` is non-empty
-- **Clinical Reason** row — shown when `referral.clinical_reason` is non-empty
-
-Both fields added to the provider email Supabase select query.
-
-**Files:** `app/referrals/actions.ts`
-
-### Referral Pipeline — New Report Tab ✅ CLOSED
-
-New **Referral Pipeline** tab in `app/reports/ReportsClient.tsx`:
-
-- **KPI strip:** Total | Pending (orange) | Upcoming (cyan) | Overdue (red) | Completed (green)
-- **Pipeline table:** one row per referral type, columns colored by type
-- **Drill-down:** tap any type row to see individual referral detail
-- **Detail view:** Provider | Stage | Next Appt | Age — sorted by urgency
-- **Export CSV:** both summary and detail views
-- **Totals row:** all green bold
-- Pending = no appointment, created < 2 days ago
-- Upcoming = future appointment scheduled
-- Overdue = no upcoming appointment, past appointment OR unscheduled 2+ days
-- Completed = `closed` or `cancelled`
-
-**Files:** `app/reports/ReportsClient.tsx`
+**Files:** `app/admin/components/CarriersSection.tsx`,
+`app/admin/components/LawyersSection.tsx`,
+`app/admin/components/UsersSection.tsx`,
+`app/admin/components/ReferralProvidersSection.tsx`
 
 ---
 
@@ -210,9 +166,9 @@ New **Referral Pipeline** tab in `app/reports/ReportsClient.tsx`:
 3. **Patient email required at intake.** `PatientFormV2.tsx` email field
    must be made required. Patient confirmation emails dead until fixed.
 
-4. **Referral workflow auto-advancement logic.** Full workflow design needed
-   (Session 45 deferred). Only SONO/FC/PSY/EMG auto-close on result upload
-   currently. MRI/VNG/ANS/etc. still require manual FD advancement.
+4. **Referral workflow auto-advancement logic.** Full workflow design needed.
+   Only SONO/FC/PSY/EMG auto-close on result upload currently. MRI/VNG/ANS/etc.
+   still require manual FD advancement.
 
 5. **Duplicate visit records.** David Anderson has multiple `patient_visits`
    rows for the same date, all sharing the same generated PDF filenames.
@@ -253,26 +209,16 @@ New **Referral Pipeline** tab in `app/reports/ReportsClient.tsx`:
 18. **`patients.intake_url` not in migration file.** Added manually via SQL
     only — schema drift risk if DB is rebuilt.
 
-19. **NPI and License Number on SONO/FC/PSY/EMG PDFs.** Fixed in code
-    (`billing_npi`, `doctor_license_number`) — visual review of actual
-    generated PDFs still needed to confirm fields populate correctly.
+19. **ZIP download naming — needs live test.** API change landed (`download_name`
+    support in `/generate-records-zip`). Fresh Select All + Download ZIP test
+    needed to confirm `VisitPacket_N_MMDDYYYY.pdf` names appear correctly.
 
 ---
 
 ## DB Schema Changes This Session
 
-```sql
--- Migration applied via Supabase dashboard SQL editor
-ALTER TABLE user_profiles
-  ADD COLUMN IF NOT EXISTS fd_column_prefs jsonb DEFAULT null;
-
--- referral_types: code updated and inserted
-UPDATE referral_types SET code = 'SONO' WHERE code = 'ULTRASOUND';
-INSERT INTO referral_types (label, category, code) VALUES
-  ('Functional Capacity', 'specialist', 'FC'),
-  ('Psychology', 'specialist', 'PSY');
--- EMG already existed (ae6ab125, neurology, code: EMG)
-```
+No new migrations. `referral_documents` table confirmed has no `patient_id`
+column — upload insert corrected accordingly.
 
 ---
 
@@ -282,30 +228,16 @@ All files below were modified or created this session and confirmed deployed:
 
 | File | Changes |
 |---|---|
-| `cosmos-api/forms/base.py` | `merge_pdfs()` helper added |
-| `cosmos-api/forms/sono.py` | New — SONO referral PDF filler |
-| `cosmos-api/forms/fc.py` | New — FC referral PDF filler |
-| `cosmos-api/forms/psy.py` | New — PSY referral PDF filler |
-| `cosmos-api/forms/emg.py` | New — EMG referral PDF filler |
-| `cosmos-api/forms/GENERIC_REFERRAL_FORM.pdf` | Added — CMT-REF-MD-001 v2.0 template |
-| `cosmos-api/main.py` | `/generate-visit-packet`, `/generate-sono`, `/generate-fc`, `/generate-psy`, `/generate-emg` routes; REFERRAL_FORM_CONFIG entries |
-| `cosmos-api/pdf_engine.py` | SONO/FC/PSY/EMG imports added |
-| `app/dashboard-v2/FDDashboardV2.tsx` | Column prefs (DB-persisted), search X, useRef, load/save effects |
-| `app/dashboard-v2/components/FDPatientSheet.tsx` | Visit Packet section (Build/View/Rebuild per visit); visitPacketMap state; Activity Summary tab nav; SONO/FC/PSY/EMG/VISIT_PACKET DOC_LABELS |
-| `app/md/[patientId]/components/ReferralGrid.tsx` | SONO/FC/PSY/EMG/EMG buttons added; Psych Referral button removed; psych props removed |
-| `app/md/[patientId]/components/VisitTab.tsx` | Psych props removed from ReferralGrid call |
-| `app/md/[patientId]/mri/MriReferral.tsx` | MRI/MRA/CT radio selector replaces YES/NO metal implant toggle |
-| `app/md/[patientId]/sono/SonoReferral.tsx` | Full rewrite — body part multi-select, no visit count, no requested date |
-| `app/md/[patientId]/sono/page.tsx` | Server component for SONO |
-| `app/md/[patientId]/fc/FcReferral.tsx` | New — FC referral client component |
-| `app/md/[patientId]/fc/page.tsx` | New — FC server component |
-| `app/md/[patientId]/psy/PsyReferral.tsx` | New — PSY referral client component |
-| `app/md/[patientId]/psy/page.tsx` | New — PSY server component |
-| `app/md/[patientId]/emg/EmgReferral.tsx` | New — EMG referral client component with Upper/Lower body parts |
-| `app/md/[patientId]/emg/page.tsx` | New — EMG server component |
-| `app/referrals/actions.ts` | Auto-close SONO/FC/PSY/EMG on result upload; body_parts + clinical_reason in provider email; MRI split gated to MRI/MRA/CT |
-| `app/referrals/components/ReferralAppointmentTab.tsx` | isImaging scoped to MRI/MRA/CT; session card above schedule form |
-| `app/reports/ReportsClient.tsx` | Referral Pipeline tab added |
+| `cosmos-api/main.py` | `download_name` support in `/generate-records-zip` ZIP entry naming |
+| `app/dashboard-v2/FDDashboardV2.tsx` | Workflow stages redesign; Needs Scheduling KPI; `patient_status` fetched; `getWorkflowStage()` rewritten; booking-action badges route to calendar |
+| `app/dashboard-v2/page.tsx` | `status` added to patients select query |
+| `app/dashboard-v2/components/FDPatientSheet.tsx` | Full Documents tab overhaul — signature card, NF-2 inline mailed, MD Clinical removed, visit packet checkboxes, manual upload, select all, named download, section header |
+| `app/calendar/page.tsx` | Patient query fixed to `.neq('status','Discharged')`; `LocationDateChips` component added; duplicate booking button removed; `React` default import added |
+| `app/dev/page.tsx` | Fixed email/phone on generated patients; SONO/FC/PSY/EMG referral types added |
+| `app/admin/components/CarriersSection.tsx` | Scroll-to-edit on tap |
+| `app/admin/components/LawyersSection.tsx` | Scroll-to-edit on tap |
+| `app/admin/components/UsersSection.tsx` | Scroll-to-edit on tap |
+| `app/admin/components/ReferralProvidersSection.tsx` | Scroll-to-edit on tap |
 
 ---
 
@@ -330,9 +262,8 @@ All files below were modified or created this session and confirmed deployed:
 - `patients.intake_url` added via manual SQL only — not in any migration file.
 - Ghost mode for PA/NP users skips location selection.
 - Ghost mode has no session timeout (timeout=0).
-- `AI_STYLE_GUIDE.md` §2 still says "five" Tailwind/shadcn exceptions — should be "six" (FD Dashboard V2 added Session 41).
-- SONO/FC/PSY/EMG PDF field population (NPI, license) — fixed in code but not yet visually verified against real generated PDFs.
 - Duplicate visit records for some patients — root cause unknown, needs investigation.
+- ZIP download naming (named files) — landed in API but not yet live-tested end-to-end.
 
 ---
 
@@ -356,6 +287,20 @@ All files below were modified or created this session and confirmed deployed:
 - Line-number based file patching (reading `lines[]` by index) is more
   reliable than string anchoring when file has non-UTF-8 bytes or
   inconsistent whitespace.
+- `referral_documents` table has no `patient_id` column — confirmed via
+  `information_schema.columns`. Upload inserts must not include it.
+- `patients.status` (not `patient_status`) is the correct column name for
+  discharge state. Values: `Active`, `Active Treatment`, `Discharged`.
+  Both `Active` and `Active Treatment` are treated as non-discharged for
+  workflow stage logic.
+- `useRef`/`useEffect` for scroll-to-edit must be declared after the state
+  variable they reference — declaring before causes TS2448 "used before
+  declaration" error.
+- sed commands with complex substitutions involving brackets and quotes are
+  unreliable in Termux — always prefer Python heredoc or patch scripts for
+  anything beyond simple single-word replacements.
+- Chrome does not overwrite same-named downloads — always `rm -f` before
+  re-downloading a patch script with the same filename.
 
 ---
 
@@ -399,6 +344,7 @@ All files below were modified or created this session and confirmed deployed:
 - [x] Body parts in provider session email (Session 45)
 - [x] Clinical reason in provider session email (Session 45)
 - [x] Referral Pipeline report tab (Session 45)
+- [x] Manual result upload on referral result cards (Session 46)
 - [ ] DME and RX codes from patient_visits
 - [ ] ReferralSheet header badge — raw DB status (cosmetic)
 - [ ] Patient email required at intake — PatientFormV2.tsx
@@ -444,6 +390,10 @@ All files below were modified or created this session and confirmed deployed:
 - [x] Column picker — custom checkbox UI, centered dropdown, Reset button (Session 45)
 - [x] Search bar X clear button (Session 45)
 - [x] Activity Summary buttons → tab navigation (Session 45)
+- [x] Workflow Stage — full lifecycle redesign (Discharged/Book Init Visit/Book Follow Up N/Cancelled Rebook/Upcoming date) (Session 46)
+- [x] Needs Scheduling KPI card (Session 46)
+- [x] Booking-action badges route directly to calendar with patient pre-filled (Session 46)
+- [x] Documents tab — MD Clinical removed; visit packet checkboxes; manual result upload; named ZIP downloads; NF-2 mailed inline; signature card restyled; section header renamed/moved (Session 46)
 - [ ] Notes tab persistence — patient_notes table
 - [ ] Stub KPIs — Patients Waiting, Insurance Verification, Tasks Due Today
 - [ ] Realtime — referrals and appointments tables
@@ -478,8 +428,13 @@ All files below were modified or created this session and confirmed deployed:
 - [x] Smart booking — auto-resolve patient's MD, next available date (Session 44)
 - [x] Adaptive doctor filter — chips ≤5, dropdown >5 (Session 44)
 - [x] System back closes referral sheet via hash nav (Session 44)
+- [x] Location date chips in booking modal — available dates by location (Session 46)
+- [x] Patient pre-fill fix — all non-discharged patients shown (Session 46)
 - [ ] Calendar realtime — appointment status changes don't push live
 - [ ] Conflict-aware time slot display (future enhancement)
+
+### Stage 3f — Admin
+- [x] Scroll-to-edit across all admin sections (Session 46)
 
 ### Stage 4 — Billing
 - [ ] Billing packet generation improvements

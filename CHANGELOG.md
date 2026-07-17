@@ -1,3 +1,151 @@
+## 2026-07-17 — Session 46
+
+### SONO/FC/PSY/EMG PDF Visual Verification
+
+NPI and license number field population confirmed correct via human visual
+review of actual generated PDFs. Open Item #19 from Session 45 closed.
+
+### Workflow Stage — Complete Lifecycle Redesign
+
+`getWorkflowStage()` in `FDDashboardV2.tsx` rewritten. New stages (priority
+order): Discharged (green) → NF-2 Missing (red) → Book Init Visit (orange) →
+Cancelled / Rebook (red) → Book Follow Up N (orange, N = visit count) →
+Upcoming · MMM D (cyan). `patients.status` column used for discharge detection
+(values: `Active`, `Active Treatment`, `Discharged`). `page.tsx` updated to
+fetch `status` field. Booking-action stage badges (Book Init Visit, Book Follow
+Up N, Cancelled/Rebook) now navigate directly to `/calendar?patient=ID` —
+booking modal auto-opens with patient + doctor pre-filled.
+
+**Files:** `app/dashboard-v2/FDDashboardV2.tsx`, `app/dashboard-v2/page.tsx`
+
+### Needs Scheduling KPI Card
+
+New KPI card counting patients in any booking-action stage. Tapping filters
+work queue. Orange color, CalendarPlus icon.
+
+**Files:** `app/dashboard-v2/FDDashboardV2.tsx`
+
+### Booking Modal — Patient Pre-fill Fix
+
+Calendar patient query changed from `.eq('status','Active Treatment')` to
+`.neq('status','Discharged')`. All non-discharged patients now appear in
+the booking modal dropdown when arriving from the FD dashboard.
+
+**Files:** `app/calendar/page.tsx`
+
+### Booking Modal — Location Date Chips with Arrows
+
+`LocationDateChips` component added to booking modal. When a location is
+selected, shows next 6 available dates for that location's `days_of_week`.
+Left/right arrow buttons page through additional dates (6 per page). Tapping
+a chip sets the appointment date. Selecting a location also auto-sets date to
+the next available date for that location.
+
+**Files:** `app/calendar/page.tsx`
+
+### Booking Modal — Duplicate Button Removed
+
+Redundant "Schedule First Appointment" empty-state button removed from
+Appointments tab in FDPatientSheet. Single "Book Appointment" header button
+remains.
+
+**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### FD Documents Tab — Section Header Renamed and Moved
+
+Section header renamed from "No-Fault Forms" to "No-Fault Forms &
+Requirements" and moved above the signature card.
+
+**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### FD Documents Tab — Signature Card Restyled
+
+Signature card now matches DocCard pattern: green dot indicator (no emoji),
+title + subtitle layout, View button right-aligned, Re-sign as underline link.
+Removed full-width View Signature button.
+
+**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### FD Documents Tab — NF-2 Confirm Mailed Inline
+
+Confirm Mailed button (and mailed confirmation with Undo) moved from below
+the NF-2 card to inline in the subtitle row alongside "Notice of Claim".
+
+**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### FD Documents Tab — MD Clinical Table Removed
+
+MD / Clinical collapsible card (PCE and ICD-10 per visit rows with checkboxes)
+removed. Visit Packet is now the primary per-visit document collection.
+
+**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### FD Documents Tab — Visit Packet Checkboxes
+
+Each Visit Packet card now has an individual checkbox for manual
+selection/deselection. `download_name` computed at selection time
+(`VisitPacket_N_MMDDYYYY.pdf`, oldest visit = 1).
+
+**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### FD Documents Tab — Select All Moved Above Visit Packet
+
+Select All button moved from Referral Results header to Visit Packet section
+header. Now selects visit packets + referral result docs (replaces old MD
+forms selection).
+
+**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### FD Documents Tab — Manual Referral Result Upload
+
+Each Referral Results card now has an Upload Result button. FD can upload
+PDFs received outside the system. Uploads to `referral-documents` storage
+bucket under `referral-results/{patientId}/{type}-manual-{ts}.{ext}`.
+Inserts `referral_documents` row (no `patient_id` — confirmed not a column
+on that table). Reloads the card after upload.
+
+**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### Named ZIP Downloads
+
+Files inside downloaded ZIPs now use meaningful names. `download_name`
+computed client-side at selection time, sent to API alongside `path`/`bucket`.
+API uses it as ZIP entry name (fallback: `record_NN.ext`).
+
+Naming convention:
+- Visit Packet: `VisitPacket_N_MMDDYYYY.pdf` (N = oldest visit = 1)
+- Referral result: `ReferralType_N_MMDDYYYY.pdf` (N = result number within type)
+
+**Files:** `cosmos-api/main.py`,
+`app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### Dev Tools — Fixed Email/Phone
+
+All generated test patients now use fixed email `arcchemies@gmail.com` and
+phone `9297683179` so notifications reach the developer during testing.
+
+**Files:** `app/dev/page.tsx`
+
+### Dev Tools — SONO/FC/PSY/EMG Referral Types
+
+SONO, FC, PSY, EMG added to `ALL_REFERRAL_TYPES` with labels, type codes,
+and clinical reasons. "All" chip updated from "All 9" to "All 13".
+
+**Files:** `app/dev/page.tsx`
+
+### Admin — Scroll to Edit Form
+
+Tapping Edit on any admin card now auto-scrolls the edit form into view
+(`scrollIntoView` smooth, 50ms delay). Applied to CarriersSection,
+LawyersSection, UsersSection, ReferralProvidersSection.
+
+**Files:** `app/admin/components/CarriersSection.tsx`,
+`app/admin/components/LawyersSection.tsx`,
+`app/admin/components/UsersSection.tsx`,
+`app/admin/components/ReferralProvidersSection.tsx`
+
+---
+
 ## 2026-07-16 — Session 45
 
 ### Visit Packet Merge — FD Documents Tab
