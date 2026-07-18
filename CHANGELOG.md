@@ -1,3 +1,25 @@
+## 2026-07-18 — Session 48 (continued)
+
+### SMS Notification Infrastructure — Built and Deployed ✅
+
+Complete Twilio SMS notification system built across both repos and deployed to production.
+
+**cosmos-api:**
+- `notifications.py` — new module. Twilio client (lazy init, graceful no-op if credentials missing), `send_sms()` with E.164 normalization, `sms_appointment_confirmed()`, `sms_appointment_reminder()`, `sms_manual()` template functions, `SMS_TEMPLATES` catalogue (5 templates).
+- `main.py` — `POST /notify/sms` (manual FD send, JWT required) and `POST /notify/appointment-reminder` (cron-callable, no JWT, queries appointments 24h out).
+- `requirements.txt` — `twilio` added.
+
+**cosmos-dashboard:**
+- `app/components/SmsModal.tsx` — new shared compose modal. Template picker, free-text body, auto-substitutes patient first name on template select, 1600-char counter, send result feedback. Reused from work queue and patient sheet.
+- `FDDashboardV2.tsx` — work queue Actions column redesigned: 📞 Call now opens phone number modal (tap-to-call). 💬 new SMS icon opens SmsModal.
+- `FDPatientSheet.tsx` — 💬 Message QuickAction added (before Email). NF-2 QuickAction removed. SmsModal mounted with patient context.
+
+**Twilio account:** Created under Cosmos Medical Technologies. `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` set in Render. `TWILIO_FROM_NUMBER` placeholder set — real 718 NYC number (`+17185695200`) to be purchased and activated next session. A2P 10DLC registration pending.
+
+**Files:** `cosmos-api/notifications.py`, `cosmos-api/main.py`, `cosmos-api/requirements.txt`, `app/components/SmsModal.tsx`, `app/dashboard-v2/FDDashboardV2.tsx`, `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+---
+
 ## 2026-07-18 — Session 48
 
 ### Production Outage — Referral Dashboard Restored ✅ CLOSED
