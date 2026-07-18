@@ -1,10 +1,10 @@
-# Cosmos Medical Technologies — HANDOVER (July 17, 2026, Session 46)
+# Cosmos Medical Technologies — HANDOVER (July 17, 2026, Session 47)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
 `PRODUCT_SPEC.md`, permanent dev conventions in `AI_STYLE_GUIDE.md` — this
 document doesn't repeat them, only references them where relevant. Read
-all six documents at session start (`SYSTEM_PROMPT.md` §12).
+all seven documents at session start (`SYSTEM_PROMPT.md` §12).
 
 This handover supersedes all prior `HANDOVER.md` versions — it is
 self-contained.
@@ -13,144 +13,84 @@ self-contained.
 
 ## Current Status
 
-All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed and live.
-Session 46 was a major FD workflow sprint: complete Workflow Stage redesign,
-booking modal improvements, FD Documents tab overhaul (MD Clinical removed,
-visit packet checkboxes, manual referral result upload, named ZIP downloads),
-Needs Scheduling KPI card, Dev Tools enhancements, and Admin scroll-to-edit
-across all sections.
+All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed and live
+as of Session 47. Session 47 was a major infrastructure and UX session:
+Active Patients report, Reports landing page, back navigation fixes, Admin
+improvements, and complete dev/preview environment setup with `cosmos-dev`
+Supabase project.
+
+**Production status:** `cosmosmt.com` is live. Last successful deploy confirmed
+Session 47 — env var restoration required an extra redeploy cycle (see Open Items).
+
+**Dev environment status:** `cosmos-dev` Supabase project is operational.
+Preview URL (`cosmos-dashboard-nu.vercel.app`) hits cosmos-dev. Login confirmed
+working (`super@cosmos.local`). Dev Tools confirmed generating test patients.
+Reports page has a known issue (see Open Items #6).
 
 ---
 
-## Completed This Session (Session 46)
+## Completed This Session (Session 47)
 
-### SONO/FC/PSY/EMG PDF Visual Verification ✅ CLOSED
+### Named ZIP Downloads — Live Test ✅ CLOSED
+End-to-end live test confirmed. Open Item from Session 46 closed.
 
-NPI and license number field population on SONO/FC/PSY/EMG PDFs visually
-verified against real generated PDFs. Fields confirmed populating correctly.
-Open Item #19 from Session 45 closed.
+### Active Patients Report ✅ CLOSED
+New `/reports/active-patients` — standalone page with TanStack Table, 17
+columns, Active/All toggle, global search, column picker, CSV export.
+Back button uses `router.back()`.
 
-### Workflow Stage — Complete Redesign ✅ CLOSED
+**Files:** `app/reports/active-patients/page.tsx`,
+`app/reports/active-patients/ActivePatientsReport.tsx`
 
-FD work queue Workflow Stage column fully redesigned with clinical lifecycle
-stages. Computed in `getWorkflowStage()` in `FDDashboardV2.tsx`.
+### Reports Landing Page ✅ CLOSED
+`/reports` now a card grid entry point. Referral analytics moved to
+`/reports/referrals`. "Active Patients ↗" link in Reports header.
 
-**Stage map (priority order):**
-| Stage | Color | Condition |
-|---|---|---|
-| `Discharged` | Green | `patients.status === 'Discharged'` |
-| `NF-2 Missing` | Red | No `nf2_url` |
-| `Book Init Visit` | Orange | Has `nf2_url`, zero visits |
-| `Cancelled / Rebook` | Red | Most recent appointment is `cancelled` |
-| `Book Follow Up N` | Orange | Has visits, no future appointment; N = visit count |
-| `Upcoming · MMM D` | Cyan | Has future non-cancelled appointment |
+**Files:** `app/reports/page.tsx`, `app/reports/ReportsLanding.tsx`,
+`app/reports/referrals/page.tsx`
 
-- `patients.status` column confirmed as the discharge field (values: `Active`, `Active Treatment`, `Discharged`)
-- `Active` and `Active Treatment` both treated as non-discharged
-- Booking-action stages (Book Init Visit, Book Follow Up N, Cancelled/Rebook) tap directly to `/calendar?patient=ID` — booking modal auto-opens with patient + doctor pre-filled
-- `Upcoming` and `Discharged` open patient sheet
+### Referral Reports — Flat Selects ✅ CLOSED
+`app/reports/referrals/page.tsx` rewritten to use flat selects + client-side
+lookup maps. Eliminates PostgREST FK join dependency. Works on both dev and
+production. `ReportsClient.tsx` unchanged.
 
-**Files:** `app/dashboard-v2/FDDashboardV2.tsx`, `app/dashboard-v2/page.tsx`
+### Back Navigation — router.back() ✅ CLOSED
+`ReportsClient.tsx` and `ActivePatientsReport.tsx` back links converted to
+`router.back()`. Browser history stack respected.
 
-### Needs Scheduling KPI Card ✅ CLOSED
+### Admin Hardware Back Guard ✅ CLOSED
+`#admin` hash sentinel + `popstate` handler. Hardware back from non-overview
+tab returns to overview first; second back exits Admin.
 
-New KPI card counting all patients in booking-action stages (Book Init Visit +
-Book Follow Up N + Cancelled/Rebook). Tapping filters work queue to those
-patients only.
+**Files:** `app/admin/page.tsx`
 
-**Files:** `app/dashboard-v2/FDDashboardV2.tsx`
+### Admin Quick Access — All Sections ✅ CLOSED
+Quick Access grid expanded: ICD-10, Audit Log, Ref. Providers added.
 
-### Booking Modal — Patient Pre-fill Fix ✅ CLOSED
+**Files:** `app/admin/components/OverviewSection.tsx`, `app/admin/page.tsx`
 
-Calendar patient query was `.eq('status','Active Treatment')` — excluded
-`Active` patients, causing empty patient dropdown when arriving from FD
-dashboard. Fixed to `.neq('status','Discharged')` — all non-discharged
-patients now appear.
+### Admin Provider Signature Card ✅ CLOSED
+Thick cyan border removed. Eye emoji + full-width button replaced with plain
+"View" text link. Green `✓` text. Matches rest of admin style.
 
-**Files:** `app/calendar/page.tsx`
+**Files:** `app/admin/components/DoctorsSection.tsx`
 
-### Booking Modal — Duplicate Button Removed ✅ CLOSED
+### Dev/Preview Environment ✅ OPERATIONAL
+- `cosmos-dev` Supabase project created and schema applied
+- `supabase/migrations/000_initial_schema.sql` — 34 tables, 418 columns
+- `supabase/new_user.sql` — reusable user creation template
+- `supabase/seed_from_production.sql` — carriers, lawyers, doctors
+- Vercel env vars: Production and Preview correctly scoped
+- `lib/supabaseServer.ts` — reads `SUPABASE_SERVICE_KEY_PREVIEW` for Preview
+- cosmos-dev seeded and operational
 
-Removed redundant "Schedule First Appointment" empty-state button from
-Appointments tab. Single "Book Appointment" header button remains.
+**Files:** `lib/supabaseServer.ts`, `supabase/migrations/000_initial_schema.sql`,
+`supabase/new_user.sql`, `supabase/seed_from_production.sql`
 
-**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
-
-### Booking Modal — Location Date Chips ✅ CLOSED
-
-When a location is selected in the booking modal, a row of available date
-chips appears showing the next 6 dates for that location's `days_of_week`.
-Tapping a chip sets the appointment date. Left/right arrows page through
-additional dates (6 per page, up to 60 total). `LocationDateChips` is a
-standalone React component with its own page state.
-
-**Files:** `app/calendar/page.tsx`
-
-### FD Documents Tab — Complete Overhaul ✅ CLOSED
-
-Multiple changes to `FDPatientSheet.tsx` Documents tab:
-
-- **Section header** renamed to "No-Fault Forms & Requirements", moved above
-  signature card
-- **Signature card** restyled to match DocCard pattern (green dot indicator,
-  View button right-aligned, Re-sign as underline link — no emoji, no
-  full-width button)
-- **NF-2 Confirm Mailed** moved inline with the NF-2 title row (subtitle
-  row shows mailed status or the button)
-- **MD Clinical table** (PCE/ICD-10 per visit collapsible card) removed —
-  replaced by Visit Packet as the primary per-visit document collection
-- **Visit Packet checkboxes** — each visit packet card now has an individual
-  checkbox for manual selection; `download_name` computed at selection time
-- **Select All** moved above Visit Packet section; now selects visit packets
-  + referral results (replaces old MD forms selection)
-- **Manual upload** — each Referral Results card has an Upload Result button
-  for uploading documents received outside the system. Inserts
-  `referral_documents` row (no `patient_id` column on that table).
-  Storage path: `referral-results/{patientId}/{safeLabel}-manual-{ts}.{ext}`
-- **Referral Results** now show below Visit Packet with Select All on same row
-
-**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
-
-### Named ZIP Downloads ✅ CLOSED
-
-Files inside the downloaded ZIP now use meaningful names instead of
-`record_01.pdf` etc.
-
-**Naming convention:**
-- Visit Packet: `VisitPacket_N_MMDDYYYY.pdf` (N = oldest visit = 1)
-- Referral result: `ReferralType_N_MMDDYYYY.pdf` (N = result number within type)
-- Date format: `MMDDYYYY` (human-readable for medical staff / attorneys)
-
-`download_name` is computed client-side at selection time and sent to the
-API alongside `path` and `bucket`. API uses it as the ZIP entry name,
-falling back to `record_NN.ext` if absent.
-
-**Files:** `cosmos-api/main.py`, `app/dashboard-v2/components/FDPatientSheet.tsx`
-
-### Dev Tools — Fixed Email/Phone + New Referral Types ✅ CLOSED
-
-- All generated test patients now use fixed email `arcchemies@gmail.com` and
-  phone `9297683179` so notifications reach the developer during testing
-- SONO, FC, PSY, EMG added to `ALL_REFERRAL_TYPES` with labels, type codes,
-  and clinical reasons
-- "All" chip updated from "All 9" to "All 13"
-
-**Files:** `app/dev/page.tsx`
-
-### Admin — Scroll to Edit Form ✅ CLOSED
-
-Tapping Edit on any admin card now scrolls the edit form into view
-automatically (`scrollIntoView({ behavior: 'smooth', block: 'start' })` with
-50ms delay). Applied to all four sections with edit forms:
-- CarriersSection
-- LawyersSection
-- UsersSection
-- ReferralProvidersSection
-
-**Files:** `app/admin/components/CarriersSection.tsx`,
-`app/admin/components/LawyersSection.tsx`,
-`app/admin/components/UsersSection.tsx`,
-`app/admin/components/ReferralProvidersSection.tsx`
+### MIGRATIONS.md ✅ CLOSED
+Sixth documentation file added to `cosmos-ai`. Covers environment map, env
+var reference, migration inventory, RLS reference, setup guide, user creation
+guide.
 
 ---
 
@@ -164,143 +104,96 @@ automatically (`scrollIntoView({ behavior: 'smooth', block: 'start' })` with
    `VisitTab.tsx` and Dev Tools card from Admin panel before go-live.
 
 3. **Patient email required at intake.** `PatientFormV2.tsx` email field
-   must be made required. Patient confirmation emails dead until fixed.
+   must become required. Patient confirmation notifications are dead until
+   fixed. Deferred multiple sessions.
 
-4. **Referral workflow auto-advancement logic.** Full workflow design needed.
-   Only SONO/FC/PSY/EMG auto-close on result upload currently. MRI/VNG/ANS/etc.
-   still require manual FD advancement.
+4. **Referral workflow auto-advancement logic.** Only SONO/FC/PSY/EMG
+   currently auto-close on result upload. All other types require manual FD
+   advancement. Full design needed.
 
-5. **Duplicate visit records.** David Anderson has multiple `patient_visits`
-   rows for the same date, all sharing the same generated PDF filenames.
-   Root cause not yet identified — investigate why duplicate visits are
-   being created.
+5. **Duplicate visit records investigation.** Some patients have multiple
+   `patient_visits` rows for the same date sharing generated PDF filenames.
+   Root cause unknown.
 
-6. **Cleanup leftover route folders.** Delete `app/md-v2/[patientId]/ref/`
-   and `app/md-v2/[patientId]/referral/` — both abandoned, broken content.
+6. **Reports page on dev — referral_types relationship error.** `/reports/referrals`
+   on Preview URL still shows "Could not find a relationship between 'referrals'
+   and 'referral_types'". FK constraints added and schema reload sent — may
+   need additional time or a manual PostgREST restart on cosmos-dev free tier.
+   Production Reports unaffected (flat selects fix deployed).
 
-7. **Dashboard V2 — Notes tab persistence.** Notes are session-only.
-   Requires a new `patient_notes` table or column. Roadmap item.
+7. **000_initial_schema.sql needs regeneration.** Generated from batched CSV
+   exports — missing primary keys, JSONB type for `available_days`, and all FK
+   constraints. Apply `schema_fix.sql` manually when setting up new environments
+   until a full `pg_dump`-based regeneration is done.
 
-8. **Dashboard V2 — Stub KPIs.** Patients Waiting, Insurance Verification,
-   Tasks Due Today require new DB tables/columns. Future work.
-
-9. **ReferralSheet header badge.** Still shows raw DB status (`New`,
-   `Scheduled`) instead of computed status. Cosmetic only.
-
-10. **`/referrals/page.tsx` `userRole` hardcoded to `"md"`.** Relies on
-    sessionStorage override. Hard refresh without re-login exposes wrong role.
-
-11. **HIPAA BAAs.** Supabase, Render, Vercel, Resend — all unsigned.
-    Pre-go-live blocker.
-
-12. **SPF/DKIM for cosmosmt.com.** Not yet configured. Pre-go-live blocker.
-
-13. **DME and RX referral codes.** Excluded from Session 38 codes refactor.
-
-14. **Realtime — referrals and appointments.** Current subscription covers
-    `patients`, `patient_visits`, `patient_forms` only. Add before go-live.
-
-15. **PCE guard — minimum pce_data threshold.** Product decision needed.
-
-16. **Ghost mode for PA/NP users.** Location selection currently skipped.
-
-17. **Impersonation session timeout.** Ghost sessions have `timeout=0`.
-
-18. **`patients.intake_url` not in migration file.** Added manually via SQL
-    only — schema drift risk if DB is rebuilt.
-
-19. **ZIP download naming — needs live test.** API change landed (`download_name`
-    support in `/generate-records-zip`). Fresh Select All + Download ZIP test
-    needed to confirm `VisitPacket_N_MMDDYYYY.pdf` names appear correctly.
+8. **Production env var incident resolved but fragile.** `NEXT_PUBLIC_SUPABASE_URL`
+   and `NEXT_PUBLIC_SUPABASE_ANON_KEY` were lost from Production scope during
+   Session 47 dev environment setup and had to be re-added. Vercel mobile UI
+   does not reliably support per-environment scoping of variables with the same
+   name — always use desktop Vercel UI for env var changes.
 
 ---
 
-## DB Schema Changes This Session
+## Known Architecture Gaps (carried forward)
 
-No new migrations. `referral_documents` table confirmed has no `patient_id`
-column — upload insert corrected accordingly.
-
----
-
-## File Confidence
-
-All files below were modified or created this session and confirmed deployed:
-
-| File | Changes |
-|---|---|
-| `cosmos-api/main.py` | `download_name` support in `/generate-records-zip` ZIP entry naming |
-| `app/dashboard-v2/FDDashboardV2.tsx` | Workflow stages redesign; Needs Scheduling KPI; `patient_status` fetched; `getWorkflowStage()` rewritten; booking-action badges route to calendar |
-| `app/dashboard-v2/page.tsx` | `status` added to patients select query |
-| `app/dashboard-v2/components/FDPatientSheet.tsx` | Full Documents tab overhaul — signature card, NF-2 inline mailed, MD Clinical removed, visit packet checkboxes, manual upload, select all, named download, section header |
-| `app/calendar/page.tsx` | Patient query fixed to `.neq('status','Discharged')`; `LocationDateChips` component added; duplicate booking button removed; `React` default import added |
-| `app/dev/page.tsx` | Fixed email/phone on generated patients; SONO/FC/PSY/EMG referral types added |
-| `app/admin/components/CarriersSection.tsx` | Scroll-to-edit on tap |
-| `app/admin/components/LawyersSection.tsx` | Scroll-to-edit on tap |
-| `app/admin/components/UsersSection.tsx` | Scroll-to-edit on tap |
-| `app/admin/components/ReferralProvidersSection.tsx` | Scroll-to-edit on tap |
-
----
-
-## Known Architecture Gaps
-
-- `getReferralProviders()` return type is still `any[]`.
-- `/referrals/page.tsx` `userRole` hardcoded to `"md"` — sessionStorage override only.
-- ReferralSheet header badge reads raw `referrals.status` — cosmetic gap.
-- Body parts missing on sessions rescheduled before Session 36 — data issue.
+- `patients.intake_url` exists only via manual SQL — not in any migration file.
+  Schema drift risk if DB is rebuilt.
 - No FK between `referral_timeline.actor_user_id` and `user_profiles.id`.
-- `(referral as any).cpt_codes` cast in `ReferralOverviewTab`.
-- Render Starter (512MB) insufficient for PDF generation under load.
-- DME and RX referral pages still hardcode `cpt_codes: []`/`icd10_codes: []`.
-- `app/md-v2/[patientId]/ref/` and `app/md-v2/[patientId]/referral/` abandoned folders to delete.
-- Android/Termux filesystem is case-insensitive — git cannot track folder renames with bracket characters.
-- `dashboard-v2` notes are session-only — not persisted to DB.
-- `referral_appointments.needs_review` and `reviewed_at` (migrations 031–032) vestigial.
-- Realtime subscription covers `patients`, `patient_visits`, `patient_forms` only.
-- PCE auto-generation guard fires on any non-empty `pce_data` — minimum field threshold not enforced.
-- `hasPceLocal` variable remains in `PreflightModal` — dead variable, harmless.
-- `PatientForm.tsx` (legacy) still exists and is used nowhere — candidate for removal.
-- `patients.intake_url` added via manual SQL only — not in any migration file.
+- `referral_appointments.needs_review` and `reviewed_at` (Migrations 031-032)
+  are vestigial — flagged for cleanup.
+- `/referrals/page.tsx` `userRole` hardcoded to `"md"` — hard refresh without
+  re-login exposes wrong role.
 - Ghost mode for PA/NP users skips location selection.
-- Ghost mode has no session timeout (timeout=0).
-- Duplicate visit records for some patients — root cause unknown, needs investigation.
-- ZIP download naming (named files) — landed in API but not yet live-tested end-to-end.
+- Ghost sessions have no timeout (`timeout=0`).
+- Abandoned route folders `ref/` and `referral/` left in repo for cleanup.
 
 ---
 
-## Technical Lessons This Session
+## Dev Environment Reference
 
-- `visitPacketMap` (Record<string, string>) is the correct pattern for
-  tracking per-visit state across multiple visit cards — a single string
-  state variable causes all cards to share the same value.
-- `isImaging` in `ReferralAppointmentTab.tsx` was gated on `category === 'imaging'`
-  which incorrectly included SONO/Ultrasound. Always gate MRI-specific logic
-  on `typeCode` (MRI/MRA/CT) not on category string.
-- `billing_npi` and `doctor_license_number` are the correct keys from
-  `_build_doctor_fields()` — not `npi` and `license_number`.
-- `awaiting_results` is not a valid `ReferralStatus` TypeScript type — use
-  the actual enum members only.
-- `'use client'` components exporting named exports (not default) must use
-  `export function X()` syntax — `page.tsx` server components that import
-  them must use `{ X }` named import, not default import.
-- Python `.format(**r)` fails when the template string contains `{}` dict
-  literals — use string concatenation instead for Python code generation.
-- Line-number based file patching (reading `lines[]` by index) is more
-  reliable than string anchoring when file has non-UTF-8 bytes or
-  inconsistent whitespace.
-- `referral_documents` table has no `patient_id` column — confirmed via
-  `information_schema.columns`. Upload inserts must not include it.
-- `patients.status` (not `patient_status`) is the correct column name for
-  discharge state. Values: `Active`, `Active Treatment`, `Discharged`.
-  Both `Active` and `Active Treatment` are treated as non-discharged for
-  workflow stage logic.
-- `useRef`/`useEffect` for scroll-to-edit must be declared after the state
-  variable they reference — declaring before causes TS2448 "used before
-  declaration" error.
-- sed commands with complex substitutions involving brackets and quotes are
-  unreliable in Termux — always prefer Python heredoc or patch scripts for
-  anything beyond simple single-word replacements.
-- Chrome does not overwrite same-named downloads — always `rm -f` before
-  re-downloading a patch script with the same filename.
+| Environment | URL | Supabase | Branch |
+|---|---|---|---|
+| Production | cosmosmt.com | cosmos (prod) | `main` |
+| Preview | cosmos-dashboard-nu.vercel.app | cosmos-dev | any feature branch |
+
+**Dev login:** `super@cosmos.local` / PIN `999999`
+
+**Feature branch workflow:**
+```bash
+git checkout -b feat/my-feature
+# build and test
+git push origin feat/my-feature
+# → Vercel auto-deploys Preview → hits cosmos-dev
+# → test at Preview URL
+git checkout main && git merge feat/my-feature && git push
+# → Vercel auto-deploys to Production
+```
+
+**When to use a feature branch:** any new DB column/table, anything that could
+break existing workflows, multi-session features, anything touching auth/billing/PDF.
+
+**Schema changes:** apply manually to cosmos-dev first, test on Preview, then
+apply same SQL to production Supabase before merging code to main.
+
+---
+
+## Lessons Learned (Session 47, appended)
+
+- Vercel mobile UI cannot reliably manage per-environment scoping for variables
+  with the same name — always use Vercel desktop UI for env var changes involving
+  Production vs Preview scope.
+- PostgREST on Supabase free tier does not reliably pick up FK constraints
+  added via ALTER TABLE — use flat selects + client-side lookup maps for all
+  Supabase joins (Cosmos standard pattern, confirmed necessary for dev
+  environment reliability).
+- Supabase SQL Editor export is capped at 100 rows regardless of LIMIT setting
+  — use 1,000 row limit setting on the UI row limit dropdown to get more, but
+  batch exports are still required for schemas with many columns.
+- `NOTIFY pgrst, 'reload schema'` can be run from SQL Editor to trigger
+  PostgREST schema cache refresh without needing Supabase dashboard access.
+- When `available_days` was declared as `TEXT[]` in migration but production
+  uses `JSONB`, seed inserts fail with type mismatch — always export column
+  types before generating seed scripts.
 
 ---
 
@@ -390,7 +283,7 @@ All files below were modified or created this session and confirmed deployed:
 - [x] Column picker — custom checkbox UI, centered dropdown, Reset button (Session 45)
 - [x] Search bar X clear button (Session 45)
 - [x] Activity Summary buttons → tab navigation (Session 45)
-- [x] Workflow Stage — full lifecycle redesign (Discharged/Book Init Visit/Book Follow Up N/Cancelled Rebook/Upcoming date) (Session 46)
+- [x] Workflow Stage — full lifecycle redesign (Session 46)
 - [x] Needs Scheduling KPI card (Session 46)
 - [x] Booking-action badges route directly to calendar with patient pre-filled (Session 46)
 - [x] Documents tab — MD Clinical removed; visit packet checkboxes; manual result upload; named ZIP downloads; NF-2 mailed inline; signature card restyled; section header renamed/moved (Session 46)
@@ -405,6 +298,10 @@ All files below were modified or created this session and confirmed deployed:
 - [x] Provider Performance tab (Sessions 42–43)
 - [x] Open Aging tab (Sessions 42–43)
 - [x] Referral Pipeline tab (Session 45)
+- [x] Reports landing page — card grid entry point (Session 47)
+- [x] Active Patients report — standalone page (Session 47)
+- [x] Referral analytics moved to /reports/referrals (Session 47)
+- [x] Reports flat selects — no PostgREST FK dependency (Session 47)
 
 ### Stage 3c — Patient Intake
 - [x] PatientFormV2 — 5-tab wizard, FD dark theme (Session 43)
@@ -435,6 +332,9 @@ All files below were modified or created this session and confirmed deployed:
 
 ### Stage 3f — Admin
 - [x] Scroll-to-edit across all admin sections (Session 46)
+- [x] Quick Access — all 8 sections (Session 47)
+- [x] Hardware back guard — stays inside admin (Session 47)
+- [x] Provider signature card restyled (Session 47)
 
 ### Stage 4 — Billing
 - [ ] Billing packet generation improvements
@@ -442,6 +342,10 @@ All files below were modified or created this session and confirmed deployed:
 
 ### Stage 5 — Infrastructure
 - [ ] Render upgrade to Standard plan — pre-go-live blocker (Visit Packet production-blocked until done)
+- [x] Dev/Preview environment — cosmos-dev Supabase (Session 47)
+- [x] Initial schema migration — 000_initial_schema.sql (Session 47)
+- [x] MIGRATIONS.md documentation (Session 47)
+- [ ] 000_initial_schema.sql regeneration from pg_dump (technical debt)
 - [ ] PDF migration to client-side @react-pdf/renderer (Phase 2, long-term)
 
 ### Stage 6 — Scale
@@ -452,5 +356,6 @@ All files below were modified or created this session and confirmed deployed:
 ### Stage 7 — Compliance
 - [ ] HIPAA compliance review
 - [ ] BAA with Supabase, Render, Vercel, Resend
+- [ ] SPF/DKIM for cosmosmt.com
 - [ ] Data retention and deletion policy
 - [ ] Patient data export capability

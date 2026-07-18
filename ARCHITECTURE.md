@@ -29,8 +29,11 @@ mobile web UI.
 On-device paths (Termux, Android-only — no desktop access exists or
 will exist): `~/cosmos-dashboard` (confirmed), `~/cosmos-api` (confirmed).
 
-Supabase project URL: `https://ttudxnzmybcwrtqlbtta.supabase.co` — never
+Supabase production project URL: `https://ttudxnzmybcwrtqlbtta.supabase.co` — never
 change without explicit instruction (`SYSTEM_PROMPT.md` §3).
+
+Supabase dev project URL: `https://tpwbgqfdznqtjqimxric.supabase.co` —
+cosmos-dev project, used for Preview/dev deployments only (Session 47).
 
 **Styling note**: Tailwind CSS is present in `package.json` but was
 unused until the Biller dashboard. Six deliberate, scoped exceptions
@@ -55,6 +58,37 @@ Every other screen remains hand-rolled inline `style={{...}}`.
 ---
 
 ## 2. Deployment Pipeline
+
+### Environments (added Session 47)
+
+| Environment | URL | Supabase | Branch |
+|---|---|---|---|
+| Production | cosmosmt.com | cosmos (prod) | `main` |
+| Preview / Dev | cosmos-dashboard-nu.vercel.app | cosmos-dev | any feature branch |
+
+### Vercel Environment Variables
+
+| Variable | Production | Preview |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | prod URL | cosmos-dev URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | prod anon key | cosmos-dev publishable key |
+| `SUPABASE_SERVICE_KEY` | prod service key | — |
+| `SUPABASE_SERVICE_KEY_PREVIEW` | — | cosmos-dev secret key |
+| `NEXT_PUBLIC_PDF_API_URL` | Render URL (shared) | Render URL (shared) |
+| `RESEND_API_KEY` | shared | shared |
+
+Key routing in `lib/supabaseServer.ts`:
+```ts
+const supabaseServiceKey =
+  process.env.SUPABASE_SERVICE_KEY_PREVIEW ||
+  process.env.SUPABASE_SERVICE_KEY!
+```
+Preview deployments pick up `SUPABASE_SERVICE_KEY_PREVIEW`; production
+falls through to `SUPABASE_SERVICE_KEY`.
+
+**Warning:** Vercel mobile UI cannot reliably manage per-environment
+scoping for variables with the same name — always use Vercel desktop UI
+(`vercel.com`) for env var changes involving Production vs Preview scope.
 
 **`cosmos-dashboard` (Vercel)** — intentional double-deploy:
 1. `git push` triggers Vercel's GitHub integration auto-deploy.
@@ -90,6 +124,15 @@ in `HANDOVER.md` Open Items. `sql/003_rls_audit_query.sql` is the
 standing tool for checking a table's actual policy set; run it before
 trusting any read/write path "just works," especially for newly-added
 columns.
+
+**PostgREST FK join reliability note (Session 47):** PostgREST on
+Supabase free tier does not reliably pick up FK constraints added via
+`ALTER TABLE` — the schema cache can be slow or fail to reload even
+after `NOTIFY pgrst, 'reload schema'`. **Cosmos standard pattern for
+all Supabase queries: flat selects + client-side lookup maps.** Never
+rely on PostgREST FK join syntax (e.g. `referral_types(label, category)`)
+in server components — use separate fetches and merge in TypeScript.
+`app/reports/referrals/page.tsx` is the reference implementation.
 
 `sql/` migration history (numbered, sequential, already run against the
 live database unless noted otherwise in `HANDOVER.md`). **Migrations

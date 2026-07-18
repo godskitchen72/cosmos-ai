@@ -1,3 +1,81 @@
+## 2026-07-17 — Session 47
+
+### Named ZIP Downloads — Live Test ✅ CLOSED
+
+Named ZIP downloads (`VisitPacket_N_MMDDYYYY.pdf` / `ReferralType_N_MMDDYYYY.pdf`) confirmed working end-to-end. Open Item from Session 46 closed.
+
+### Active Patients Report — New Standalone Page
+
+New `/reports/active-patients` page with full TanStack Table. Features: Active/All status toggle (defaults to non-discharged), global search, per-column sort, column visibility picker (17 columns), CSV export respecting current filters and visible columns. Back button uses `router.back()`.
+
+Columns: Patient ID, Last Name, First Name, Status, Date of Accident, Date of Birth, Claim #, Carrier, Treating Provider, Visits, Last Visit, Signature, NF-2, NF-2 Mailed, AOB, Attorney Email, Patient Email.
+
+**Files:** `app/reports/active-patients/page.tsx`, `app/reports/active-patients/ActivePatientsReport.tsx`
+
+### Reports Landing Page — Card Grid
+
+`/reports` now shows a card grid entry point instead of landing directly on referral analytics. Each card navigates to its own route. "Active Patients ↗" link added to Reports header.
+
+**Files:** `app/reports/page.tsx` (replaced), `app/reports/ReportsLanding.tsx` (new), `app/reports/referrals/page.tsx` (new — referral analytics moved here)
+
+### Referral Reports — Flat Selects + Client-Side Joins
+
+`app/reports/referrals/page.tsx` rewritten to use flat selects + client-side lookup maps instead of PostgREST FK join syntax. Eliminates dependency on PostgREST schema cache being warmed — works reliably on both dev and production. `ReportsClient.tsx` unchanged.
+
+**Files:** `app/reports/referrals/page.tsx`
+
+### Back Navigation — router.back() Throughout
+
+All hardcoded `href` back links in Reports and Admin replaced with `router.back()` so browser history stack is respected.
+
+**Files:** `app/reports/ReportsClient.tsx`, `app/reports/active-patients/ActivePatientsReport.tsx`
+
+### Admin — Hardware Back Guard
+
+`app/admin/page.tsx` now pushes a `#admin` hash sentinel on mount and intercepts `popstate`. Hardware back from any non-overview tab returns to Admin overview first; second back from overview exits Admin normally.
+
+**Files:** `app/admin/page.tsx`
+
+### Admin — Quick Access All Sections
+
+Admin Overview Quick Access grid expanded from 5 to 8 sections. Added: ICD-10, Audit Log, Ref. Providers. `admin-tab` event handler updated to include `audit` and `ref-providers`.
+
+**Files:** `app/admin/components/OverviewSection.tsx`, `app/admin/page.tsx`
+
+### Admin — Provider Signature Card Restyled
+
+DoctorsSection signature card: thick cyan border removed (now `1px solid #1a3a4a`), eye emoji + full-width "View Signature" button replaced with plain "View" text link inline with "Re-draw" button. Green `✓ Signature on file` text replaces cyan checkbox label.
+
+**Files:** `app/admin/components/DoctorsSection.tsx`
+
+### Dev/Preview Environment — cosmos-dev Supabase
+
+Complete dev environment setup:
+- `cosmos-dev` Supabase project created (free tier)
+- `supabase/migrations/000_initial_schema.sql` generated — 34 tables, 418 columns, RLS policies, indexes, seed data
+- `supabase/new_user.sql` — reusable user creation template
+- `supabase/seed_from_production.sql` — carriers, lawyers, doctors from production
+- Vercel env vars wired: Production and Preview correctly scoped
+- `lib/supabaseServer.ts` updated: reads `SUPABASE_SERVICE_KEY_PREVIEW` for Preview
+- cosmos-dev seeded: 7 doctors, 20 carriers, 3 lawyers, 14 referral types, superadmin (`super@cosmos.local` / PIN `999999`)
+- Dev environment confirmed operational: login ✅, Admin ✅, Dev Tools ✅, 25 test patients generated ✅
+
+**Files:** `lib/supabaseServer.ts`, `supabase/migrations/000_initial_schema.sql`, `supabase/new_user.sql`, `supabase/seed_from_production.sql`
+
+### MIGRATIONS.md — New Documentation File
+
+Sixth documentation file added to `cosmos-ai` repo. Covers: environment map, Vercel env var reference, migration file inventory, RLS policy reference, new environment setup guide, new user creation guide, Session 47 schema changes, known technical debt.
+
+**Files:** `cosmos-ai/MIGRATIONS.md`
+
+### cosmos-dev Schema Fixes (manual SQL on cosmos-dev only)
+
+Primary keys added to all core tables. `doctors.available_days` type corrected `TEXT[] → JSONB`. FK constraints added: `referrals→referral_types`, `referrals→patients`, `referral_appointments→referrals`, `referral_documents→referrals`, `referral_timeline→referrals`, `referral_notes→referrals`, `patient_visits→patients`, `appointments→patients`. RLS authenticated policies added to all tables. Schema reload via `NOTIFY pgrst, 'reload schema'`.
+
+Note: These changes are on cosmos-dev only. `000_initial_schema.sql` requires regeneration from a full `pg_dump` to incorporate them permanently.
+
+---
+
 ## 2026-07-17 — Session 46
 
 ### SONO/FC/PSY/EMG PDF Visual Verification
