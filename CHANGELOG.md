@@ -1,3 +1,60 @@
+## 2026-07-18 — Session 48
+
+### Production Outage — Referral Dashboard Restored ✅ CLOSED
+
+`cosmosmt.com/referrals` was returning "Invalid API key" on load. Root cause: `SUPABASE_SERVICE_KEY_PREVIEW` was scoped to both Production and Preview in Vercel. `lib/supabaseServer.ts` uses `SUPABASE_SERVICE_KEY_PREVIEW || SUPABASE_SERVICE_KEY` — with the cosmos-dev key present in Production scope, it was being used against the production Supabase project, which rejected it. Fixed by rescoping `SUPABASE_SERVICE_KEY_PREVIEW` to Preview only. Production referrals dashboard confirmed operational.
+
+### Production — Duplicate FK Constraint Removed ✅ CLOSED
+
+Adding the cosmos-dev FK `fk_referrals_referral_provider` during this session's debugging created a second FK between `referrals` and `referral_providers` on production (the original `referrals_referral_provider_id_fkey` already existed). PostgREST returned "more than one relationship found" error. Duplicate `fk_referrals_referral_provider` dropped on production. `NOTIFY pgrst, 'reload schema'` sent. Production referrals confirmed working.
+
+### Preview Environment — Env Vars Corrected ✅ CLOSED
+
+Preview deployments were hitting production Supabase due to missing Preview-scoped env vars. Fixed:
+- `NEXT_PUBLIC_SUPABASE_URL` — Preview entry confirmed pointing to cosmos-dev (`tpwbgqfdznqtjqimxric`)
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` — cosmos-dev anon key added to Preview scope
+- `SUPABASE_SERVICE_KEY_PREVIEW` — confirmed present, rescoped to Preview only
+- Stable Preview URL confirmed: `cosmos-dashboard-nu.vercel.app`
+
+### Preview Deployment Workflow Clarified ✅ CLOSED
+
+Root cause of Preview never deploying: all pushes were to `main`, which always triggers Production. Preview deployments require a feature branch (`git push origin feat/branch-name`). `feat/dev-test` branch used to trigger and confirm first real Preview build. Branch deleted after confirmation. Workflow documented.
+
+### cosmos-dev Schema — Full Rebuild from pg_dump ✅ CLOSED
+
+cosmos-dev schema was severely drifted from production — `patients` table had `patient_id text` PK instead of `id uuid`, `doctors` used `doctor_id` as PK, multiple tables missing PKs entirely. Piecemeal patching was not viable. Performed full rebuild:
+
+1. Installed `postgresql` client via `pkg install postgresql -y` in Termux
+2. Production DB password reset to remove `@` character (URL-encoding incompatibility with `pg_dump` connection strings)
+3. Schema-only dump from production: `pg_dump "postgresql://postgres:PASSWORD@db.ttudxnzmybcwrtqlbtta.supabase.co:5432/postgres" --schema-only --no-owner --no-acl -f ~/prod_schema.sql`
+4. Applied to cosmos-dev: `psql "postgresql://postgres:PASSWORD@db.tpwbgqfdznqtjqimxric.supabase.co:5432/postgres" -f ~/prod_schema.sql`
+5. All 34 tables confirmed present on cosmos-dev post-apply
+6. Errors during apply (Supabase internal system objects, publications, event triggers) — all harmless, system-owned objects that already exist on cosmos-dev free tier
+
+### cosmos-dev — Duplicate FK Constraints Removed ✅ CLOSED
+
+The pg_dump applied production FK constraints on top of the manually-added ones from earlier in this session and Session 47, creating duplicates. PostgREST returns "more than one relationship found" for any duplicated FK. All duplicates identified and dropped:
+
+```sql
+-- Dropped (manual duplicates from Session 47 / this session):
+ALTER TABLE public.referral_appointments DROP CONSTRAINT fk_ref_appointments_referral;
+ALTER TABLE public.referrals DROP CONSTRAINT fk_referrals_patient;
+ALTER TABLE public.referrals DROP CONSTRAINT fk_referrals_referral_type;
+ALTER TABLE public.appointments DROP CONSTRAINT fk_appointments_patient;
+ALTER TABLE public.patient_visits DROP CONSTRAINT fk_patient_visits_patient;
+ALTER TABLE public.referral_documents DROP CONSTRAINT fk_ref_documents_referral;
+ALTER TABLE public.referral_notes DROP CONSTRAINT fk_ref_notes_referral;
+ALTER TABLE public.referral_timeline DROP CONSTRAINT fk_ref_timeline_referral;
+```
+
+`referral_providers` PK (`id`) and FK (`referrals_referral_provider_id_fkey`) also added to cosmos-dev (were missing — not in Session 47 patch). Schema reload sent. cosmos-dev `/referrals` confirmed working.
+
+### cosmos-dev Schema Status ✅ CONFIRMED CLEAN
+
+Final duplicate FK check returned zero true duplicates. All remaining multi-FK entries (`referrals→auth.users` ×4, `referral_documents→auth.users` ×2, `biller_md_flags→user_profiles` ×2) are legitimate — each targets a different column on the same table. cosmos-dev PostgREST schema is clean.
+
+---
+
 ## 2026-07-17 — Session 47
 
 ### Named ZIP Downloads — Live Test ✅ CLOSED

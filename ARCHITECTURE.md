@@ -90,6 +90,18 @@ falls through to `SUPABASE_SERVICE_KEY`.
 scoping for variables with the same name — always use Vercel desktop UI
 (`vercel.com`) for env var changes involving Production vs Preview scope.
 
+**Session 48 incident:** `SUPABASE_SERVICE_KEY_PREVIEW` was accidentally
+scoped to both Production and Preview. Because `supabaseServer.ts` uses
+`SUPABASE_SERVICE_KEY_PREVIEW || SUPABASE_SERVICE_KEY`, the cosmos-dev
+key was being sent to production Supabase, which rejected it as invalid.
+Fixed by rescoping to Preview only. Rule: `SUPABASE_SERVICE_KEY_PREVIEW`
+must **never** be scoped to Production.
+
+**Preview deployment note (Session 48):** Preview deployments only happen
+on feature branches — pushing to `main` always triggers Production only.
+`cosmos-dashboard-nu.vercel.app` is the stable alias for the latest
+Preview build and is the correct URL for dev testing.
+
 **`cosmos-dashboard` (Vercel)** — intentional double-deploy:
 1. `git push` triggers Vercel's GitHub integration auto-deploy.
 2. An explicit `vercel --prod --yes` CLI call is also run in the same
@@ -125,14 +137,25 @@ standing tool for checking a table's actual policy set; run it before
 trusting any read/write path "just works," especially for newly-added
 columns.
 
-**PostgREST FK join reliability note (Session 47):** PostgREST on
+**PostgREST FK join reliability note (Sessions 47–48):** PostgREST on
 Supabase free tier does not reliably pick up FK constraints added via
 `ALTER TABLE` — the schema cache can be slow or fail to reload even
-after `NOTIFY pgrst, 'reload schema'`. **Cosmos standard pattern for
-all Supabase queries: flat selects + client-side lookup maps.** Never
-rely on PostgREST FK join syntax (e.g. `referral_types(label, category)`)
-in server components — use separate fetches and merge in TypeScript.
+after `NOTIFY pgrst, 'reload schema'`. Additionally, duplicate FK
+constraints between the same two tables cause PostgREST to return
+"more than one relationship found" — this was triggered on production
+and cosmos-dev during Session 48 when manual patches were applied on top
+of existing constraints. Always check for duplicates after any FK work.
+**Cosmos standard pattern for all Supabase queries: flat selects +
+client-side lookup maps.** Never rely on PostgREST FK join syntax
+(e.g. `referral_types(label, category)`) in server components — use
+separate fetches and merge in TypeScript.
 `app/reports/referrals/page.tsx` is the reference implementation.
+
+**cosmos-dev schema (Session 48):** cosmos-dev was fully rebuilt from a
+production `pg_dump` — all 34 tables present with correct PKs and FKs.
+The `000_initial_schema.sql` file on disk is stale and should not be
+used for new environment setup. Use the pg_dump method documented in
+`MIGRATIONS.md`.
 
 `sql/` migration history (numbered, sequential, already run against the
 live database unless noted otherwise in `HANDOVER.md`). **Migrations

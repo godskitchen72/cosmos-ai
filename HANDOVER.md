@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 17, 2026, Session 47)
+# Cosmos Medical Technologies — HANDOVER (July 18, 2026, Session 48)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -13,23 +13,38 @@ self-contained.
 
 ## Current Status
 
-All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed and live
-as of Session 47. Session 47 was a major infrastructure and UX session:
-Active Patients report, Reports landing page, back navigation fixes, Admin
-improvements, and complete dev/preview environment setup with `cosmos-dev`
-Supabase project.
+All `cosmos-dashboard` commits confirmed deployed and live as of Session 48.
+Session 48 was an infrastructure and environment stability session: production
+referral dashboard outage resolved, Preview environment fully operational,
+cosmos-dev schema rebuilt from production pg_dump.
 
-**Production status:** `cosmosmt.com` is live. Last successful deploy confirmed
-Session 47 — env var restoration required an extra redeploy cycle (see Open Items).
+**Production status:** `cosmosmt.com` is live. Referral dashboard confirmed
+working. env var scoping corrected (see Session 48 completed items).
 
-**Dev environment status:** `cosmos-dev` Supabase project is operational.
-Preview URL (`cosmos-dashboard-nu.vercel.app`) hits cosmos-dev. Login confirmed
-working (`super@cosmos.local`). Dev Tools confirmed generating test patients.
-Reports page has a known issue (see Open Items #6).
+**Dev environment status:** `cosmos-dev` Supabase project is fully operational.
+Schema rebuilt from production pg_dump — all 34 tables present with correct
+PKs and FK constraints. Preview URL (`cosmos-dashboard-nu.vercel.app`) hits
+cosmos-dev. `/referrals` and `/reports` confirmed working on Preview.
+Login confirmed working (`super@cosmos.local` / PIN `999999`).
 
 ---
 
-## Completed This Session (Session 47)
+## Completed This Session (Session 48)
+
+### Production Referral Dashboard Outage — Resolved ✅ CLOSED
+`SUPABASE_SERVICE_KEY_PREVIEW` was scoped to Production and Preview — causing production to use the cosmos-dev service key, rejected by production Supabase as invalid. Rescoped to Preview only. Duplicate FK constraint (`fk_referrals_referral_provider`) dropped from production. Referral dashboard confirmed working on `cosmosmt.com`.
+
+### Preview Environment — Fully Operational ✅ CLOSED
+Preview env vars corrected: `NEXT_PUBLIC_SUPABASE_ANON_KEY` added to Preview scope, `SUPABASE_SERVICE_KEY_PREVIEW` rescoped to Preview only, `NEXT_PUBLIC_SUPABASE_URL` for Preview confirmed pointing to cosmos-dev. Stable Preview URL: `cosmos-dashboard-nu.vercel.app`. Preview deployment workflow clarified — feature branches only, never `main`.
+
+### cosmos-dev Schema — Rebuilt from pg_dump ✅ CLOSED
+Schema was severely drifted. Full rebuild performed via `pg_dump` from production using Termux `postgresql` client. All 34 tables confirmed present. All duplicate FK constraints (from Session 47 manual patches + pg_dump) identified and dropped. cosmos-dev PostgREST schema confirmed clean. `/referrals` and `/reports` working on Preview.
+
+**Method documented in MIGRATIONS.md** — `pg_dump` via direct connection (port 5432, not pooler) is the confirmed working approach from Android/Termux.
+
+---
+
+## Completed Previous Session (Session 47)
 
 ### Named ZIP Downloads — Live Test ✅ CLOSED
 End-to-end live test confirmed. Open Item from Session 46 closed.
@@ -115,22 +130,19 @@ guide.
    `patient_visits` rows for the same date sharing generated PDF filenames.
    Root cause unknown.
 
-6. **Reports page on dev — referral_types relationship error.** `/reports/referrals`
-   on Preview URL still shows "Could not find a relationship between 'referrals'
-   and 'referral_types'". FK constraints added and schema reload sent — may
-   need additional time or a manual PostgREST restart on cosmos-dev free tier.
-   Production Reports unaffected (flat selects fix deployed).
+6. **000_initial_schema.sql — superseded by pg_dump method.** The Session 47
+   manual schema file is now obsolete for new environment setup. Use the
+   pg_dump approach documented in MIGRATIONS.md instead. The file on disk
+   is stale and should not be used for new environment setup.
 
-7. **000_initial_schema.sql needs regeneration.** Generated from batched CSV
-   exports — missing primary keys, JSONB type for `available_days`, and all FK
-   constraints. Apply `schema_fix.sql` manually when setting up new environments
-   until a full `pg_dump`-based regeneration is done.
+7. **Production DB password changed this session.** Password was reset to
+   remove `@` character for pg_dump compatibility. Ensure this is noted
+   if any other tooling references the old password format.
 
-8. **Production env var incident resolved but fragile.** `NEXT_PUBLIC_SUPABASE_URL`
-   and `NEXT_PUBLIC_SUPABASE_ANON_KEY` were lost from Production scope during
-   Session 47 dev environment setup and had to be re-added. Vercel mobile UI
-   does not reliably support per-environment scoping of variables with the same
-   name — always use desktop Vercel UI for env var changes.
+8. **Vercel env var scoping — standing fragile point.** Mobile Vercel UI
+   cannot reliably manage per-environment scoping. Always use desktop browser
+   for any env var changes. Rule now documented in MIGRATIONS.md and
+   ARCHITECTURE.md.
 
 ---
 
@@ -158,13 +170,17 @@ guide.
 
 **Dev login:** `super@cosmos.local` / PIN `999999`
 
+**Stable Preview URL:** `cosmos-dashboard-nu.vercel.app` — always points to latest Preview build. Use this for testing, not per-deployment URLs.
+
+**Important:** Preview deployments only happen on feature branches — NOT `main`. Pushing to `main` always triggers Production. Always create a feature branch for Preview testing.
+
 **Feature branch workflow:**
 ```bash
 git checkout -b feat/my-feature
 # build and test
 git push origin feat/my-feature
 # → Vercel auto-deploys Preview → hits cosmos-dev
-# → test at Preview URL
+# → test at cosmos-dashboard-nu.vercel.app
 git checkout main && git merge feat/my-feature && git push
 # → Vercel auto-deploys to Production
 ```
@@ -345,7 +361,8 @@ apply same SQL to production Supabase before merging code to main.
 - [x] Dev/Preview environment — cosmos-dev Supabase (Session 47)
 - [x] Initial schema migration — 000_initial_schema.sql (Session 47)
 - [x] MIGRATIONS.md documentation (Session 47)
-- [ ] 000_initial_schema.sql regeneration from pg_dump (technical debt)
+- [x] cosmos-dev schema rebuilt from pg_dump (Session 48) — pg_dump method is now the documented approach; 000_initial_schema.sql is superseded
+- [ ] 000_initial_schema.sql on disk needs update or removal to prevent confusion
 - [ ] PDF migration to client-side @react-pdf/renderer (Phase 2, long-term)
 
 ### Stage 6 — Scale

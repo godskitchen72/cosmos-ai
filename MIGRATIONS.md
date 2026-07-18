@@ -70,12 +70,46 @@ All tables have:
 
 ## Setting Up a New Environment
 
-1. Create Supabase project (free tier)
-2. SQL Editor → paste `000_initial_schema.sql` → Run and enable RLS
-3. Run Session 47 Schema Changes SQL below
-4. Supabase → Authentication → Users → Add user → run `new_user.sql`
-5. Vercel env vars (desktop browser) → add Preview-scoped vars
-6. Run `seed_from_production.sql` or use Dev Tools to generate test patients
+**Preferred method (Session 48+): pg_dump from production**
+
+```bash
+# 1. Install PostgreSQL client in Termux (if not already installed)
+pkg install postgresql -y
+
+# 2. Dump production schema (schema only — no data)
+pg_dump "postgresql://postgres:PASSWORD@db.ttudxnzmybcwrtqlbtta.supabase.co:5432/postgres" \
+  --schema-only --no-owner --no-acl -f ~/prod_schema.sql
+
+# 3. Apply to new environment
+psql "postgresql://postgres:PASSWORD@db.<new-project-id>.supabase.co:5432/postgres" \
+  -f ~/prod_schema.sql 2>&1 | tail -30
+```
+
+**Notes:**
+- Use direct connection (`db.<id>.supabase.co:5432`), NOT the pooler — pg_dump requires direct connection
+- DB password must not contain `@` — reset via Supabase dashboard if needed (Settings → Database → Reset password)
+- Errors about Supabase internal objects (`s3_multipart_uploads_parts`, `vector_indexes`, publications, event triggers) are harmless — these are system-owned and already exist on all Supabase projects
+- After apply, run duplicate FK check (see below) and drop any pre-existing manual patches
+
+**Post-apply: check for duplicate FKs**
+```sql
+SELECT conrelid::regclass AS table_name, confrelid::regclass AS ref_table, COUNT(*) AS fk_count
+FROM pg_constraint
+WHERE contype = 'f'
+AND conrelid::regclass::text NOT LIKE 'pg_%'
+GROUP BY conrelid, confrelid
+HAVING COUNT(*) > 1
+ORDER BY table_name;
+```
+Any result with `fk_count > 1` where both point to the same column is a duplicate — drop the manually-named one (prefixed `fk_`).
+
+**After schema apply:**
+4. `NOTIFY pgrst, 'reload schema';` in SQL editor
+5. Supabase → Authentication → Users → Add user → run `new_user.sql`
+6. Vercel env vars (desktop browser only) → add Preview-scoped vars
+7. Run `seed_from_production.sql` or use Dev Tools to generate test patients
+
+**Legacy method (deprecated):** `000_initial_schema.sql` + Session 47 Schema Changes SQL. Do not use for new environments — schema is now stale relative to production.
 
 ---
 
@@ -152,10 +186,32 @@ NOTIFY pgrst, 'reload schema';
 
 ## Known Technical Debt
 
-- `000_initial_schema.sql` needs regeneration from a full `pg_dump` (desktop required)
-- `patients.intake_url` column exists in production via manual SQL — not in migration
-- `referral_appointments.needs_review` and `reviewed_at` are vestigial — flagged for cleanup
-- PostgREST on free-tier Supabase does not reliably pick up FK constraints — use flat selects + client-side joins (Cosmos standard pattern; `app/reports/referrals/page.tsx` is the reference implementation)
+- `000_initial_schema.sql` on disk is stale — superseded by pg_dump method (Session 48). Should be removed or replaced with a note pointing to the pg_dump approach to prevent confusion.
+- `patients.intake_url` column exists in production via manual SQL — not captured in any migration file. Schema drift risk on rebuild (pg_dump will capture it going forward).
+- `referral_appointments.needs_review` and `reviewed_at` are vestigial — flagged for cleanup.
+- PostgREST on free-tier Supabase does not reliably pick up FK constraints — use flat selects + client-side joins (Cosmos standard pattern; `app/reports/referrals/page.tsx` is the reference implementation).
+- Production DB password was reset Session 48 (removed `@` for pg_dump compatibility). No app code uses this password — only direct DB connections (pg_dump, psql). cosmos-dev DB password also reset same session.
+
+---
+
+## Session 48 — cosmos-dev Schema Rebuild (July 18, 2026)
+
+cosmos-dev was rebuilt from a production pg_dump after discovering severe schema drift (wrong PK names/types on `patients`, `doctors`; missing PKs on multiple tables). The `000_initial_schema.sql` + manual patch approach was abandoned.
+
+**Rebuild steps performed:**
+1. `pkg install postgresql -y` in Termux
+2. Production DB password reset (removed `@`)
+3. `pg_dump` from production direct connection → `~/prod_schema.sql`
+4. cosmos-dev DB password reset (removed `@`)
+5. `psql` applied `prod_schema.sql` to cosmos-dev
+6. All 34 tables confirmed present
+7. Duplicate FK constraints from Session 47 manual patches dropped (8 constraints removed)
+8. `referral_providers` PK added (was missing from cosmos-dev)
+9. `referrals_referral_provider_id_fkey` FK added to cosmos-dev
+10. `NOTIFY pgrst, 'reload schema'` sent
+11. Preview `/referrals` and `/reports` confirmed working
+
+**cosmos-dev post-rebuild FK state:** All FK relationships match production. No duplicate constraints remain.
 
 ---
 
