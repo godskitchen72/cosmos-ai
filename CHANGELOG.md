@@ -1,3 +1,71 @@
+## 2026-07-18 — Session 49
+
+### Referral Workflow Redesign ✅
+
+Complete referral lifecycle redesigned from 15 statuses to 7. All status transitions are now automatic — driven by real FD actions, never manual.
+
+**New status set:** `new | scheduled | reschedule | cancelled | awaiting_results | results_received | closed`
+
+**Removed statuses:** `scheduling`, `auth_required`, `patient_confirmed`, `completed`, `no_show`, `rescheduled`, `results_pending`, `uploaded`, `needs_review`, `reviewed`
+
+**Transition logic (all automatic):**
+- Referral created → `new`
+- Appointment saved → `scheduled` (from `new`, `reschedule`, `cancelled`)
+- Session cancelled or no-show → `reschedule`
+- Reschedule appointment saved → `scheduled`
+- Result uploaded → `results_received` → `closed` (two-step, same action)
+
+**Overdue computed overlay (not a DB status):**
+- `new` / `reschedule` / `cancelled` with no new appointment after 2+ days
+- `awaiting_results` with no result after 7+ days since appointment date
+
+**`SessionLifecycle` simplified:** `pending | result_uploaded | cancelled` (removed `uploaded`, `sent_review`, `reviewed`)
+
+**Files:** `app/referrals/types.ts`, `app/referrals/actions.ts`
+
+### MD Review Workflow — Removed ✅
+
+MD review workflow (`markSessionNeedsReview()`, `reviewSession()`, `confirmSessionResults()`) deleted. Auto-close on upload replaces it. `needs_review` and `reviewed_at` columns dropped from `referral_appointments` (Migration 032, applied to production and cosmos-dev).
+
+**Files:** `app/referrals/actions.ts`, `app/referrals/ReferralSheet.tsx`, `app/referrals/components/ReferralAppointmentTab.tsx`, `app/md-v2/[patientId]/ReferralsTabV2.tsx`
+
+### Referral Dashboard — Work Queue Columns ✅
+
+`ReferralDashboard.tsx` rebuilt with provider-facing work queue columns:
+
+**Column set:** Patient · Type (+ body parts chips) · Provider · Ref. Created · Appt · Docs Rcvd · Workflow Stage · Actions
+
+- **Type column:** referral type label + body parts as cyan chips below (MRI/CT/MRA only)
+- **Provider column:** facility name in green bold; contact name as subtitle
+- **Workflow Stage badge:** tappable — opens ReferralSheet on correct tab per status (New/Reschedule/Cancelled/Overdue → Appointment tab; Awaiting Results → Documents tab; Closed → Overview tab)
+- **Actions column:** 👁 View (opens ReferralSheet overview) · 📞 Call (provider call modal, bottom-sheet) · ✉ Email (mailto provider)
+- **Appt column:** "Book Appt" cyan button when no appointment exists
+- **Docs Rcvd column:** green "Results In + date" when received; yellow "Awaiting" when pending
+- **Row backgrounds:** tinted per status (overdue = red, awaiting = amber, reschedule = orange, cancelled = dark red)
+
+**Files:** `app/referrals/ReferralDashboard.tsx`
+
+### Referral Dashboard — 9 KPI Cards ✅
+
+4×2 grid replacing previous 7-card layout:
+
+**Total · New · Scheduled · Reschedule · Cancelled · Awaiting · Overdue · Closed**
+
+- Total and Closed in green (`#19a866`)
+- Each status has distinct accent color matching workflow badge palette
+- Overdue counts all referrals in any overdue condition across all stages
+- Closed counts referrals closed this calendar month
+
+### Storage RLS Fix — referral-documents Bucket ✅
+
+INSERT policy on `storage.objects` for `referral-documents` bucket had null `WITH CHECK` clause — uploads were silently failing (document row not inserted, no error surfaced to UI). Fixed by dropping and recreating the INSERT policy with correct `WITH CHECK (bucket_id = 'referral-documents')`. DELETE policy also added. Applied to both production and cosmos-dev.
+
+### DB Status Constraint Updated ✅
+
+`referrals_status_check` constraint dropped and rebuilt on production and cosmos-dev to accept new status values: `('new','scheduled','reschedule','cancelled','awaiting_results','results_received','closed')`. Old constraint was blocking writes of `reschedule` status.
+
+---
+
 ## 2026-07-18 — Session 48 (continued)
 
 ### SMS Notification Infrastructure — Built and Deployed ✅

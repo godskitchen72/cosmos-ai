@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 18, 2026, Session 48 — Close)
+# Cosmos Medical Technologies — HANDOVER (July 18, 2026, Session 49 — Close)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -13,49 +13,72 @@ self-contained.
 
 ## Current Status
 
-All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed and live as of Session 48 close.
+All `cosmos-dashboard` commits confirmed deployed and live as of Session 49 close.
 
-**Production status:** `cosmosmt.com` is live. SMS notification infrastructure fully built and deployed. Twilio credentials configured in Render — SMS activation pending phone number purchase (next session).
+**Production status:** `cosmosmt.com` is live. Referral dashboard fully rebuilt with new workflow. SMS infrastructure live — activation still pending phone number purchase.
 
-**Dev environment status:** `cosmos-dev` Supabase project fully operational. Schema rebuilt from production pg_dump — all 34 tables present with correct PKs and FK constraints. Preview URL (`cosmos-dashboard-nu.vercel.app`) hits cosmos-dev.
+**Dev environment status:** `cosmos-dev` Supabase project fully operational. Schema matches production including Session 49 migrations.
 
 ---
 
-## Completed This Session (Session 48 — Full)
+## Completed This Session (Session 49 — Full)
 
-### Production Referral Dashboard Outage — Resolved ✅ CLOSED
-`SUPABASE_SERVICE_KEY_PREVIEW` was scoped to Production and Preview — causing production to use the cosmos-dev service key, rejected by production Supabase as invalid. Rescoped to Preview only. Duplicate FK constraint (`fk_referrals_referral_provider`) dropped from production. Referral dashboard confirmed working on `cosmosmt.com`.
+### Referral Dashboard — Work Queue Columns ✅ CLOSED
 
-### Preview Environment — Fully Operational ✅ CLOSED
-Preview env vars corrected: `NEXT_PUBLIC_SUPABASE_ANON_KEY` added to Preview scope, `SUPABASE_SERVICE_KEY_PREVIEW` rescoped to Preview only. Stable Preview URL: `cosmos-dashboard-nu.vercel.app`.
+`ReferralDashboard.tsx` rebuilt with new column set:
+- **Patient · Type (+ body parts) · Provider · Ref. Created · Appt · Docs Rcvd · Workflow Stage · Actions**
+- Provider column in green bold (`#19a866`)
+- Type column shows body parts as cyan chips below label (MRI/CT/MRA only)
+- Workflow Stage badge is tappable — opens ReferralSheet on correct tab per status
+- Actions column: 👁 View · 📞 Call (provider call modal) · ✉ Email (mailto provider)
+- Appt column: "Book Appt" button when no appointment exists (opens Appointment tab)
+- Docs Rcvd column: green "Results In" / yellow "Awaiting"
 
-### cosmos-dev Schema — Rebuilt from pg_dump ✅ CLOSED
-Full rebuild via `pg_dump` from production. All 34 tables confirmed. All duplicate FK constraints dropped. Method documented in MIGRATIONS.md.
+### Referral Workflow Redesign ✅ CLOSED
 
-### SMS Notification Infrastructure — Built and Deployed ✅ CLOSED
+Complete referral lifecycle simplified from 15 statuses to 7. All transitions automatic.
 
-Complete Twilio SMS system built across both repos.
+**New `ReferralStatus` union:** `new | scheduled | reschedule | cancelled | awaiting_results | results_received | closed`
 
-**cosmos-api changes:**
-- `notifications.py` — new file. Twilio client wrapper (`send_sms()`), 5 message templates, `SMS_TEMPLATES` catalogue for FD modal.
-- `main.py` — two new endpoints:
-  - `POST /notify/sms` — manual FD-to-patient send (JWT required)
-  - `POST /notify/appointment-reminder` — cron-callable, queries appointments 24h out, sends reminders (no JWT — called server-side)
-- `requirements.txt` — `twilio` added
+**New `SessionLifecycle`:** `pending | result_uploaded | cancelled` (removed `uploaded`, `sent_review`, `reviewed`)
 
-**cosmos-dashboard changes:**
-- `app/components/SmsModal.tsx` — new shared modal. Template picker (5 templates), free-text body, auto-substitutes patient first name on template select, character counter, send result feedback. Used from both work queue and patient sheet.
-- `FDDashboardV2.tsx` — work queue Actions column: 📞 Call button now opens Call modal (shows phone number + tap-to-call link). 💬 new SMS button opens SmsModal. ✉ Email unchanged.
-- `FDPatientSheet.tsx` — 💬 Message QuickAction added before Email in header row. NF-2 QuickAction removed (Documents tab handles NF-2). SmsModal mounted with patient context.
+**Transition logic:**
+- Created → `new`
+- Appointment saved → `scheduled` (from `new`, `reschedule`, `cancelled`)
+- No-show / Cancel → `reschedule` (auto on `cancelSession()`)
+- Reschedule saved → `scheduled`
+- Result uploaded → `results_received` → `closed` (two-step auto on upload)
 
-**Twilio account setup:**
-- Account created under Cosmos Medical Technologies
-- `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` added to Render cosmos-api env vars
-- `TWILIO_FROM_NUMBER` set to `+18777804236` (Twilio Virtual Phone — placeholder)
-- SMS modal confirmed working (auto-fills patient name, template selection, preview)
-- Send tested — failed with "Mismatch between From number" — Virtual Phone number is not owned by account
+**Overdue computed overlay (not a DB status):**
+- `new` / `reschedule` / `cancelled` — 2+ days with no new appointment
+- `awaiting_results` — 7+ days since appointment date
 
-**Files:** `cosmos-api/notifications.py`, `cosmos-api/main.py`, `cosmos-api/requirements.txt`, `app/components/SmsModal.tsx`, `app/dashboard-v2/FDDashboardV2.tsx`, `app/dashboard-v2/components/FDPatientSheet.tsx`
+**Files changed:** `app/referrals/types.ts`, `app/referrals/actions.ts`, `app/referrals/ReferralDashboard.tsx`, `app/referrals/ReferralSheet.tsx`, `app/referrals/components/ReferralAppointmentTab.tsx`, `app/md-v2/[patientId]/ReferralsTabV2.tsx`
+
+### 9 KPI Cards — Referral Dashboard ✅ CLOSED
+
+4×2 grid: **Total · New · Scheduled · Reschedule · Cancelled · Awaiting · Overdue · Closed**
+- Total and Closed in green (`#19a866`)
+- Each status has distinct accent color matching badge palette
+- Overdue is computed overlay — counts referrals in any overdue condition
+
+### MD Review Workflow — Removed ✅ CLOSED
+
+`markSessionNeedsReview()`, `reviewSession()`, `confirmSessionResults()` deleted from `actions.ts`.
+`needs_review` and `reviewed_at` columns dropped from `referral_appointments` (Migration 032).
+`ReferralSheet.tsx` and `ReferralsTabV2.tsx` updated to remove all references.
+
+### Storage RLS Fix — referral-documents bucket ✅ CLOSED
+
+INSERT policy had null `WITH CHECK` clause — uploads were silently failing. Fixed:
+- Dropped and recreated INSERT policy with correct `WITH CHECK (bucket_id = 'referral-documents')`
+- Added missing DELETE policy for `authenticated` role
+Applied to both production and cosmos-dev.
+
+### DB Status Constraint Updated ✅ CLOSED
+
+`referrals_status_check` constraint rebuilt on production and cosmos-dev to match new status values:
+`('new','scheduled','reschedule','cancelled','awaiting_results','results_received','closed')`
 
 ---
 
@@ -65,54 +88,46 @@ Complete Twilio SMS system built across both repos.
    Merge is blocked for production use until this upgrade lands. One click in
    Render dashboard — $25/mo, no code change.
 
-2. **Twilio SMS activation — next session.** All code is live. Three steps remaining:
-   - Buy `+17185695200` (718 NYC number, $1.15/month) — already in cart from this session
+2. **Twilio SMS activation.** All code is live. Three steps remaining:
+   - Buy `+17185695200` (718 NYC number, $1.15/month) — already in cart
    - Update `TWILIO_FROM_NUMBER` in Render from `+18777804236` → `+17185695200`
-   - Complete A2P 10DLC business registration (required for US SMS production delivery — takes a few days after submission)
+   - Complete A2P 10DLC business registration (takes a few days after submission)
    - Test live SMS send from FD dashboard
 
-3. **DEV artifacts removal.** Remove DEV fill-all PCE button from
-   `VisitTab.tsx` and Dev Tools card from Admin panel before go-live.
+3. **Production patient phone data.** All `patients.phone` records are `+19297683179`
+   (set for SMS testing Session 48). Must be cleared before go-live:
+   ```sql
+   UPDATE patients SET phone = NULL;
+   ```
 
-4. **Patient email required at intake.** `PatientFormV2.tsx` email field
-   must become required. Deferred multiple sessions. Note: phone is now more
-   critical than email since SMS is the primary notification channel.
+4. **DEV artifacts removal.** Remove DEV fill-all PCE button from
+   `VisitTab.tsx` and Dev Tools card from Admin panel before go-live.
 
 5. **Patient phone required at intake.** `PatientFormV2.tsx` phone field
    must become required. SMS notifications silently fail for patients with no
-   phone on file. Higher priority than email (Open Item #4) given SMS infrastructure now live.
+   phone on file.
 
-6. **Appointment confirmation SMS trigger.** `/notify/sms` endpoint exists
+6. **Patient email required at intake.** `PatientFormV2.tsx` email field
+   must become required. Deferred multiple sessions.
+
+7. **Appointment confirmation SMS trigger.** `/notify/sms` endpoint exists
    but nothing calls it automatically on booking. Wire into calendar booking
-   save path (next session after Twilio activation confirmed).
-
-7. **Referral workflow auto-advancement logic.** Only SONO/FC/PSY/EMG
-   currently auto-close on result upload. All other types require manual FD
-   advancement. Full design needed.
+   save path after Twilio activation confirmed.
 
 8. **Duplicate visit records investigation.** Some patients have multiple
    `patient_visits` rows for the same date sharing generated PDF filenames.
    Root cause unknown.
 
-9. **000_initial_schema.sql — superseded by pg_dump method.** The Session 47
-   manual schema file is now obsolete for new environment setup. Use the
-   pg_dump approach documented in MIGRATIONS.md instead.
-
-10. **Production DB password changed this session.** Password was reset to
-    remove `@` character for pg_dump compatibility.
-
-11. **Vercel env var scoping — standing fragile point.** Always use desktop
-    browser for any env var changes.
+9. **000_initial_schema.sql — superseded by pg_dump method.** Stale on disk.
+   Use pg_dump approach documented in MIGRATIONS.md instead.
 
 ---
 
 ## Known Architecture Gaps (carried forward)
 
 - `patients.intake_url` exists only via manual SQL — not in any migration file.
-  Schema drift risk if DB is rebuilt.
+  Schema drift risk if DB is rebuilt (pg_dump will capture it going forward).
 - No FK between `referral_timeline.actor_user_id` and `user_profiles.id`.
-- `referral_appointments.needs_review` and `reviewed_at` (Migrations 031-032)
-  are vestigial — flagged for cleanup.
 - Ghost session timeout is 0 — impersonation sessions never expire.
 - `/referrals/page.tsx` `userRole` hardcoded to `"md"` — wrong role on hard
   refresh without re-login.
@@ -123,7 +138,7 @@ Complete Twilio SMS system built across both repos.
 
 | Env Var | Value | Location |
 |---|---|---|
-| `TWILIO_ACCOUNT_SID` | `[TWILIO_ACCOUNT_SID]` | Render cosmos-api |
+| `TWILIO_ACCOUNT_SID` | `ACabce173444c01d6b1735130ec2f354a9` | Render cosmos-api |
 | `TWILIO_AUTH_TOKEN` | (set) | Render cosmos-api |
 | `TWILIO_FROM_NUMBER` | `+18777804236` (placeholder — update next session) | Render cosmos-api |
 
@@ -145,13 +160,18 @@ Note: `[Name]` is auto-substituted with patient first name when template is sele
 
 ---
 
-## Production Patient Data Note
+## Referral Status Reference (Session 49)
 
-All current `patients` records have `phone = '+19297683179'` (set via SQL this session for SMS testing). This must be cleared or updated when real patients are added. Run:
-```sql
-UPDATE patients SET phone = NULL;
-```
-...before go-live, or update individually as real patients are entered.
+| Status | DB Value | Color | Trigger |
+|---|---|---|---|
+| New | `new` | `#a78bfa` purple | Referral created |
+| Scheduled | `scheduled` | `#60a5fa` blue | Appointment saved |
+| Reschedule | `reschedule` | `#f97316` orange | No-show or cancel |
+| Cancelled [REBOOK] | `cancelled` | `#ef4444` red | FD cancels |
+| Awaiting Results | `awaiting_results` | `#fbbf24` amber | Appointment date passed |
+| Results Received | `results_received` | `#4ade80` green | Result uploaded (transient) |
+| Closed | `closed` | `#94a3b8` grey | Auto on upload |
+| **Overdue** | *(computed)* | `#fca5a5` red | 2+ days no action / 7+ days no result |
 
 ---
 
@@ -167,20 +187,22 @@ UPDATE patients SET phone = NULL;
 - [x] Full referral lifecycle (Sessions 30–46)
 - [x] MRI/MRA/CT body parts (Sessions 38–39)
 - [x] SONO/FC/PSY/EMG/ANS referral types (Sessions 37, 45)
-- [x] Auto-close on result upload — all supported types (Sessions 38, 45)
+- [x] Auto-close on result upload — all types (Session 49)
+- [x] Referral workflow redesign — 7 statuses, all auto-transitions (Session 49)
+- [x] MD review workflow removed — replaced by auto-close (Session 49)
 - [x] Referral Pipeline report (Session 45)
 - [ ] DME and RX codes from patient_visits
-- [ ] ReferralSheet header badge — raw DB status (cosmetic)
 - [ ] Patient email required at intake — PatientFormV2.tsx
 - [ ] DEV artifacts removal — VisitTab.tsx PCE button + Admin Dev Tools card
 - [ ] Add FK: referral_timeline.actor_user_id → user_profiles.id
-- [ ] Full referral workflow auto-advancement logic design
 
 ### Stage 3 — Front Desk Dashboard V2
 - [x] Full FD Dashboard V2 (Sessions 40–46)
 - [x] SMS notification system — modal, templates, API (Session 48)
 - [x] Call modal — work queue (Session 48)
 - [x] Message QuickAction — patient sheet (Session 48)
+- [x] Referral dashboard work queue columns — Provider, Type, Workflow Stage, Actions (Session 49)
+- [x] Provider call modal — referral dashboard (Session 49)
 - [ ] Appointment confirmation SMS — auto-trigger on booking
 - [ ] Patient phone required at intake
 - [ ] Notes tab persistence — patient_notes table

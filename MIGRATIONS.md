@@ -184,13 +184,56 @@ NOTIFY pgrst, 'reload schema';
 
 ---
 
-## Known Technical Debt
+## Session 49 — Schema Changes (July 18, 2026)
 
-- `000_initial_schema.sql` on disk is stale — superseded by pg_dump method (Session 48). Should be removed or replaced with a note pointing to the pg_dump approach to prevent confusion.
+### Migration 032 — Drop needs_review and reviewed_at from referral_appointments
+
+MD review workflow removed (Session 49). Auto-close on upload replaces it.
+
+```sql
+ALTER TABLE public.referral_appointments DROP COLUMN IF EXISTS needs_review;
+ALTER TABLE public.referral_appointments DROP COLUMN IF EXISTS reviewed_at;
+NOTIFY pgrst, 'reload schema';
+```
+
+Applied to: production (`ttudxnzmybcwrtqlbtta`) and cosmos-dev (`tpwbgqfdznqtjqimxric`).
+
+### referrals_status_check Constraint Rebuilt
+
+Old constraint included deprecated status values. Rebuilt to match new workflow.
+
+```sql
+ALTER TABLE public.referrals DROP CONSTRAINT IF EXISTS referrals_status_check;
+ALTER TABLE public.referrals ADD CONSTRAINT referrals_status_check
+  CHECK (status IN ('new','scheduled','reschedule','cancelled','awaiting_results','results_received','closed'));
+```
+
+Applied to: production and cosmos-dev.
+
+### Storage RLS — referral-documents Bucket
+
+INSERT policy had null `WITH CHECK` — uploads silently failed. Fixed:
+
+```sql
+DROP POLICY IF EXISTS "Authenticated users can upload referral docs" ON storage.objects;
+CREATE POLICY "Authenticated users can upload referral docs"
+  ON storage.objects FOR INSERT TO authenticated
+  WITH CHECK (bucket_id = 'referral-documents');
+CREATE POLICY "Authenticated users can delete referral docs"
+  ON storage.objects FOR DELETE TO authenticated
+  USING (bucket_id = 'referral-documents');
+```
+
+Applied to: production and cosmos-dev.
+
+---
+
+## Known Technical Debt (updated Session 49)
+
+- `000_initial_schema.sql` on disk is stale — superseded by pg_dump method (Session 48). Should be removed or replaced with a pointer to the pg_dump approach.
 - `patients.intake_url` column exists in production via manual SQL — not captured in any migration file. Schema drift risk on rebuild (pg_dump will capture it going forward).
-- `referral_appointments.needs_review` and `reviewed_at` are vestigial — flagged for cleanup.
 - PostgREST on free-tier Supabase does not reliably pick up FK constraints — use flat selects + client-side joins (Cosmos standard pattern; `app/reports/referrals/page.tsx` is the reference implementation).
-- Production DB password was reset Session 48 (removed `@` for pg_dump compatibility). No app code uses this password — only direct DB connections (pg_dump, psql). cosmos-dev DB password also reset same session.
+- Production DB password was reset Session 48 (removed `@` for pg_dump compatibility). No app code uses this password — only direct DB connections.
 
 ---
 
