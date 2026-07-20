@@ -51,8 +51,10 @@ now exist — all approved explicitly after the tradeoff was presented:
 4. **MDClient patient list** (`/md`, `app/md/MDClient.tsx`) — shadcn
    Cards with colored left borders; routes to `/md-v2/` (Session 23).
 5. **Referral Management dashboard** (`/referrals`, `app/referrals/`) —
-   shadcn Cards, Sheet, TanStack Table; same CSS-variable bridge pattern
-   as Biller and Admin (Session 25).
+   Appointment-driven TanStack Table (Session 50). One row per
+   `referral_appointments` record. Full-page detail at `/referrals/[id]`
+   (all sessions) or `/referrals/[id]?appt=[uuid]` (single appointment).
+   Multi-Referral reminder row in NEW bucket for MRI with unscheduled parts.
 Every other screen remains hand-rolled inline `style={{...}}`.
 
 ---

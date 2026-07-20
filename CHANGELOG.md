@@ -1,3 +1,68 @@
+## 2026-07-20 — Session 50
+
+### MRI Referral Save Bug Fix ✅
+
+`MriReferral.tsx` — error message moved from scrollable content area into fixed footer, always visible above Save button. Users previously received no feedback when tapping Save without selecting a modality.
+
+**File:** `app/md/[patientId]/mri/MriReferral.tsx`
+
+### Appointment-Driven Referral Dashboard ✅
+
+Complete architectural rebuild. Dashboard now shows one row per `referral_appointments` record instead of one row per referral.
+
+**KPI counts:**
+- NEW = referrals with no appointments + MRI referrals with unscheduled body parts (Multi-Referral rows)
+- SCHEDULED = appointments with future date, no result
+- RESCHEDULE = cancelled appointments pending rebook
+- OVERDUE = appointments past date, no result
+- CLOSED = appointments with result uploaded
+
+**List:** One row per appointment. Body part chips, date, status, provider. Left border color per status.
+
+**Files:** `app/referrals/ReferralDashboard.tsx`, `app/referrals/actions.ts`, `app/referrals/types.ts`
+
+### Multi-Referral Tracking Row ✅
+
+MRI/MRA/CT referrals with multiple body parts generate a persistent reminder row in the NEW bucket showing unscheduled body parts. MULTI-REFERRAL badge displayed under patient name. Self-destroys when all body parts have active appointments.
+
+### MRI Referral Lifecycle — Stays `new` Throughout ✅
+
+MRI/MRA/CT referrals no longer advance to `scheduled`. They remain `new` until all sessions have results, then auto-close. `scheduleAppointment()`, `cancelSession()`, `rescheduleSession()` all skip status transitions for MRI types. `uploadReferralResult()` restores `allPartsAssigned` gate for MRI — closes only when all ordered body parts are covered and all sessions complete.
+
+**File:** `app/referrals/actions.ts`
+
+### Referral Detail Full Page at `/referrals/[id]` ✅
+
+`ReferralSheet.tsx` modal replaced with full-page navigation. Tapping a dashboard row navigates to `/referrals/[id]` (Multi-Referral view, all sessions) or `/referrals/[id]?appt=[uuid]` (individual appointment view, single session).
+
+**Files added:** `app/referrals/[id]/page.tsx`, `app/referrals/[id]/ReferralDetailPage.tsx`
+
+### CANCELLED Badge on Session Cards ✅
+
+Cancelled appointments render a distinct orange CANCELLED card with "Body part returned to unscheduled pool" note. No action buttons shown.
+
+**File:** `app/referrals/components/ReferralAppointmentTab.tsx`
+
+### Rebook Flow from RESCHEDULE Row ✅
+
+Tapping a RESCHEDULE row opens single appointment view. Cancelled body part is pre-selected in chip pool. Schedule form shown immediately. On save, the cancelled appointment row is deleted from DB — RESCHEDULE row self-destroys, new SCHEDULED row appears.
+
+**Files:** `app/referrals/actions.ts`, `app/referrals/components/ReferralAppointmentTab.tsx`
+
+### `needs_review` Column References Fixed ✅
+
+Four files still querying removed `needs_review`/`reviewed_at` columns fixed:
+- `app/dashboard-v2/components/FDPatientSheet.tsx`
+- `app/md-v2/[patientId]/ref/[rid]/page.tsx`
+- `app/reports/ReportsClient.tsx`
+- `app/reports/referrals/page.tsx`
+
+### `ReferralAppointmentTab` — Pool Fix ✅
+
+`assignedParts` now excludes cancelled appointments so cancelled body parts correctly return to the unscheduled chip pool. `focusedAppointmentId` prop added — individual appointment view hides chip pool and schedule form except when viewing a cancelled appointment (rebook flow).
+
+---
+
 ## 2026-07-18 — Session 49
 
 ### Referral Workflow Redesign ✅

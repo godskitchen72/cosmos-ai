@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 18, 2026, Session 49 — Close)
+# Cosmos Medical Technologies — HANDOVER (July 20, 2026, Session 50 — Close)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -13,124 +13,144 @@ self-contained.
 
 ## Current Status
 
-All `cosmos-dashboard` commits confirmed deployed and live as of Session 49 close.
+All `cosmos-dashboard` commits confirmed deployed and live as of Session 50 close.
 
-**Production status:** `cosmosmt.com` is live. Referral dashboard fully rebuilt with new workflow. SMS infrastructure live — activation still pending phone number purchase.
+**Production status:** `cosmosmt.com` is live. Referral dashboard fully rebuilt with appointment-driven architecture. MRI referral splitting, Multi-Referral tracking row, and single-appointment view all working.
 
-**Dev environment status:** `cosmos-dev` Supabase project fully operational. Schema matches production including Session 49 migrations.
+**Dev environment status:** `cosmos-dev` Supabase project fully operational.
 
 ---
 
-## Completed This Session (Session 49 — Full)
+## Completed This Session (Session 50 — Full)
 
-### Referral Dashboard — Work Queue Columns ✅ CLOSED
+### MRI Referral Save Bug Fix ✅
+`MriReferral.tsx` — error message moved from scrollable content area into fixed footer div, always visible above Save button regardless of scroll position. Silent failure when no modality selected now surfaces immediately.
 
-`ReferralDashboard.tsx` rebuilt with new column set:
-- **Patient · Type (+ body parts) · Provider · Ref. Created · Appt · Docs Rcvd · Workflow Stage · Actions**
-- Provider column in green bold (`#19a866`)
-- Type column shows body parts as cyan chips below label (MRI/CT/MRA only)
-- Workflow Stage badge is tappable — opens ReferralSheet on correct tab per status
-- Actions column: 👁 View · 📞 Call (provider call modal) · ✉ Email (mailto provider)
-- Appt column: "Book Appt" button when no appointment exists (opens Appointment tab)
-- Docs Rcvd column: green "Results In" / yellow "Awaiting"
+### Appointment-Driven Referral Dashboard ✅
+Complete architectural rebuild of referral tracking. Dashboard now shows one row per `referral_appointments` record instead of one row per referral.
 
-### Referral Workflow Redesign ✅ CLOSED
+**KPI counts (appointment-driven):**
+- NEW = referrals with no appointments + MRI referrals with unscheduled body parts
+- SCHEDULED = appointments with future date, no result
+- RESCHEDULE = cancelled appointments (self-destroys on rebook)
+- OVERDUE = appointments past date, no result
+- CLOSED = appointments with result uploaded
 
-Complete referral lifecycle simplified from 15 statuses to 7. All transitions automatic.
+**List rows:**
+- One row per appointment, showing body part(s), date, status, provider
+- Left border color per status (cyan=scheduled, orange=reschedule, red=overdue, green=closed)
 
-**New `ReferralStatus` union:** `new | scheduled | reschedule | cancelled | awaiting_results | results_received | closed`
+**Files:** `app/referrals/ReferralDashboard.tsx`, `app/referrals/actions.ts`, `app/referrals/types.ts`
 
-**New `SessionLifecycle`:** `pending | result_uploaded | cancelled` (removed `uploaded`, `sent_review`, `reviewed`)
+### Multi-Referral Row ✅
+MRI/MRA/CT referrals with multiple body parts generate a persistent "Multi-Referral" reminder row in NEW. Shows unscheduled body parts remaining. Self-destroys when all body parts have active appointments. MULTI-REFERRAL badge rendered under patient name in purple.
 
-**Transition logic:**
-- Created → `new`
-- Appointment saved → `scheduled` (from `new`, `reschedule`, `cancelled`)
-- No-show / Cancel → `reschedule` (auto on `cancelSession()`)
-- Reschedule saved → `scheduled`
-- Result uploaded → `results_received` → `closed` (two-step auto on upload)
+### MRI Lifecycle — Stays `new` Throughout ✅
+MRI/MRA/CT referrals no longer advance to `scheduled` status. They remain `new` until all sessions have results uploaded, then auto-close. Non-MRI referrals unchanged.
 
-**Overdue computed overlay (not a DB status):**
-- `new` / `reschedule` / `cancelled` — 2+ days with no new appointment
-- `awaiting_results` — 7+ days since appointment date
+**`scheduleAppointment()`** — MRI skips status advance
+**`cancelSession()`** — MRI stays `new` (non-MRI → `reschedule`)
+**`rescheduleSession()`** — MRI stays `new` (non-MRI → `scheduled`)
+**`uploadReferralResult()`** — MRI closes only when all body parts assigned + all sessions complete
 
-**Files changed:** `app/referrals/types.ts`, `app/referrals/actions.ts`, `app/referrals/ReferralDashboard.tsx`, `app/referrals/ReferralSheet.tsx`, `app/referrals/components/ReferralAppointmentTab.tsx`, `app/md-v2/[patientId]/ReferralsTabV2.tsx`
+### Referral Detail Full Page at `/referrals/[id]` ✅
+`ReferralSheet.tsx` modal replaced with full-page navigation. Tapping a dashboard row navigates to `/referrals/[id]` (Multi-Referral) or `/referrals/[id]?appt=[uuid]` (individual appointment).
 
-### 9 KPI Cards — Referral Dashboard ✅ CLOSED
+**Files added:** `app/referrals/[id]/page.tsx`, `app/referrals/[id]/ReferralDetailPage.tsx`
 
-4×2 grid: **Total · New · Scheduled · Reschedule · Cancelled · Awaiting · Overdue · Closed**
-- Total and Closed in green (`#19a866`)
-- Each status has distinct accent color matching badge palette
-- Overdue is computed overlay — counts referrals in any overdue condition
+**Individual appointment view:** Single session card only — no chip pool, no schedule form (unless appointment is cancelled → rebook flow shown).
 
-### MD Review Workflow — Removed ✅ CLOSED
+### CANCELLED Badge on Session Cards ✅
+Cancelled appointments display orange CANCELLED badge, dimmed card, "Body part returned to unscheduled pool" note. No action buttons.
 
-`markSessionNeedsReview()`, `reviewSession()`, `confirmSessionResults()` deleted from `actions.ts`.
-`needs_review` and `reviewed_at` columns dropped from `referral_appointments` (Migration 032).
-`ReferralSheet.tsx` and `ReferralsTabV2.tsx` updated to remove all references.
+**File:** `app/referrals/components/ReferralAppointmentTab.tsx`
 
-### Storage RLS Fix — referral-documents bucket ✅ CLOSED
+### Rebook Flow from RESCHEDULE Row ✅
+Tapping a RESCHEDULE row opens single appointment view with:
+- Cancelled session card (CANCELLED badge)
+- "Rebook — select body parts" chip pool (cancelled body part pre-selected)
+- Schedule form shown immediately
 
-INSERT policy had null `WITH CHECK` clause — uploads were silently failing. Fixed:
-- Dropped and recreated INSERT policy with correct `WITH CHECK (bucket_id = 'referral-documents')`
-- Added missing DELETE policy for `authenticated` role
-Applied to both production and cosmos-dev.
+On save, cancelled appointment row is **deleted** from DB. RESCHEDULE row self-destroys. New SCHEDULED row appears.
 
-### DB Status Constraint Updated ✅ CLOSED
+### `needs_review` Column References Fixed ✅
+Four files still querying removed `needs_review`/`reviewed_at` columns (removed Session 49). Fixed:
+- `app/dashboard-v2/components/FDPatientSheet.tsx`
+- `app/md-v2/[patientId]/ref/[rid]/page.tsx`
+- `app/reports/ReportsClient.tsx`
+- `app/reports/referrals/page.tsx`
 
-`referrals_status_check` constraint rebuilt on production and cosmos-dev to match new status values:
-`('new','scheduled','reschedule','cancelled','awaiting_results','results_received','closed')`
+### `Math.ceil` Session Gate Removed ✅
+`scheduleAppointment()` no longer uses `Math.ceil(parts/2)` to gate MRI status advancement. Gate was preventing status from advancing even when appointment was booked.
+
+### `ReferralAppointmentTab` — Unscheduled Parts Fix ✅
+`assignedParts` now excludes cancelled appointments, so cancelled body parts correctly return to the unscheduled chip pool.
 
 ---
 
 ## Open Items, Priority Order
 
-1. **Render Standard plan upgrade.** Still on Starter (512MB). Visit Packet
-   Merge is blocked for production use until this upgrade lands. One click in
-   Render dashboard — $25/mo, no code change.
+1. **Render Standard plan upgrade.** Still on Starter (512MB). Visit Packet Merge blocked for production use. One click, $25/mo.
 
-2. **Twilio SMS activation.** All code is live. Three steps remaining:
-   - Buy `+17185695200` (718 NYC number, $1.15/month) — already in cart
-   - Update `TWILIO_FROM_NUMBER` in Render from `+18777804236` → `+17185695200`
-   - Complete A2P 10DLC business registration (takes a few days after submission)
-   - Test live SMS send from FD dashboard
+2. **Twilio SMS activation.** All code live. Three steps:
+   - Buy `+17185695200`
+   - Update `TWILIO_FROM_NUMBER` in Render
+   - Complete A2P 10DLC business registration
 
-3. **Production patient phone data.** All `patients.phone` records are `+19297683179`
-   (set for SMS testing Session 48). Must be cleared before go-live:
+3. **Production patient phone data.** All `patients.phone` = `+19297683179`. Clear before go-live:
    ```sql
    UPDATE patients SET phone = NULL;
    ```
 
-4. **DEV artifacts removal.** Remove DEV fill-all PCE button from
-   `VisitTab.tsx` and Dev Tools card from Admin panel before go-live.
+4. **DEV artifacts removal.** PCE fill-all button in `VisitTab.tsx` + Dev Tools card in Admin panel.
 
-5. **Patient phone required at intake.** `PatientFormV2.tsx` phone field
-   must become required. SMS notifications silently fail for patients with no
-   phone on file.
+5. **Patient phone required at intake.** `PatientFormV2.tsx` phone field must be required.
 
-6. **Patient email required at intake.** `PatientFormV2.tsx` email field
-   must become required. Deferred multiple sessions.
+6. **Patient email required at intake.** `PatientFormV2.tsx` email field must be required.
 
-7. **Appointment confirmation SMS trigger.** `/notify/sms` endpoint exists
-   but nothing calls it automatically on booking. Wire into calendar booking
-   save path after Twilio activation confirmed.
+7. **Appointment confirmation SMS trigger.** Wire `/notify/sms` into calendar booking save path.
 
-8. **Duplicate visit records investigation.** Some patients have multiple
-   `patient_visits` rows for the same date sharing generated PDF filenames.
-   Root cause unknown.
+8. **Referral detail page restyling.** `ReferralAppointmentTab.tsx`, `ReferralOverviewTab.tsx`, `ReferralNotesTab.tsx`, `ReferralDocumentsTab.tsx` need full restyling to match calendar BookingModal design tokens (`#0f1f2e` cards, `#19a866` section labels, `#0a1119` inputs).
 
-9. **000_initial_schema.sql — superseded by pg_dump method.** Stale on disk.
-   Use pg_dump approach documented in MIGRATIONS.md instead.
+9. **`page.tsx` userRole hardcoded.** `/referrals/page.tsx` passes `userRole="md"` — role is resolved client-side from sessionStorage. Not a bug but should be cleaned up.
+
+10. **Duplicate visit records investigation.** Some patients have multiple `patient_visits` rows for the same date.
+
+11. **`000_initial_schema.sql` superseded.** Stale on disk — use pg_dump approach.
 
 ---
 
 ## Known Architecture Gaps (carried forward)
 
 - `patients.intake_url` exists only via manual SQL — not in any migration file.
-  Schema drift risk if DB is rebuilt (pg_dump will capture it going forward).
 - No FK between `referral_timeline.actor_user_id` and `user_profiles.id`.
 - Ghost session timeout is 0 — impersonation sessions never expire.
-- `/referrals/page.tsx` `userRole` hardcoded to `"md"` — wrong role on hard
-  refresh without re-login.
+- `/referrals/page.tsx` `userRole` hardcoded to `"md"`.
+
+---
+
+## Referral Architecture — Session 50 Model
+
+### Appointment-Driven Dashboard
+- One row per `referral_appointments` record
+- Multi-Referral reminder row (NEW bucket only) for MRI with unscheduled parts
+- Individual appointment row navigates to `/referrals/[id]?appt=[uuid]`
+- Multi-Referral row navigates to `/referrals/[id]` (all sessions)
+
+### MRI Session Splitting Rules
+- Max 2 body parts per session (FD chooses 1 or 2)
+- Patient can spread across as many sessions as needed
+- MRI referral status stays `new` throughout
+- Closes only when ALL ordered body parts have sessions + ALL sessions have results
+
+### Cancelled Appointment Lifecycle
+- Cancel → `outcome = 'cancelled'` → RESCHEDULE row appears
+- Rebook → cancelled appointment row **deleted** → RESCHEDULE row destroyed → new SCHEDULED row created
+- History preserved in `referral_timeline`
+
+### `outcome` Values (referral_appointments)
+`null` (scheduled/pending) | `completed` | `cancelled` | `no_show`
+Note: `superseded` was attempted but abandoned — delete approach used instead.
 
 ---
 
@@ -138,121 +158,64 @@ Applied to both production and cosmos-dev.
 
 | Env Var | Value | Location |
 |---|---|---|
-| `TWILIO_ACCOUNT_SID` | `ACabce173444c01d6b1735130ec2f354a9` | Render cosmos-api |
+| `TWILIO_ACCOUNT_SID` | `AC...` (stored in Render env vars) | Render cosmos-api |
 | `TWILIO_AUTH_TOKEN` | (set) | Render cosmos-api |
-| `TWILIO_FROM_NUMBER` | `+18777804236` (placeholder — update next session) | Render cosmos-api |
+| `TWILIO_FROM_NUMBER` | `+18777804236` (placeholder) | Render cosmos-api |
 
 **Target FROM number:** `+17185695200` (718 NYC, $1.15/mo, purchase pending)
 
-**A2P 10DLC:** Required for production SMS delivery to US numbers. Must register Cosmos Medical Technologies as a business sender via Twilio console after number purchase.
-
 ---
 
-## SMS Templates (live in SmsModal + notifications.py)
+## SMS Templates (live)
 
-1. **Appointment Confirmed** — Hi [Name], your appointment at Cosmos Medical has been confirmed. We look forward to seeing you. Reply STOP to opt out.
-2. **Appointment Reminder** — Hi [Name], this is a reminder about your upcoming appointment at Cosmos Medical. Please call our office if you need to reschedule. Reply STOP to opt out.
-3. **Please Call Our Office** — Hi [Name], please call our office at your earliest convenience regarding your treatment. Reply STOP to opt out.
-4. **Documents Needed** — Hi [Name], we have outstanding documents that require your attention. Please contact our office. Reply STOP to opt out.
-5. **Results Ready** — Hi [Name], your test results are ready for review. Please schedule a follow-up visit. Reply STOP to opt out.
-
-Note: `[Name]` is auto-substituted with patient first name when template is selected in the modal.
-
----
-
-## Referral Status Reference (Session 49)
-
-| Status | DB Value | Color | Trigger |
-|---|---|---|---|
-| New | `new` | `#a78bfa` purple | Referral created |
-| Scheduled | `scheduled` | `#60a5fa` blue | Appointment saved |
-| Reschedule | `reschedule` | `#f97316` orange | No-show or cancel |
-| Cancelled [REBOOK] | `cancelled` | `#ef4444` red | FD cancels |
-| Awaiting Results | `awaiting_results` | `#fbbf24` amber | Appointment date passed |
-| Results Received | `results_received` | `#4ade80` green | Result uploaded (transient) |
-| Closed | `closed` | `#94a3b8` grey | Auto on upload |
-| **Overdue** | *(computed)* | `#fca5a5` red | 2+ days no action / 7+ days no result |
+1. **Appointment Confirmed** — Hi [Name], your appointment at Cosmos Medical has been confirmed.
+2. **Appointment Reminder** — Hi [Name], this is a reminder about your upcoming appointment at Cosmos Medical.
+3. **Please Call Our Office** — Hi [Name], please call our office at your earliest convenience.
+4. **Documents Needed** — Hi [Name], we have outstanding documents that require your attention.
+5. **Results Ready** — Hi [Name], your test results are ready for review.
 
 ---
 
 ## Roadmap Checklist
 
 ### Stage 1 — Core Clinical
-- [x] Patient intake — PatientFormV2 5-tab wizard (Session 43)
-- [x] Visit documentation — SOAP, CPT, ICD-10 (Sessions 1–20)
-- [x] NF-2 generation and mailing (Sessions 1–20)
-- [x] AOB generation (Sessions 1–20)
+- [x] Patient intake — PatientFormV2 5-tab wizard
+- [x] Visit documentation — SOAP, CPT, ICD-10
+- [x] NF-2 generation and mailing
+- [x] AOB generation
 
 ### Stage 2 — Referral Management
-- [x] Full referral lifecycle (Sessions 30–46)
-- [x] MRI/MRA/CT body parts (Sessions 38–39)
-- [x] SONO/FC/PSY/EMG/ANS referral types (Sessions 37, 45)
-- [x] Auto-close on result upload — all types (Session 49)
-- [x] Referral workflow redesign — 7 statuses, all auto-transitions (Session 49)
-- [x] MD review workflow removed — replaced by auto-close (Session 49)
-- [x] Referral Pipeline report (Session 45)
+- [x] Full referral lifecycle
+- [x] MRI/MRA/CT body parts + session splitting
+- [x] SONO/FC/PSY/EMG/ANS referral types
+- [x] Auto-close on result upload
+- [x] Referral workflow redesign — 7 statuses, all auto-transitions
+- [x] MD review workflow removed
+- [x] Appointment-driven dashboard (Session 50)
+- [x] Multi-Referral tracking row (Session 50)
+- [x] MRI stays `new` throughout lifecycle (Session 50)
+- [x] Single appointment view at /referrals/[id]?appt= (Session 50)
+- [x] Rebook flow from RESCHEDULE row (Session 50)
+- [ ] Referral detail page restyling (calendar design tokens)
 - [ ] DME and RX codes from patient_visits
-- [ ] Patient email required at intake — PatientFormV2.tsx
-- [ ] DEV artifacts removal — VisitTab.tsx PCE button + Admin Dev Tools card
-- [ ] Add FK: referral_timeline.actor_user_id → user_profiles.id
+- [ ] Patient email required at intake
+- [ ] DEV artifacts removal
 
 ### Stage 3 — Front Desk Dashboard V2
-- [x] Full FD Dashboard V2 (Sessions 40–46)
-- [x] SMS notification system — modal, templates, API (Session 48)
-- [x] Call modal — work queue (Session 48)
-- [x] Message QuickAction — patient sheet (Session 48)
-- [x] Referral dashboard work queue columns — Provider, Type, Workflow Stage, Actions (Session 49)
-- [x] Provider call modal — referral dashboard (Session 49)
+- [x] Full FD Dashboard V2
+- [x] SMS notification system
+- [x] Referral dashboard appointment-driven (Session 50)
 - [ ] Appointment confirmation SMS — auto-trigger on booking
 - [ ] Patient phone required at intake
-- [ ] Notes tab persistence — patient_notes table
-- [ ] Stub KPIs — Patients Waiting, Insurance Verification, Tasks Due Today
+- [ ] Notes tab persistence
 - [ ] Realtime — referrals and appointments tables
-- [ ] Remove legacy PatientForm.tsx
-
-### Stage 3b — FD Reports
-- [x] All report tabs (Sessions 42–47)
-- [x] Reports landing page (Session 47)
-- [x] Active Patients report (Session 47)
-
-### Stage 3c — Patient Intake
-- [x] PatientFormV2 (Session 43)
-- [ ] Patient email required
-- [ ] Patient phone required
-- [ ] intake_url added to migration file
-
-### Stage 3d — Superadmin & Ghost Mode
-- [x] Full JWT impersonation (Session 43)
-- [ ] Ghost mode for PA/NP users
-- [ ] Impersonation session timeout
-
-### Stage 3e — Scheduling
-- [x] Calendar redesign + smart booking (Sessions 44, 46)
-- [ ] Appointment confirmation SMS on booking
-- [ ] Calendar realtime
-- [ ] Conflict-aware time slot display
-
-### Stage 3f — Admin
-- [x] All admin sections complete (Sessions 46–47)
-
-### Stage 4 — Billing
-- [ ] Billing packet generation improvements
-- [ ] Attorney email workflow
 
 ### Stage 5 — Infrastructure
 - [ ] Render upgrade to Standard plan — pre-go-live blocker
-- [ ] Twilio SMS activation — number purchase + A2P 10DLC
-- [x] Dev/Preview environment (Sessions 47–48)
+- [ ] Twilio SMS activation
 - [ ] 000_initial_schema.sql removal/replacement
-
-### Stage 6 — Scale
-- [ ] Holistic UX audit
-- [ ] Accessibility
-- [ ] Multi-tenancy
 
 ### Stage 7 — Compliance
 - [ ] HIPAA compliance review
 - [ ] BAA with Supabase, Render, Vercel, Resend, Twilio
 - [ ] SPF/DKIM for cosmosmt.com
-- [ ] Data retention and deletion policy
-- [ ] Patient data export capability
