@@ -1,3 +1,38 @@
+## 2026-07-21 — Session 52
+
+### MD Dashboard V3 — Enterprise physician workspace at `/md-v3` ✅
+
+New enterprise MD dashboard at `/md-v3`. Deployed and accessible via superadmin dashboard picker (MD V3 tile). Replaces the legacy `/md` MDClient list in function — `/md` route retained until promotion is complete.
+
+**Architecture:** Server `page.tsx` (matches `dashboard-v2` pattern exactly — no auth redirect, data fetch only) → `MDDashboardV3.tsx` client component → `PatientClinicalSheet.tsx` + `SOAPWorkspace.tsx`.
+
+**KPI cards:** Today (appointments), Waiting (no note yet), Billing (flags + missing), Urgent (tx expiring/expired). Each card filters the TanStack work queue.
+
+**TanStack work queue columns:** Priority indicator, Patient (name + ID + supervised label), DOB, DOA + treatment window, Appt time, Last Visit, Carrier, Pain score, Note status, Results status, Billing status, Actions (Visit / Chart). Global search, column visibility toggle, sort, 20-row pagination.
+
+**Treatment window:** 180-day DOA timer per patient. Color-coded green/orange/red. Progress bar in patient sheet header.
+
+**Patient Clinical Sheet:** Right-side sheet (desktop) / full-screen (mobile). Opens on row tap. Four tabs:
+- Overview: demographics, accident/insurance, pain chips, document buttons, latest visit codes, open referrals
+- Visits: full history with ICD-10/CPT, billing status, Open Visit button
+- Referrals: all referrals with status + appointments, Manage Referrals button
+- SOAP: Subjective (complaints, accident, role, care, work, aggravating, radiation, meds/allergies) / Objective (vitals, pain scores by region, cervical ROM with normals) / Assessment (prognosis, functional limitations, active ICD-10) / Plan (orders + referral links) / Diagnoses (live ICD-10) / Procedures (live CPT). Fields without backend columns show COMING SOON badge — not dead-end inputs.
+
+**Locked decision:** Cross-role visual consistency adopted as platform standard. MD, FD, and future Billing dashboards share the same layout, nav, cards, table, and side-sheet pattern. Data and actions differ by role only.
+
+**Root cause fixed:** Server page components must not call `supabase.auth.getUser()` + `redirect()` — causes silent 404 in production. Auth is middleware-only. Convention documented in HANDOVER.md and ARCHITECTURE.md.
+
+**Files added:**
+- `app/md-v3/page.tsx`
+- `app/md-v3/MDDashboardV3.tsx`
+- `app/md-v3/components/PatientClinicalSheet.tsx`
+- `app/md-v3/components/SOAPWorkspace.tsx`
+- `app/md-v3/error.tsx` (debug artifact — remove when stable)
+
+**File modified:** `app/page.tsx` — MD V3 tile added to `SUPERADMIN_DASHBOARDS` array
+
+---
+
 ## 2026-07-21 — Session 51
 
 ### FD Dashboard V2 — Documents Missing: intake form added ✅
