@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 21, 2026, Session 51 — Close)
+# Cosmos Medical Technologies — HANDOVER (July 21, 2026, Session 52 — Close)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -13,89 +13,58 @@ self-contained.
 
 ## Current Status
 
-All `cosmos-dashboard` commits confirmed deployed and live as of Session 51 close.
+All `cosmos-dashboard` commits confirmed deployed and live as of Session 52 close.
 
-**Production status:** `cosmosmt.com` is live. FD Dashboard V2 KPI cards updated, MD Referral Workspace live, Admin Users login email edit live, referral detail tabs restyled.
+**Production status:** `cosmosmt.com` is live. MD Dashboard V3 deployed and operational. `cosmos-dashboard-nu.vercel.app` alias updated to latest build. Preview alias management now requires `vercel alias` CLI command after each deploy — Vercel auto-alias only fires on `main` branch pushes, not via `--prod --yes` flag.
 
 **Dev environment status:** `cosmos-dev` Supabase project fully operational.
 
+**Root cause learned (Session 52):** Server component `page.tsx` files must NOT call `supabase.auth.getUser()` + `redirect()` — this causes the page to 404 in production. Auth is handled by middleware only. `page.tsx` files must use `supabaseServer` for data fetches directly, same pattern as `dashboard-v2/page.tsx`. This applies to all future server page components.
+
 ---
 
-## Completed This Session (Session 51 — Full)
+## Completed This Session (Session 52 — Full)
 
-### FD Dashboard V2 — Documents Missing: intake form added ✅
-`docsIssues` filter now includes `!p.intake_url` — patients without an intake form are included in the Documents Missing KPI and work queue filter. `intake_url` added to `Patient` interface and to the Supabase select in `page.tsx`.
+### MD Dashboard V3 — New enterprise physician workspace at `/md-v3` ✅
 
-**Files:** `app/dashboard-v2/FDDashboardV2.tsx`, `app/dashboard-v2/page.tsx`
+Full enterprise MD dashboard replacing the legacy `/md` patient list. Deployed and live.
 
-### FD Dashboard V2 — Bills Submitted KPI (visit count) ✅
-`billingReady` (patient count) replaced with `billsSubmitted` (visit count — `visits.filter(v => v.submitted_to_billing_at).length`). KPI label updated to "Bills Submitted", description "visits submitted to billing".
+**Route:** `/md-v3` — server component `page.tsx` → `MDDashboardV3.tsx` (client)
 
-**File:** `app/dashboard-v2/FDDashboardV2.tsx`
+**Features:**
+- Header: Cosmos Medical branding, DashboardNav hamburger, physician name, date, today's appointment count
+- KPI cards: Today (appointments), Waiting (no note yet), Billing (flags + missing), Urgent (treatment window expiring/expired) — each card filters the work queue
+- TanStack Table work queue: Patient, Priority, Appt time, Last Visit, Carrier, Pain score, Note status, Results status, Billing status, Actions (Visit / Chart)
+- Global search, column visibility toggle, sort by all columns, 20-row pagination
+- Treatment window bar per patient (180-day DOA timer, color-coded: green/orange/red)
+- Left border color per row: treatment window urgency or biller flag
+- Supervised doctor support — shows supervised provider label on patient rows
 
-### FD Dashboard V2 — Submit Bills KPI (full 4-gate) ✅
-New `submitBills` KPI counts visits ready to submit but not yet submitted. Full 4-condition gate: `nf3_preflight_passed = true` + `AOB on file` + `visit_line_items` exist + PCE generated + `submitted_to_billing_at IS NULL`. `page.tsx` fetches `visit_line_items` (visit_id only) and `patient_forms` (visit_id + form_type = PCE) to support the gate.
-
-**Files:** `app/dashboard-v2/FDDashboardV2.tsx`, `app/dashboard-v2/page.tsx`
-
-### FD Dashboard V2 — NF-2 Missing KPI removed ✅
-`nf2missing` KPI card removed. Documents Missing (which includes NF-2 check) makes it redundant. `nf2Missing` variable retained — still used by `getWorkflowStage()`.
-
-**File:** `app/dashboard-v2/FDDashboardV2.tsx`
-
-### FDPatientSheet — Bills Submitted label ✅
-"Billing Ready" label updated to "Bills Submitted" in the patient sheet workflow status section.
-
-**File:** `app/dashboard-v2/components/FDPatientSheet.tsx`
-
-### Admin Users — login email edit for superadmin ✅
-Superadmins can now change any user's login email directly from the Users tab. Email change calls `supabase.auth.admin.updateUserById(id, { email, email_confirm: true })` — immediate, no confirmation email sent. `emailEdit` field added to edit form with helper note. Email only sent to API when it has actually changed (prevents unnecessary auth updates on every save).
-
-**Files:** `app/admin/components/UsersSection.tsx`, `app/api/admin/users/route.ts`
-
-### Admin Users — scroll + focus on edit form and PIN reset ✅
-`fullNameRef` auto-focuses the Full Name input when Edit is tapped. `pinResetRef` auto-focuses the PIN input when Reset PIN is tapped. Both scroll into view first (150ms delay on focus to allow scroll to complete).
-
-**File:** `app/admin/components/UsersSection.tsx`
-
-### Admin Overview — KPI cards 3 per row ✅
-KPI grid changed from `grid-cols-2` to `grid-cols-3`. Card `py-6` default from shadcn `Card` component overridden with `py-0 gap-0` on `KpiCard`. `CardContent` padding updated to `py-2`.
-
-**File:** `app/admin/components/OverviewSection.tsx`
-
-### MD Referral Workspace — `/referrals` route ✅
-New full-page workspace at `/md/[patientId]/referrals?visit_id=`. Replaces direct navigation to individual referral pages. Features: sticky collapsible referral selector (4-col grid, 13 types), per-referral status tracking (not started / in progress / completed), `onBack` returns to grid, `onSaved` marks complete and returns to grid, Finish screen with summary and direct jump-back to any referral.
+**Patient Clinical Sheet** (right-side desktop, full-screen mobile):
+- Opens on row tap
+- Overview tab: demographics, accident/insurance, pain summary chips, document buttons (Intake/NF-2/AOB/Sig), latest visit ICD-10/CPT, open referrals
+- Visits tab: full visit history with ICD-10/CPT per visit, billing status, Open Visit button
+- Referrals tab: all referrals with status, appointments, Manage Referrals button
+- SOAP tab: Subjective (complaints, accident type, role, care, work status, aggravating factors, radiation, meds/allergies), Objective (vitals, pain scores by region, cervical ROM), Assessment (prognosis, functional limitations, active ICD-10), Plan (orders, referrals link), Diagnoses (ICD-10 live), Procedures (CPT live). Fields without backend columns show COMING SOON badge.
 
 **Files added:**
-- `app/md/[patientId]/referrals/page.tsx` (server wrapper)
-- `app/md/[patientId]/referrals/ReferralWorkspace.tsx` (client workspace)
-- `app/md/[patientId]/lib/referralUtils.ts` (shared `getAuthToken` + `viewReferralFile`)
+- `app/md-v3/page.tsx` — server component, data fetcher (matches dashboard-v2 pattern exactly)
+- `app/md-v3/MDDashboardV3.tsx` — main client component
+- `app/md-v3/components/PatientClinicalSheet.tsx` — right-side/full-screen patient sheet
+- `app/md-v3/components/SOAPWorkspace.tsx` — SOAP documentation tabs
+- `app/md-v3/error.tsx` — error boundary (debug artifact, can be removed)
 
-### MD Referral Workspace — all 11 forms wired ✅
-All referral form components updated: `getAuthToken` extracted to shared `referralUtils.ts` (eliminates 11 duplicate copies). `onBack` + `onSaved` optional props added to all 11 forms. `router.back()` replaced with `onBack ? onBack() : router.back()`. `viewReferralFile()` replaces inline `createSignedUrl` calls.
+**Dashboard picker:** MD V3 tile added to `SUPERADMIN_DASHBOARDS` in `app/page.tsx` (line 25, between MD/Doctor and Billing).
 
-**Files:** all 11 `*Referral.tsx` components across `mri/`, `sono/`, `pt/`, `ortho/`, `vng/`, `ans/`, `dme/`, `rx/`, `emg/`, `psy/`, `fc/`
+**Architectural decision (Session 52, locked):** Cross-role visual consistency adopted as platform standard — MD, FD, and future Billing dashboards share the same layout, nav, cards, table, and side-sheet interaction pattern. Data and actions differ by role; UX pattern is identical.
 
-### MD Referral Workspace — MRI/MRA/CT split into 3 focused forms ✅
-`MriReferral.tsx` (combined modality form) is no longer used by the workspace. Three new focused forms created:
-- `MriForm.tsx` — Spine + Extremities + Contrast only
-- `MraForm.tsx` — MRA Studies only
-- `CtForm.tsx` — CT Studies only
-
-All three call the same `/generate-mri` endpoint. Existing `MriReferral.tsx` retained for individual page route (`/mri/page.tsx`).
-
-**Files added:** `app/md/[patientId]/mri/MriForm.tsx`, `MraForm.tsx`, `CtForm.tsx`
-
-### Referral Detail — tab restyling ✅
-All 4 referral detail tab components updated to match calendar BookingModal design tokens:
-- Card backgrounds: `#0a1015` → `#0f1f2e`
-- Input backgrounds: `#0d1821` → `#0a1119`
-- Section headers: `fontSize 15, cyan` → `fontSize 11, green, uppercase, letterSpacing 0.1em`
-- Upload/action buttons: `#1a2e4a / #60a5fa` → `#00cfff20 / #00cfff`
-- Field labels: `#64748b` → `#19a866`
-- Destructive buttons: `#3a1a1a / #f87171` → `#e74c3c18 / #e74c3c`
-
-**Files:** `app/referrals/components/ReferralAppointmentTab.tsx`, `ReferralOverviewTab.tsx`, `ReferralDocumentsTab.tsx`, `ReferralNotesTab.tsx`
+**Deferred to Session 53:**
+- Sidebar nav (evaluated and deferred — separate session)
+- SOAP structured pain/exam fields (requires new schema — migration needed)
+- ICD-10 / CPT favorite/recent codes
+- Signature center
+- Task center
+- Clinical timeline
 
 ---
 
@@ -121,11 +90,15 @@ All 4 referral detail tab components updated to match calendar BookingModal desi
 
 7. **Appointment confirmation SMS trigger.** Wire `/notify/sms` into calendar booking save path.
 
-8. **`page.tsx` userRole hardcoded.** `/referrals/page.tsx` passes `userRole="md"` — role is resolved client-side from sessionStorage. Not a bug but should be cleaned up.
+8. **`/md` route retirement.** Four files reference `/md`: `app/page.tsx` (lines 14, 18, 19, 24, 334), `app/md/[patientId]/PatientChart.tsx` (back button), `app/components/DashboardNav.tsx` (nav link), `app/md-v2/page.tsx` (redirect). When ready to promote `/md-v3`, update these four files. Do not retire `/md` until then.
 
-9. **Duplicate visit records investigation.** Some patients have multiple `patient_visits` rows for the same date.
+9. **`/md-v3` error boundary cleanup.** `app/md-v3/error.tsx` is a debug artifact. Remove when `/md-v3` is stable.
 
-10. **`000_initial_schema.sql` superseded.** Stale on disk — use pg_dump approach.
+10. **`page.tsx` userRole hardcoded.** `/referrals/page.tsx` passes `userRole="md"` — role is resolved client-side from sessionStorage. Not a bug but should be cleaned up.
+
+11. **Duplicate visit records investigation.** Some patients have multiple `patient_visits` rows for the same date.
+
+12. **`000_initial_schema.sql` superseded.** Stale on disk — use pg_dump approach.
 
 ---
 
@@ -135,6 +108,36 @@ All 4 referral detail tab components updated to match calendar BookingModal desi
 - No FK between `referral_timeline.actor_user_id` and `user_profiles.id`.
 - Ghost session timeout is 0 — impersonation sessions never expire.
 - `/referrals/page.tsx` `userRole` hardcoded to `"md"`.
+- `app/md-v3/error.tsx` debug artifact in production.
+
+---
+
+## Critical Convention — Server Page Components
+
+**Confirmed Session 52:** All `page.tsx` server components must follow the `dashboard-v2` pattern:
+
+```ts
+import { supabaseServer } from '@/lib/supabaseServer'
+export const revalidate = 0
+export default async function PageName() {
+  const supabase = supabaseServer
+  // fetch data directly — NO auth.getUser(), NO redirect()
+}
+```
+
+Calling `supabase.auth.getUser()` + `redirect('/login')` in a server page causes the route to fail silently in production (builds as static `f` type, serves 404). Middleware handles all auth — page components do data fetching only.
+
+---
+
+## Vercel Alias Convention (Session 52 lesson)
+
+After each `vercel --prod --yes` deploy, the `cosmos-dashboard-nu.vercel.app` alias does NOT always update automatically. If the preview URL still shows an old build, run:
+
+```bash
+vercel alias <new-deployment-url> cosmos-dashboard-nu.vercel.app
+```
+
+Get the new deployment URL from `vercel ls | head -5`.
 
 ---
 
@@ -173,8 +176,8 @@ All 4 referral detail tab components updated to match calendar BookingModal desi
 ### Form Contract
 All 11 referral form components share identical optional props:
 ```ts
-onBack?: () => void        // called instead of router.back() when inside workspace
-onSaved?: (filename: string) => void  // called after successful PDF save
+onBack?: () => void
+onSaved?: (filename: string) => void
 ```
 When `onBack` is absent (standalone page route), `router.back()` fires as before — backward compatible.
 
@@ -253,11 +256,22 @@ Three separate focused forms in `app/md/[patientId]/mri/`:
 - [ ] Notes tab persistence
 - [ ] Realtime — referrals and appointments tables
 
-### Stage 4 — Admin
+### Stage 4 — MD Dashboard
+- [x] MDClient patient list (`/md`) — legacy, to be retired
+- [x] MD V2 patient chart (`/md-v2/[patientId]`) — full chart, retained
+- [x] MD Dashboard V3 (`/md-v3`) — enterprise workspace (Session 52)
+- [ ] MD Dashboard V3 — SOAP structured pain/exam fields (new schema required)
+- [ ] MD Dashboard V3 — signature center
+- [ ] MD Dashboard V3 — task center
+- [ ] MD Dashboard V3 — clinical timeline
+- [ ] MD Dashboard V3 — sidebar nav
+- [ ] `/md` route retirement (promote `/md-v3`)
+
+### Stage 5 — Admin
 - [x] Admin Users — login email edit for superadmin (Session 51)
 - [x] Admin Overview — KPI cards 3 per row (Session 51)
 
-### Stage 5 — Infrastructure
+### Stage 6 — Infrastructure
 - [ ] Render upgrade to Standard plan — pre-go-live blocker
 - [ ] Twilio SMS activation
 - [ ] 000_initial_schema.sql removal/replacement

@@ -36,12 +36,8 @@ Supabase dev project URL: `https://tpwbgqfdznqtjqimxric.supabase.co` —
 cosmos-dev project, used for Preview/dev deployments only (Session 47).
 
 **Styling note**: Tailwind CSS is present in `package.json` but was
-unused until the Biller dashboard. Six deliberate, scoped exceptions
+unused until the Biller dashboard. Seven deliberate, scoped exceptions
 now exist — all approved explicitly after the tradeoff was presented:
-6. **FD Dashboard V2** (`/dashboard-v2`, `app/dashboard-v2/`) — shadcn/
-   Tailwind with same CSS-variable bridge and Oxanium font; TanStack Table
-   for work queue; Realtime subscription on `patients`, `patient_visits`,
-   `patient_forms` (Session 41).
 1. **Biller dashboard** (`/billing`, §8) — the first exception.
 2. **Admin page** (`/admin`, `app/admin/page.tsx`) — full shadcn/ui
    rebuild; same CSS-variable bridge and Oxanium font as the Biller
@@ -55,9 +51,19 @@ now exist — all approved explicitly after the tradeoff was presented:
    `referral_appointments` record. Full-page detail at `/referrals/[id]`
    (all sessions) or `/referrals/[id]?appt=[uuid]` (single appointment).
    Multi-Referral reminder row in NEW bucket for MRI with unscheduled parts.
+6. **FD Dashboard V2** (`/dashboard-v2`, `app/dashboard-v2/`) — shadcn/
+   Tailwind with same CSS-variable bridge and Oxanium font; TanStack Table
+   for work queue; Realtime subscription on `patients`, `patient_visits`,
+   `patient_forms` (Session 41).
+7. **MD Dashboard V3** (`/md-v3`, `app/md-v3/`) — enterprise physician
+   workspace; TanStack Table work queue; Patient Clinical Sheet (right-side
+   desktop / full-screen mobile); SOAP workspace with `pce_data` integration;
+   treatment window timer; cross-role platform standard (Session 52).
 Every other screen remains hand-rolled inline `style={{...}}`.
 
 **MD Referral Workspace** (`/md/[patientId]/referrals`, Session 51): full-page referral entry point replacing per-referral page navigation. Sticky collapsible selector (13 referral types), per-type status tracking, `onBack`/`onSaved` prop contract on all 11 form components, shared `referralUtils.ts` (`getAuthToken`, `viewReferralFile`). MRI/MRA/CT each have dedicated focused form components (`MriForm`, `MraForm`, `CtForm`) — `MriReferral.tsx` retained for standalone route only.
+
+**Cross-role visual consistency (Session 52, locked):** MD Dashboard V3, FD Dashboard V2, and future Billing dashboard share the same layout, nav, cards, table, and side-sheet interaction pattern. Data and actions differ by role; UX pattern is identical. This is the platform standard for all future role-based dashboards.
 
 ---
 
@@ -105,6 +111,14 @@ must **never** be scoped to Production.
 on feature branches — pushing to `main` always triggers Production only.
 `cosmos-dashboard-nu.vercel.app` is the stable alias for the latest
 Preview build and is the correct URL for dev testing.
+
+**Vercel alias convention (Session 52):** After each `vercel --prod --yes`
+deploy, the `cosmos-dashboard-nu.vercel.app` alias does not always update
+automatically. If the preview URL shows a stale build, run:
+```bash
+vercel alias <new-deployment-url> cosmos-dashboard-nu.vercel.app
+```
+Get the new deployment URL from `vercel ls | head -5`.
 
 **`cosmos-dashboard` (Vercel)** — intentional double-deploy:
 1. `git push` triggers Vercel's GitHub integration auto-deploy.
@@ -397,6 +411,25 @@ query with `revalidate: 0`, then passes the result as props to a client
 component that owns all interactivity. Don't fetch inside the client
 component unless there's a specific reason to deviate.
 
+**Critical convention (Session 52, locked):** Server `page.tsx` components
+must NOT call `supabase.auth.getUser()` + `redirect()`. Auth is handled
+by middleware only. Calling `getUser()` + `redirect('/login')` in a server
+page causes the route to compile as a static (`f`) type and serve 404 in
+production, even though the build log shows the route as present. The
+correct pattern — matching `app/dashboard-v2/page.tsx` exactly:
+
+```ts
+import { supabaseServer } from '@/lib/supabaseServer'
+export const revalidate = 0
+export default async function PageName() {
+  const supabase = supabaseServer
+  // fetch data directly — no auth.getUser(), no redirect()
+}
+```
+
+Middleware (`middleware.ts`) handles all unauthenticated requests by
+redirecting to `/` (the login page). Page components are data-fetch only.
+
 ---
 
 ## 8. Document Generation Pattern (Save→View)
@@ -477,6 +510,12 @@ the user profile — regardless of how many locations the doctor has.
 (`locs.length > 1` bypass removed Session 14.) `cosmos_location_id`
 and `cosmos_location_name` stored in `sessionStorage` for use by
 `handleStartVisit` and manual visit INSERT in `PatientChart.tsx`.
+
+**Superadmin dashboard picker** (`SUPERADMIN_DASHBOARDS` array in `app/page.tsx`):
+current entries — Front Desk (`/dashboard-v2`), MD / Doctor (`/md`), MD V3
+(`/md-v3`), Billing (`/billing`), Admin (`/admin`). Navigation uses
+`router.push(d.path)` — client-side. To add a new dashboard, append one
+entry to this array; no other change required.
 
 ---
 
