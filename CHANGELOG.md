@@ -1,3 +1,84 @@
+## 2026-07-21 — Session 51
+
+### FD Dashboard V2 — Documents Missing: intake form added ✅
+
+`docsIssues` filter now includes `!p.intake_url`. `intake_url` added to `Patient` interface and Supabase select in `page.tsx`. KPI description updated to "missing sig, AOB, NF-2, or intake".
+
+**Files:** `app/dashboard-v2/FDDashboardV2.tsx`, `app/dashboard-v2/page.tsx`
+
+### FD Dashboard V2 — Bills Submitted KPI (visit count) ✅
+
+`billingReady` (patient count) replaced with `billsSubmitted` (visit count). Label "Bills Submitted", description "visits submitted to billing".
+
+**File:** `app/dashboard-v2/FDDashboardV2.tsx`
+
+### FD Dashboard V2 — Submit Bills KPI (full 4-gate) ✅
+
+New KPI counts visits ready to submit but not yet submitted. Gate: `nf3_preflight_passed` + AOB on file + `visit_line_items` exist + PCE generated + not yet submitted. `page.tsx` fetches `visit_line_items` and `patient_forms` (PCE only).
+
+**Files:** `app/dashboard-v2/FDDashboardV2.tsx`, `app/dashboard-v2/page.tsx`
+
+### FD Dashboard V2 — NF-2 Missing KPI removed ✅
+
+`nf2missing` KPI card removed — covered by Documents Missing. `nf2Missing` variable retained for `getWorkflowStage()`.
+
+**File:** `app/dashboard-v2/FDDashboardV2.tsx`
+
+### FDPatientSheet — Bills Submitted label ✅
+
+"Billing Ready" → "Bills Submitted".
+
+**File:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### Admin Users — login email edit for superadmin ✅
+
+Superadmins can change any user's login email from the Users tab. `supabase.auth.admin.updateUserById(id, { email, email_confirm: true })` — immediate, no confirmation required. Email only sent to API when changed.
+
+**Files:** `app/admin/components/UsersSection.tsx`, `app/api/admin/users/route.ts`
+
+### Admin Users — scroll + focus on edit form and PIN reset ✅
+
+`fullNameRef` auto-focuses Full Name on Edit. `pinResetRef` auto-focuses PIN on Reset PIN. Both scroll into view first.
+
+**File:** `app/admin/components/UsersSection.tsx`
+
+### Admin Overview — KPI cards 3 per row ✅
+
+`grid-cols-2` → `grid-cols-3`. Card `py-6` overridden with `py-0 gap-0`. `CardContent` → `py-2`.
+
+**File:** `app/admin/components/OverviewSection.tsx`
+
+### MD Referral Workspace ✅
+
+New full-page referral entry point at `/md/[patientId]/referrals?visit_id=`. Sticky collapsible selector (4-col grid, 13 referral types), per-referral status (not started / in progress / completed), `onBack` returns to grid, `onSaved` marks complete + returns to grid, Finish screen with summary.
+
+**Files added:** `app/md/[patientId]/referrals/page.tsx`, `ReferralWorkspace.tsx`, `lib/referralUtils.ts`
+
+### MD Referral Workspace — all 11 forms wired ✅
+
+`getAuthToken` extracted to shared `referralUtils.ts` (11 duplicate copies removed). `onBack` + `onSaved` optional props added to all 11 forms. Backward compatible — standalone page routes unaffected.
+
+**Files:** all 11 `*Referral.tsx` components
+
+### MD Referral Workspace — MRI/MRA/CT split into 3 focused forms ✅
+
+Three new form components replacing the combined modality form inside the workspace:
+- `MriForm.tsx` — Spine + Extremities + Contrast
+- `MraForm.tsx` — MRA Studies
+- `CtForm.tsx` — CT Studies
+
+`MriReferral.tsx` retained for standalone `/mri/page.tsx` route.
+
+**Files added:** `app/md/[patientId]/mri/MriForm.tsx`, `MraForm.tsx`, `CtForm.tsx`
+
+### Referral Detail — tab restyling ✅
+
+4 tab components updated to match calendar BookingModal design tokens: cards `#0f1f2e`, inputs `#0a1119`, section headers green uppercase `fontSize 11`, action buttons `#00cfff20`, destructive buttons `#e74c3c18`.
+
+**Files:** `app/referrals/components/ReferralAppointmentTab.tsx`, `ReferralOverviewTab.tsx`, `ReferralDocumentsTab.tsx`, `ReferralNotesTab.tsx`
+
+---
+
 ## 2026-07-20 — Session 50
 
 ### MRI Referral Save Bug Fix ✅

@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 20, 2026, Session 50 — Close)
+# Cosmos Medical Technologies — HANDOVER (July 21, 2026, Session 51 — Close)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -13,78 +13,89 @@ self-contained.
 
 ## Current Status
 
-All `cosmos-dashboard` commits confirmed deployed and live as of Session 50 close.
+All `cosmos-dashboard` commits confirmed deployed and live as of Session 51 close.
 
-**Production status:** `cosmosmt.com` is live. Referral dashboard fully rebuilt with appointment-driven architecture. MRI referral splitting, Multi-Referral tracking row, and single-appointment view all working.
+**Production status:** `cosmosmt.com` is live. FD Dashboard V2 KPI cards updated, MD Referral Workspace live, Admin Users login email edit live, referral detail tabs restyled.
 
 **Dev environment status:** `cosmos-dev` Supabase project fully operational.
 
 ---
 
-## Completed This Session (Session 50 — Full)
+## Completed This Session (Session 51 — Full)
 
-### MRI Referral Save Bug Fix ✅
-`MriReferral.tsx` — error message moved from scrollable content area into fixed footer div, always visible above Save button regardless of scroll position. Silent failure when no modality selected now surfaces immediately.
+### FD Dashboard V2 — Documents Missing: intake form added ✅
+`docsIssues` filter now includes `!p.intake_url` — patients without an intake form are included in the Documents Missing KPI and work queue filter. `intake_url` added to `Patient` interface and to the Supabase select in `page.tsx`.
 
-### Appointment-Driven Referral Dashboard ✅
-Complete architectural rebuild of referral tracking. Dashboard now shows one row per `referral_appointments` record instead of one row per referral.
+**Files:** `app/dashboard-v2/FDDashboardV2.tsx`, `app/dashboard-v2/page.tsx`
 
-**KPI counts (appointment-driven):**
-- NEW = referrals with no appointments + MRI referrals with unscheduled body parts
-- SCHEDULED = appointments with future date, no result
-- RESCHEDULE = cancelled appointments (self-destroys on rebook)
-- OVERDUE = appointments past date, no result
-- CLOSED = appointments with result uploaded
+### FD Dashboard V2 — Bills Submitted KPI (visit count) ✅
+`billingReady` (patient count) replaced with `billsSubmitted` (visit count — `visits.filter(v => v.submitted_to_billing_at).length`). KPI label updated to "Bills Submitted", description "visits submitted to billing".
 
-**List rows:**
-- One row per appointment, showing body part(s), date, status, provider
-- Left border color per status (cyan=scheduled, orange=reschedule, red=overdue, green=closed)
+**File:** `app/dashboard-v2/FDDashboardV2.tsx`
 
-**Files:** `app/referrals/ReferralDashboard.tsx`, `app/referrals/actions.ts`, `app/referrals/types.ts`
+### FD Dashboard V2 — Submit Bills KPI (full 4-gate) ✅
+New `submitBills` KPI counts visits ready to submit but not yet submitted. Full 4-condition gate: `nf3_preflight_passed = true` + `AOB on file` + `visit_line_items` exist + PCE generated + `submitted_to_billing_at IS NULL`. `page.tsx` fetches `visit_line_items` (visit_id only) and `patient_forms` (visit_id + form_type = PCE) to support the gate.
 
-### Multi-Referral Row ✅
-MRI/MRA/CT referrals with multiple body parts generate a persistent "Multi-Referral" reminder row in NEW. Shows unscheduled body parts remaining. Self-destroys when all body parts have active appointments. MULTI-REFERRAL badge rendered under patient name in purple.
+**Files:** `app/dashboard-v2/FDDashboardV2.tsx`, `app/dashboard-v2/page.tsx`
 
-### MRI Lifecycle — Stays `new` Throughout ✅
-MRI/MRA/CT referrals no longer advance to `scheduled` status. They remain `new` until all sessions have results uploaded, then auto-close. Non-MRI referrals unchanged.
+### FD Dashboard V2 — NF-2 Missing KPI removed ✅
+`nf2missing` KPI card removed. Documents Missing (which includes NF-2 check) makes it redundant. `nf2Missing` variable retained — still used by `getWorkflowStage()`.
 
-**`scheduleAppointment()`** — MRI skips status advance
-**`cancelSession()`** — MRI stays `new` (non-MRI → `reschedule`)
-**`rescheduleSession()`** — MRI stays `new` (non-MRI → `scheduled`)
-**`uploadReferralResult()`** — MRI closes only when all body parts assigned + all sessions complete
+**File:** `app/dashboard-v2/FDDashboardV2.tsx`
 
-### Referral Detail Full Page at `/referrals/[id]` ✅
-`ReferralSheet.tsx` modal replaced with full-page navigation. Tapping a dashboard row navigates to `/referrals/[id]` (Multi-Referral) or `/referrals/[id]?appt=[uuid]` (individual appointment).
+### FDPatientSheet — Bills Submitted label ✅
+"Billing Ready" label updated to "Bills Submitted" in the patient sheet workflow status section.
 
-**Files added:** `app/referrals/[id]/page.tsx`, `app/referrals/[id]/ReferralDetailPage.tsx`
+**File:** `app/dashboard-v2/components/FDPatientSheet.tsx`
 
-**Individual appointment view:** Single session card only — no chip pool, no schedule form (unless appointment is cancelled → rebook flow shown).
+### Admin Users — login email edit for superadmin ✅
+Superadmins can now change any user's login email directly from the Users tab. Email change calls `supabase.auth.admin.updateUserById(id, { email, email_confirm: true })` — immediate, no confirmation email sent. `emailEdit` field added to edit form with helper note. Email only sent to API when it has actually changed (prevents unnecessary auth updates on every save).
 
-### CANCELLED Badge on Session Cards ✅
-Cancelled appointments display orange CANCELLED badge, dimmed card, "Body part returned to unscheduled pool" note. No action buttons.
+**Files:** `app/admin/components/UsersSection.tsx`, `app/api/admin/users/route.ts`
 
-**File:** `app/referrals/components/ReferralAppointmentTab.tsx`
+### Admin Users — scroll + focus on edit form and PIN reset ✅
+`fullNameRef` auto-focuses the Full Name input when Edit is tapped. `pinResetRef` auto-focuses the PIN input when Reset PIN is tapped. Both scroll into view first (150ms delay on focus to allow scroll to complete).
 
-### Rebook Flow from RESCHEDULE Row ✅
-Tapping a RESCHEDULE row opens single appointment view with:
-- Cancelled session card (CANCELLED badge)
-- "Rebook — select body parts" chip pool (cancelled body part pre-selected)
-- Schedule form shown immediately
+**File:** `app/admin/components/UsersSection.tsx`
 
-On save, cancelled appointment row is **deleted** from DB. RESCHEDULE row self-destroys. New SCHEDULED row appears.
+### Admin Overview — KPI cards 3 per row ✅
+KPI grid changed from `grid-cols-2` to `grid-cols-3`. Card `py-6` default from shadcn `Card` component overridden with `py-0 gap-0` on `KpiCard`. `CardContent` padding updated to `py-2`.
 
-### `needs_review` Column References Fixed ✅
-Four files still querying removed `needs_review`/`reviewed_at` columns (removed Session 49). Fixed:
-- `app/dashboard-v2/components/FDPatientSheet.tsx`
-- `app/md-v2/[patientId]/ref/[rid]/page.tsx`
-- `app/reports/ReportsClient.tsx`
-- `app/reports/referrals/page.tsx`
+**File:** `app/admin/components/OverviewSection.tsx`
 
-### `Math.ceil` Session Gate Removed ✅
-`scheduleAppointment()` no longer uses `Math.ceil(parts/2)` to gate MRI status advancement. Gate was preventing status from advancing even when appointment was booked.
+### MD Referral Workspace — `/referrals` route ✅
+New full-page workspace at `/md/[patientId]/referrals?visit_id=`. Replaces direct navigation to individual referral pages. Features: sticky collapsible referral selector (4-col grid, 13 types), per-referral status tracking (not started / in progress / completed), `onBack` returns to grid, `onSaved` marks complete and returns to grid, Finish screen with summary and direct jump-back to any referral.
 
-### `ReferralAppointmentTab` — Unscheduled Parts Fix ✅
-`assignedParts` now excludes cancelled appointments, so cancelled body parts correctly return to the unscheduled chip pool.
+**Files added:**
+- `app/md/[patientId]/referrals/page.tsx` (server wrapper)
+- `app/md/[patientId]/referrals/ReferralWorkspace.tsx` (client workspace)
+- `app/md/[patientId]/lib/referralUtils.ts` (shared `getAuthToken` + `viewReferralFile`)
+
+### MD Referral Workspace — all 11 forms wired ✅
+All referral form components updated: `getAuthToken` extracted to shared `referralUtils.ts` (eliminates 11 duplicate copies). `onBack` + `onSaved` optional props added to all 11 forms. `router.back()` replaced with `onBack ? onBack() : router.back()`. `viewReferralFile()` replaces inline `createSignedUrl` calls.
+
+**Files:** all 11 `*Referral.tsx` components across `mri/`, `sono/`, `pt/`, `ortho/`, `vng/`, `ans/`, `dme/`, `rx/`, `emg/`, `psy/`, `fc/`
+
+### MD Referral Workspace — MRI/MRA/CT split into 3 focused forms ✅
+`MriReferral.tsx` (combined modality form) is no longer used by the workspace. Three new focused forms created:
+- `MriForm.tsx` — Spine + Extremities + Contrast only
+- `MraForm.tsx` — MRA Studies only
+- `CtForm.tsx` — CT Studies only
+
+All three call the same `/generate-mri` endpoint. Existing `MriReferral.tsx` retained for individual page route (`/mri/page.tsx`).
+
+**Files added:** `app/md/[patientId]/mri/MriForm.tsx`, `MraForm.tsx`, `CtForm.tsx`
+
+### Referral Detail — tab restyling ✅
+All 4 referral detail tab components updated to match calendar BookingModal design tokens:
+- Card backgrounds: `#0a1015` → `#0f1f2e`
+- Input backgrounds: `#0d1821` → `#0a1119`
+- Section headers: `fontSize 15, cyan` → `fontSize 11, green, uppercase, letterSpacing 0.1em`
+- Upload/action buttons: `#1a2e4a / #60a5fa` → `#00cfff20 / #00cfff`
+- Field labels: `#64748b` → `#19a866`
+- Destructive buttons: `#3a1a1a / #f87171` → `#e74c3c18 / #e74c3c`
+
+**Files:** `app/referrals/components/ReferralAppointmentTab.tsx`, `ReferralOverviewTab.tsx`, `ReferralDocumentsTab.tsx`, `ReferralNotesTab.tsx`
 
 ---
 
@@ -110,13 +121,11 @@ Four files still querying removed `needs_review`/`reviewed_at` columns (removed 
 
 7. **Appointment confirmation SMS trigger.** Wire `/notify/sms` into calendar booking save path.
 
-8. **Referral detail page restyling.** `ReferralAppointmentTab.tsx`, `ReferralOverviewTab.tsx`, `ReferralNotesTab.tsx`, `ReferralDocumentsTab.tsx` need full restyling to match calendar BookingModal design tokens (`#0f1f2e` cards, `#19a866` section labels, `#0a1119` inputs).
+8. **`page.tsx` userRole hardcoded.** `/referrals/page.tsx` passes `userRole="md"` — role is resolved client-side from sessionStorage. Not a bug but should be cleaned up.
 
-9. **`page.tsx` userRole hardcoded.** `/referrals/page.tsx` passes `userRole="md"` — role is resolved client-side from sessionStorage. Not a bug but should be cleaned up.
+9. **Duplicate visit records investigation.** Some patients have multiple `patient_visits` rows for the same date.
 
-10. **Duplicate visit records investigation.** Some patients have multiple `patient_visits` rows for the same date.
-
-11. **`000_initial_schema.sql` superseded.** Stale on disk — use pg_dump approach.
+10. **`000_initial_schema.sql` superseded.** Stale on disk — use pg_dump approach.
 
 ---
 
@@ -129,7 +138,7 @@ Four files still querying removed `needs_review`/`reviewed_at` columns (removed 
 
 ---
 
-## Referral Architecture — Session 50 Model
+## Referral Architecture — Session 50 Model (unchanged)
 
 ### Appointment-Driven Dashboard
 - One row per `referral_appointments` record
@@ -150,7 +159,36 @@ Four files still querying removed `needs_review`/`reviewed_at` columns (removed 
 
 ### `outcome` Values (referral_appointments)
 `null` (scheduled/pending) | `completed` | `cancelled` | `no_show`
-Note: `superseded` was attempted but abandoned — delete approach used instead.
+
+---
+
+## MD Referral Workspace Architecture (Session 51)
+
+### Route
+`/md/[patientId]/referrals?visit_id=` — server page.tsx → `ReferralWorkspace.tsx` (client)
+
+### Referral Registry
+13 entries in `REFERRAL_REGISTRY` array in `ReferralWorkspace.tsx`. To add a new referral type: add one entry to the registry + add a case to `ReferralFormRouter` switch. Nothing else changes.
+
+### Form Contract
+All 11 referral form components share identical optional props:
+```ts
+onBack?: () => void        // called instead of router.back() when inside workspace
+onSaved?: (filename: string) => void  // called after successful PDF save
+```
+When `onBack` is absent (standalone page route), `router.back()` fires as before — backward compatible.
+
+### Shared Utilities
+`app/md/[patientId]/lib/referralUtils.ts`:
+- `getAuthToken()` — session JWT for API Authorization headers
+- `viewReferralFile(filename)` — opens signed URL in new tab
+
+### MRI / MRA / CT
+Three separate focused forms in `app/md/[patientId]/mri/`:
+- `MriForm.tsx` — spine + extremities + contrast (formType: `MRI`)
+- `MraForm.tsx` — MRA studies (formType: `MRA`)
+- `CtForm.tsx` — CT studies (formType: `CT`)
+- `MriReferral.tsx` — retained for `/mri/page.tsx` standalone route only
 
 ---
 
@@ -196,7 +234,9 @@ Note: `superseded` was attempted but abandoned — delete approach used instead.
 - [x] MRI stays `new` throughout lifecycle (Session 50)
 - [x] Single appointment view at /referrals/[id]?appt= (Session 50)
 - [x] Rebook flow from RESCHEDULE row (Session 50)
-- [ ] Referral detail page restyling (calendar design tokens)
+- [x] Referral detail page restyling — calendar design tokens (Session 51)
+- [x] MD Referral Workspace — all 11 forms, onBack/onSaved, shared utils (Session 51)
+- [x] MRI/MRA/CT split into 3 focused workspace forms (Session 51)
 - [ ] DME and RX codes from patient_visits
 - [ ] Patient email required at intake
 - [ ] DEV artifacts removal
@@ -205,10 +245,17 @@ Note: `superseded` was attempted but abandoned — delete approach used instead.
 - [x] Full FD Dashboard V2
 - [x] SMS notification system
 - [x] Referral dashboard appointment-driven (Session 50)
+- [x] Documents Missing — intake form added (Session 51)
+- [x] Bills Submitted KPI — visit count (Session 51)
+- [x] Submit Bills KPI — full 4-gate (Session 51)
 - [ ] Appointment confirmation SMS — auto-trigger on booking
 - [ ] Patient phone required at intake
 - [ ] Notes tab persistence
 - [ ] Realtime — referrals and appointments tables
+
+### Stage 4 — Admin
+- [x] Admin Users — login email edit for superadmin (Session 51)
+- [x] Admin Overview — KPI cards 3 per row (Session 51)
 
 ### Stage 5 — Infrastructure
 - [ ] Render upgrade to Standard plan — pre-go-live blocker

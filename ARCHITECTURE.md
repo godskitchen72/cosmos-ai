@@ -57,6 +57,8 @@ now exist — all approved explicitly after the tradeoff was presented:
    Multi-Referral reminder row in NEW bucket for MRI with unscheduled parts.
 Every other screen remains hand-rolled inline `style={{...}}`.
 
+**MD Referral Workspace** (`/md/[patientId]/referrals`, Session 51): full-page referral entry point replacing per-referral page navigation. Sticky collapsible selector (13 referral types), per-type status tracking, `onBack`/`onSaved` prop contract on all 11 form components, shared `referralUtils.ts` (`getAuthToken`, `viewReferralFile`). MRI/MRA/CT each have dedicated focused form components (`MriForm`, `MraForm`, `CtForm`) — `MriReferral.tsx` retained for standalone route only.
+
 ---
 
 ## 2. Deployment Pipeline
