@@ -1,3 +1,70 @@
+## 2026-07-22 — Session 54
+
+### Phone Number Formatting ✅
+
+`fmtPhoneDisplay()` helper added to `FDPatientSheet.tsx` and `PatientClinicalSheet.tsx`. Patient phone numbers now render as `(929) 768-3179` format in the FD patient sheet (Demographics section) and MD V3 patient clinical sheet. All other surfaces already used `fmtPhoneDisplay()` correctly.
+
+**Files modified:** `app/dashboard-v2/components/FDPatientSheet.tsx`, `app/md-v3/components/PatientClinicalSheet.tsx`
+
+### PDF Signature Pipeline — Full Overhaul ✅
+
+**AOB patient signature not injecting:**
+- Root cause: `forms/aob.py` was reading `patient_data.get("signature_url")` — key never exists in `patient_data`. Patient signature is stored under `patient_signature_url`. Patient signature was never injecting into any AOB.
+
+**Signature stretch fix (all 14 forms):**
+- `forms/base.py` `inject_signature_image()`: `keep_proportion=False` → `keep_proportion=True`. Applies globally to all forms via shared function.
+
+**Signature size fix (all 14 forms):**
+- `forms/base.py` `inject_signature_image()`: AcroForm widget rects for signature fields are 10–14pt tall (text-field-sized). Expanded to `cy ± 30` (60pt total, centered on field midpoint) for legible rendering across all templates.
+
+**NF-2 and NF-3 inline injection fix:**
+- Both files had their own inline `page.insert_image()` loops (bypassing `base.py`) with `keep_proportion=False` and no rect expansion. Patched to match base.py pattern.
+- NF-2 uses asymmetric expansion (`r.y0 - 20, r.y1 + 35`) to prevent overflow into adjacent stacked signature fields.
+
+**EMG/SONO/FC/PSY wrong signature key:**
+- All 4 forms built from `GENERIC_REFERRAL_FORM.pdf` were reading `patient_signature_url` and injecting it into `provider.signature` field — patient's own signature was appearing as the provider/MD signature.
+- Fixed to `doctor_signature_url` in all 4 files.
+
+**Files modified:** `forms/aob.py`, `forms/base.py`, `forms/nf2.py`, `forms/nf3.py`, `forms/emg.py`, `forms/sono.py`, `forms/fc.py`, `forms/psy.py`
+
+### Doctor Signature Immediate DB Persist ✅
+
+`DoctorsSection.tsx` `handleSignature()` previously uploaded the signature image to Supabase Storage and updated local React state — but `doctors.signature_url` in the DB was only updated when the user tapped Save Provider. If the user closed without saving, the new signature was in storage but the DB still pointed to the old file, causing freshly-generated PDFs to render the old signature.
+
+Fixed: immediately calls `supabase.from('doctors').update({ signature_url: filename }).eq('doctor_id', editing)` after successful upload, before closing the signature pad.
+
+**File modified:** `app/admin/components/DoctorsSection.tsx`
+
+### FD Documents Tab — W9 Link ✅
+
+W9 card added to the NO-FAULT FORMS & REQUIREMENTS section in `FDPatientSheet.tsx`. Shows a View button (opens signed URL) when the patient's assigned doctor has a `w9_url` on file; shows "🔒 Not on file" otherwise.
+
+Resolution: `FDDashboardV2.tsx` builds `doctorW9Map` (direct `doctor_id → w9_url` lookup) and passes `_resolvedW9Url` as a resolved field on each patient row. `page.tsx` doctors select extended to `doctor_id, first_name, last_name, w9_url, supervising_provider_id`.
+
+**Files modified:** `app/dashboard-v2/page.tsx`, `app/dashboard-v2/FDDashboardV2.tsx`, `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### Supervised Provider W9 Inheritance ✅
+
+Provider physicians (PA, NP) never have their own W9 — they bill under their supervising MD's Professional Corporation. `DoctorsSection.tsx` `handleSave()` now automatically copies the supervisor's `w9_url` to the supervised provider's own `w9_url` on every save. This makes the FD dashboard's direct `doctor_id → w9_url` lookup always resolve correctly without runtime supervisor chain resolution.
+
+Backfill: John Orthobot's `w9_url` manually set to Yury Gottesman's W9 (`ccfeb4b0-e61e-48f0-b4fa-bd15c155f6d0_W9.pdf`) via direct SQL UPDATE.
+
+**Remaining:** Run backfill SQL for other supervised providers (Reza NPian, Brad PAian, Ron Pearlman) — see HANDOVER Open Items #4.
+
+**File modified:** `app/admin/components/DoctorsSection.tsx`
+
+### FD Documents Tab — Select All & Checkboxes ✅
+
+- Select All button moved from inside Visit Packet section header to top of Documents tab, above NO-FAULT FORMS section
+- Select All now selects all available docs: Intake Form + NF-2 + AOB + W9 + all built visit packets + all referral result docs
+- Checkboxes added to Intake Form, NF-2, AOB, and W9 cards — rendered inside each card border (not outside)
+- `DocCard` component extended with `onSelect` and `isSelected` props — checkbox renders inside the card alongside the title when provided and a file exists
+- `staticDocs` array computes selectable static docs at render time for `allSelected` / `toggleSelectAll` logic
+
+**File modified:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+---
+
 ## 2026-07-22 — Session 53
 
 ### cosmosmt.com — DNS Live ✅

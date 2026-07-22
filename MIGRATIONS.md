@@ -1,3 +1,30 @@
+## Session 54 — Data Changes (July 22, 2026)
+
+### No schema DDL this session.
+
+### doctors — w9_url backfill for supervised providers
+
+Supervised provider physicians inherit their supervising MD's W9. `DoctorsSection.tsx` now auto-copies supervisor `w9_url` on save going forward. Manual backfill applied to John Orthobot in production:
+
+```sql
+-- Applied to production (ttudxnzmybcwrtqlbtta) via Supabase SQL editor
+UPDATE doctors
+SET w9_url = 'ccfeb4b0-e61e-48f0-b4fa-bd15c155f6d0_W9.pdf'
+WHERE doctor_id = 'e562ce06-d2fd-4146-9165-b1b331028736';
+```
+
+**Remaining backfill** (run at next session start or open each provider in Admin and Save):
+```sql
+UPDATE doctors d
+SET w9_url = sup.w9_url
+FROM doctors sup
+WHERE d.supervising_provider_id = sup.doctor_id
+AND sup.w9_url IS NOT NULL
+AND (d.w9_url IS NULL OR d.w9_url != sup.w9_url);
+```
+
+---
+
 # MIGRATIONS.md
 ## Cosmos Medical Technologies — Database Migration & Environment Reference
 **Created:** Session 47 — July 17, 2026

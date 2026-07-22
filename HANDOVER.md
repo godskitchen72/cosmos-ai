@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 22, 2026, Session 53 — Close)
+# Cosmos Medical Technologies — HANDOVER (July 22, 2026, Session 54 — Close)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -13,9 +13,9 @@ self-contained.
 
 ## Current Status
 
-All `cosmos-dashboard` commits confirmed deployed and live as of Session 53 close.
+All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed and live as of Session 54 close.
 
-**Production status:** `cosmosmt.com` DNS is now fully live (A record 216.150.1.1, CNAME www→cname.vercel-dns.com, SSL active). MD Dashboard V3 is the promoted default MD dashboard. `/md` and `/md-v2` routes are retained in the codebase but removed from the picker and nav. `cosmos-dashboard-nu.vercel.app` alias remains pointed at cosmos-dev (Preview).
+**Production status:** `cosmosmt.com` fully live. MD Dashboard V3 is the default MD dashboard. FD Dashboard V2 is the default FD dashboard with full document selection, W9 link, and signature pipeline fixes live.
 
 **Dev environment status:** `cosmos-dev` Supabase project fully operational.
 
@@ -23,47 +23,65 @@ All `cosmos-dashboard` commits confirmed deployed and live as of Session 53 clos
 
 ---
 
-## Completed This Session (Session 53 — Full)
+## Completed This Session (Session 54 — Full)
 
-### cosmosmt.com DNS — Live ✅
-- Porkbun DNS: A record `@` → `216.150.1.1`, CNAME `www` → `cname.vercel-dns.com`
-- Vercel domain added to `cosmos-dashboard` project → Production environment
-- SSL cert issued automatically
-- Login page confirmed loading at `cosmosmt.com`
+### Phone Number Formatting ✅
+- `fmtPhoneDisplay()` added to `FDPatientSheet.tsx` and `PatientClinicalSheet.tsx`
+- Phone numbers now render as `(929) 768-3179` format in FD patient sheet and MD V3 patient sheet
+- All other surfaces already used `fmtPhoneDisplay()` correctly
 
-### MD Dashboard V3 — Promoted as Default MD Dashboard ✅
-- `app/page.tsx` — `md`, `pa`, `np` role paths updated to `/md-v3`; login redirect for MD roles → `/md-v3?doctor_id=`; superadmin picker updated (single "MD Dashboard" tile → `/md-v3`)
-- `app/components/DashboardNav.tsx` — MD Clinical nav link → `/md-v3`
-- `/md` and `/md-v2` routes retained in codebase but no longer linked from picker or nav
+**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`, `app/md-v3/components/PatientClinicalSheet.tsx`
 
-### MD Dashboard V3 — Bug Fixes ✅
-- `app/md-v3/page.tsx` — `doctor_id` now read from `searchParams` (not `user_profiles` — was returning wrong user); superadmin (no `doctor_id`) now fetches all patients instead of returning empty
-- `app/md-v3/components/PatientClinicalSheet.tsx` — `icd10_codes` and `cpt_codes` guarded with `Array.isArray()` before `.map()` calls (production data has non-array values)
-- `app/md-v3/components/SOAPWorkspace.tsx` — same `Array.isArray()` guards applied
+### PDF Signature Pipeline — Full Overhaul ✅
 
-### MD Dashboard V3 — RESULTS Chip ✅
-- New column `md_viewed_at TIMESTAMPTZ NULL` added to `referral_appointments` (both production and cosmos-dev)
-- `app/md-v3/page.tsx` — `md_viewed_at` added to `referral_appointments` select
-- `app/md-v3/MDDashboardV3.tsx` — `hasNewResults` computed per patient (any completed appointment with `md_viewed_at IS NULL`); cyan RESULTS chip rendered on patient name cell; on row tap, all unviewed completed appointments for that patient updated to `md_viewed_at = now()` via client-side Supabase call
+**AOB patient signature key fix:**
+- `forms/aob.py` line 76: `"signature_url"` → `"patient_signature_url"` (key never existed in `patient_data`; patient sig was never injecting)
 
-### MD Dashboard V3 — Patient Sheet Improvements ✅
-- Documents section removed from Overview tab
-- `Documents` tab added (renders `FDDocumentsTab` from `app/dashboard-v2/components/FDPatientSheet.tsx`)
-- `FDDocumentsTab` exported from `FDPatientSheet.tsx`
-- Full Chart button replaced with Documents shortcut (`setTab('documents')`)
-- "Open Visit →" renamed to "Edit Visit →", links to `/md/[patientId]?visit_id=`
-- Documents button in header correctly calls `setTab('documents')`
-- Start Visit green solid badge in APPT column navigates to `/md/[patientId]`
+**Signature stretch fix (all forms):**
+- `forms/base.py` `inject_signature_image()`: `keep_proportion=False` → `keep_proportion=True`
 
-### MD Dashboard V3 — Work Queue UI Overhaul ✅
-- Billing KPI card removed; 3-col KPI grid fills full width
-- Billing column removed from TanStack table and toggleable columns list
-- Appointment time formatted 12-hour (e.g. `5:00 PM`)
-- DOB shown in cyan below patient name (replaced patient ID)
-- Patient name `whiteSpace: nowrap` with ellipsis overflow
-- Last Visit, Carrier, DOA, APPT cells in cyan (`#00cfff`)
-- `policy_num` toggleable column added (off by default), rendered cyan `nowrap`
-- Patient column widened 160 → 200px
+**Signature size fix (all forms):**
+- `forms/base.py` `inject_signature_image()`: rect expanded to `cy ± 30` (60pt tall), centered on field midpoint — applies to all 14 forms via single shared function
+
+**NF-2 and NF-3 inline injection fix:**
+- `forms/nf2.py` and `forms/nf3.py` had their own inline `page.insert_image()` calls bypassing `base.py` — patched to use same `cy ± 30` expansion and `keep_proportion=True`
+- NF-2 expansion is asymmetric: `r.y0 - 20, r.y1 + 35` (expands upward to avoid bleeding into adjacent content)
+
+**EMG/SONO/FC/PSY wrong signature key fix:**
+- All 4 forms were injecting `patient_signature_url` into `provider.signature` field
+- Fixed to `doctor_signature_url` in all 4 files
+
+**Files:** `forms/aob.py`, `forms/base.py`, `forms/nf2.py`, `forms/nf3.py`, `forms/emg.py`, `forms/sono.py`, `forms/fc.py`, `forms/psy.py`
+
+### Doctor Signature Immediate DB Persist ✅
+- `DoctorsSection.tsx` `handleSignature()`: after successful upload, immediately calls `supabase.from('doctors').update({ signature_url: filename }).eq('doctor_id', editing)` — no longer requires Save Provider to persist new signature to DB
+
+**File:** `app/admin/components/DoctorsSection.tsx`
+
+### FD Documents Tab — W9 Link ✅
+- W9 card added to NO-FAULT FORMS section in `FDPatientSheet.tsx`
+- Shows "View" button when doctor's `w9_url` is on file; "🔒 Not on file" otherwise
+- `_resolvedW9Url` passed from `FDDashboardV2` via `doctorW9Map` (direct `doctor_id → w9_url` lookup)
+- `page.tsx` doctors select extended to include `w9_url, supervising_provider_id`
+- `Doctor` interface updated in `FDDashboardV2.tsx`
+
+**Files:** `app/dashboard-v2/page.tsx`, `app/dashboard-v2/FDDashboardV2.tsx`, `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### Supervised Provider W9 Inheritance ✅
+- `DoctorsSection.tsx` `handleSave()`: after saving a supervised provider, copies supervisor's `w9_url` to the supervised doctor's record automatically
+- Backfill applied to production: John Orthobot's `w9_url` set to Yury Gottesman's W9 manually via SQL
+- Rule: provider physicians (PA/NP) never have their own W9 — always inherit supervisor's W9
+
+**File:** `app/admin/components/DoctorsSection.tsx`
+
+### FD Documents Tab — Select All & Checkboxes ✅
+- Select All button moved above NO-FAULT FORMS section (was inside Visit Packet header)
+- Select All now includes: Intake Form + NF-2 + AOB + W9 + all visit packets + all referral results
+- Checkboxes added to Intake Form, NF-2, AOB, and W9 cards — all render inside their respective card borders
+- `DocCard` component extended with `onSelect`/`isSelected` props — checkbox renders inside card alongside title
+- `staticDocs` array computes selectable static docs at render time
+
+**Files:** `app/dashboard-v2/components/FDPatientSheet.tsx`
 
 ---
 
@@ -81,25 +99,34 @@ All `cosmos-dashboard` commits confirmed deployed and live as of Session 53 clos
    UPDATE patients SET phone = NULL;
    ```
 
-4. **DEV artifacts removal.** PCE fill-all button in `VisitTab.tsx` + Dev Tools card in Admin panel.
+4. **W9 "Not on file" — remaining supervised providers.** Only John Orthobot was manually backfilled. Other supervised providers (Reza NPian, Brad PAian, Ron Pearlman) need their `w9_url` set. Run:
+   ```sql
+   UPDATE doctors d
+   SET w9_url = sup.w9_url
+   FROM doctors sup
+   WHERE d.supervising_provider_id = sup.doctor_id
+   AND sup.w9_url IS NOT NULL
+   AND (d.w9_url IS NULL OR d.w9_url != sup.w9_url);
+   ```
+   Or open each supervised provider in Admin → Save Provider (auto-copies on save).
 
-5. **Patient phone required at intake.** `PatientFormV2.tsx` phone field must be required.
+5. **DEV artifacts removal.** PCE fill-all button in `VisitTab.tsx` + Dev Tools card in Admin panel.
 
-6. **Patient email required at intake.** `PatientFormV2.tsx` email field must be required.
+6. **Patient phone required at intake.** `PatientFormV2.tsx` phone field must be required.
 
-7. **Appointment confirmation SMS trigger.** Wire `/notify/sms` into calendar booking save path.
+7. **Patient email required at intake.** `PatientFormV2.tsx` email field must be required.
 
-8. **`/md` and `/md-v2` route retirement.** Routes still in codebase. Safe to delete once MD V3 confirmed stable. Files to remove: `app/md-v2/` (entire directory). Keep `app/md/[patientId]/PatientChart.tsx` and all referral/visit editor files — still used by V3 Edit Visit and Start Visit buttons.
+8. **Appointment confirmation SMS trigger.** Wire `/notify/sms` into calendar booking save path.
 
-9. **`/md-v3` error boundary cleanup.** `app/md-v3/error.tsx` is a debug artifact. Remove when `/md-v3` is stable.
+9. **`/md` and `/md-v2` route retirement.** Routes still in codebase. Safe to delete once MD V3 confirmed stable. Files to remove: `app/md-v2/` (entire directory). Keep `app/md/[patientId]/PatientChart.tsx` and all referral/visit editor files — still used by V3 Edit Visit and Start Visit buttons.
 
-10. **`page.tsx` userRole hardcoded.** `/referrals/page.tsx` passes `userRole="md"` — role is resolved client-side from sessionStorage. Not a bug but should be cleaned up.
+10. **`/md-v3` error boundary cleanup.** `app/md-v3/error.tsx` is a debug artifact. Remove when `/md-v3` is stable.
 
-11. **Duplicate visit records investigation.** Some patients have multiple `patient_visits` rows for the same date.
+11. **`page.tsx` userRole hardcoded.** `/referrals/page.tsx` passes `userRole="md"` — role is resolved client-side from sessionStorage. Not a bug but should be cleaned up.
 
-12. **`000_initial_schema.sql` superseded.** Stale on disk — use pg_dump approach.
+12. **Duplicate visit records investigation.** Some patients have multiple `patient_visits` rows for the same date.
 
-13. **MD V3 column color verification.** Confirm cyan colors on Carrier, Last Visit, DOA, APPT in production after session-end patch. Open `cosmosmt.com/md-v3` at next session start.
+13. **`000_initial_schema.sql` superseded.** Stale on disk — use pg_dump approach.
 
 ---
 
@@ -110,6 +137,36 @@ All `cosmos-dashboard` commits confirmed deployed and live as of Session 53 clos
 - Ghost session timeout is 0 — impersonation sessions never expire.
 - `/referrals/page.tsx` `userRole` hardcoded to `"md"`.
 - `app/md-v3/error.tsx` debug artifact in production.
+- `doctors.w9_url` for supervised providers is a copied value (not a FK) — if supervisor regenerates W9, supervised providers must be re-saved or re-backfilled.
+
+---
+
+## PDF Signature Architecture (Session 54, locked)
+
+All signature injection goes through `forms/base.py` `inject_signature_image()`. Single shared function called by all 14 form generators. Key properties:
+- `keep_proportion=True` — no stretching
+- `cy ± 30` rect expansion — 60pt tall, centered on field midpoint
+- Exception: NF-2 uses asymmetric expansion (`r.y0 - 20, r.y1 + 35`) to avoid bleeding into adjacent stacked fields
+
+NF-2 and NF-3 have their own inline injection loops (due to multi-field/keyword matching complexity) but now use the same expansion and `keep_proportion=True`.
+
+**Key signature URL keys in `patient_data`:**
+- Patient signature: `patient_signature_url`
+- Doctor/treating provider signature: `doctor_signature_url`
+- Supervisor signature: `supervisor_signature_url`
+- Billing entity signature (supervisor or treating): `assignee_sig_url` (NF-3 only, computed inline)
+
+---
+
+## W9 Inheritance Rule (Session 54, locked)
+
+Supervised providers (PA, NP, DC, PT, PSY) never have their own W9 — they bill under their supervising MD's PC. Their `doctors.w9_url` is set to the supervisor's `w9_url` at save time in Admin (`DoctorsSection.tsx` `handleSave()`). The FD dashboard resolves W9 via simple `doctor_id → w9_url` direct lookup (no supervisor chain resolution at runtime).
+
+---
+
+## DocCard Checkbox Pattern (Session 54)
+
+`DocCard` component in `FDPatientSheet.tsx` now accepts `onSelect` and `isSelected` props. When provided and `filename` exists, a cyan checkbox renders inside the card to the left of the title. Use this pattern for any future selectable DocCard.
 
 ---
 
@@ -252,6 +309,9 @@ Three separate focused forms in `app/md/[patientId]/mri/`:
 - [x] Documents Missing — intake form added (Session 51)
 - [x] Bills Submitted KPI — visit count (Session 51)
 - [x] Submit Bills KPI — full 4-gate (Session 51)
+- [x] Phone number formatting in patient sheet (Session 54)
+- [x] W9 link in Documents tab (Session 54)
+- [x] Select All + checkboxes on all selectable docs (Session 54)
 - [ ] Appointment confirmation SMS — auto-trigger on booking
 - [ ] Patient phone required at intake
 - [ ] Notes tab persistence
@@ -265,6 +325,7 @@ Three separate focused forms in `app/md/[patientId]/mri/`:
 - [x] MD Dashboard V3 — RESULTS chip + md_viewed_at (Session 53)
 - [x] MD Dashboard V3 — Documents tab (Session 53)
 - [x] MD Dashboard V3 — cosmosmt.com DNS live (Session 53)
+- [x] MD Dashboard V3 — phone formatting in patient sheet (Session 54)
 - [ ] MD Dashboard V3 — SOAP structured pain/exam fields (new schema required)
 - [ ] MD Dashboard V3 — clinical timeline
 - [ ] `/md` and `/md-v2` route retirement (code cleanup)
@@ -272,6 +333,8 @@ Three separate focused forms in `app/md/[patientId]/mri/`:
 ### Stage 5 — Admin
 - [x] Admin Users — login email edit for superadmin (Session 51)
 - [x] Admin Overview — KPI cards 3 per row (Session 51)
+- [x] Doctor signature immediate DB persist on upload (Session 54)
+- [x] Supervised provider W9 inheritance on save (Session 54)
 
 ### Stage 6 — Infrastructure
 - [ ] Render upgrade to Standard plan — pre-go-live blocker
