@@ -1,3 +1,57 @@
+## 2026-07-22 — Session 53
+
+### cosmosmt.com — DNS Live ✅
+
+Production domain fully configured. Porkbun DNS: A record `@` → `216.150.1.1`, CNAME `www` → `cname.vercel-dns.com`. Vercel domain added to `cosmos-dashboard` project scoped to Production environment. SSL cert auto-issued. Login page confirmed live at `cosmosmt.com`.
+
+### MD Dashboard V3 — Promoted as Default MD Dashboard ✅
+
+`/md-v3` is now the entry point for all MD, PA, and NP roles. Superadmin picker updated to single "MD Dashboard" tile. DashboardNav MD link updated. `/md` and `/md-v2` routes retained in codebase (visit editor at `/md/[patientId]` still used by V3 Edit Visit / Start Visit) but removed from all navigation surfaces.
+
+**Files modified:** `app/page.tsx`, `app/components/DashboardNav.tsx`
+
+### MD Dashboard V3 — Bug Fixes ✅
+
+- `page.tsx` now reads `doctor_id` from `searchParams` (previously queried `user_profiles` without filter — returned wrong user)
+- Superadmin (no `doctor_id`) now fetches all patients instead of empty list
+- `icd10_codes` and `cpt_codes` guarded with `Array.isArray()` in `PatientClinicalSheet.tsx` and `SOAPWorkspace.tsx` — production data has non-array values causing runtime crash on patient row click
+
+**Files modified:** `app/md-v3/page.tsx`, `app/md-v3/components/PatientClinicalSheet.tsx`, `app/md-v3/components/SOAPWorkspace.tsx`
+
+### MD Dashboard V3 — RESULTS Chip ✅
+
+New `md_viewed_at TIMESTAMPTZ NULL` column on `referral_appointments` (applied to production and cosmos-dev). When any completed referral appointment has `md_viewed_at IS NULL`, a cyan RESULTS chip appears on the patient's work queue row. Tapping the row clears all unviewed completed appointments for that patient via client-side Supabase update.
+
+**Schema:** `ALTER TABLE referral_appointments ADD COLUMN md_viewed_at TIMESTAMPTZ NULL`
+
+**Files modified:** `app/md-v3/page.tsx`, `app/md-v3/MDDashboardV3.tsx`
+
+### MD Dashboard V3 — Patient Sheet: Documents Tab ✅
+
+- Documents section removed from Overview tab
+- New Documents tab added — renders `FDDocumentsTab` (lifted from `FDPatientSheet.tsx`)
+- `FDDocumentsTab` exported from `app/dashboard-v2/components/FDPatientSheet.tsx`
+- Full Chart header button replaced with Documents shortcut (`setTab('documents')`)
+- Edit Visit button correctly links to `/md/[patientId]?visit_id=`
+- Start Visit green solid badge in APPT column navigates to `/md/[patientId]`
+
+**Files modified:** `app/md-v3/components/PatientClinicalSheet.tsx`, `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### MD Dashboard V3 — Work Queue UI Overhaul ✅
+
+- Billing KPI card removed; 3-col KPI grid fills full width
+- Billing column removed from TanStack table and toggleable columns list
+- Appointment time formatted 12-hour (e.g. `5:00 PM`)
+- DOB shown in cyan below patient name (replaced patient ID)
+- Patient name `whiteSpace: nowrap` with ellipsis overflow
+- Last Visit, Carrier, DOA, APPT cells in cyan (`#00cfff`)
+- `policy_num` toggleable column added (off by default), rendered cyan `nowrap`
+- Patient column widened 160 → 200px
+
+**Files modified:** `app/md-v3/MDDashboardV3.tsx`
+
+---
+
 ## 2026-07-21 — Session 52
 
 ### MD Dashboard V3 — Enterprise physician workspace at `/md-v3` ✅

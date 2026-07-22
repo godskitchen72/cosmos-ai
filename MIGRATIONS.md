@@ -4,6 +4,22 @@
 **Maintained by:** Godskitchen / cosmos-ai repo
 
 ---
+## Session 53 — Schema Changes (July 22, 2026)
+
+### referral_appointments — md_viewed_at column
+
+MD results notification system. When a referral result is uploaded (`outcome = 'completed'`), MD is notified via a cyan RESULTS chip on the work queue row. Tapping the row sets `md_viewed_at = now()` to clear the chip. Flag reactivates on each new completed result.
+
+```sql
+ALTER TABLE public.referral_appointments
+  ADD COLUMN IF NOT EXISTS md_viewed_at TIMESTAMPTZ NULL;
+NOTIFY pgrst, 'reload schema';
+```
+
+Applied to: production (`ttudxnzmybcwrtqlbtta`) and cosmos-dev (`tpwbgqfdznqtjqimxric`).
+
+---
+
 
 ## Environment Map
 

@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 21, 2026, Session 52 — Close)
+# Cosmos Medical Technologies — HANDOVER (July 22, 2026, Session 53 — Close)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -13,9 +13,9 @@ self-contained.
 
 ## Current Status
 
-All `cosmos-dashboard` commits confirmed deployed and live as of Session 52 close.
+All `cosmos-dashboard` commits confirmed deployed and live as of Session 53 close.
 
-**Production status:** `cosmosmt.com` is live. MD Dashboard V3 deployed and operational. `cosmos-dashboard-nu.vercel.app` alias updated to latest build. Preview alias management now requires `vercel alias` CLI command after each deploy — Vercel auto-alias only fires on `main` branch pushes, not via `--prod --yes` flag.
+**Production status:** `cosmosmt.com` DNS is now fully live (A record 216.150.1.1, CNAME www→cname.vercel-dns.com, SSL active). MD Dashboard V3 is the promoted default MD dashboard. `/md` and `/md-v2` routes are retained in the codebase but removed from the picker and nav. `cosmos-dashboard-nu.vercel.app` alias remains pointed at cosmos-dev (Preview).
 
 **Dev environment status:** `cosmos-dev` Supabase project fully operational.
 
@@ -23,54 +23,53 @@ All `cosmos-dashboard` commits confirmed deployed and live as of Session 52 clos
 
 ---
 
-## Completed This Session (Session 52 — Full)
+## Completed This Session (Session 53 — Full)
 
-### MD Dashboard V3 — New enterprise physician workspace at `/md-v3` ✅
+### cosmosmt.com DNS — Live ✅
+- Porkbun DNS: A record `@` → `216.150.1.1`, CNAME `www` → `cname.vercel-dns.com`
+- Vercel domain added to `cosmos-dashboard` project → Production environment
+- SSL cert issued automatically
+- Login page confirmed loading at `cosmosmt.com`
 
-Full enterprise MD dashboard replacing the legacy `/md` patient list. Deployed and live.
+### MD Dashboard V3 — Promoted as Default MD Dashboard ✅
+- `app/page.tsx` — `md`, `pa`, `np` role paths updated to `/md-v3`; login redirect for MD roles → `/md-v3?doctor_id=`; superadmin picker updated (single "MD Dashboard" tile → `/md-v3`)
+- `app/components/DashboardNav.tsx` — MD Clinical nav link → `/md-v3`
+- `/md` and `/md-v2` routes retained in codebase but no longer linked from picker or nav
 
-**Route:** `/md-v3` — server component `page.tsx` → `MDDashboardV3.tsx` (client)
+### MD Dashboard V3 — Bug Fixes ✅
+- `app/md-v3/page.tsx` — `doctor_id` now read from `searchParams` (not `user_profiles` — was returning wrong user); superadmin (no `doctor_id`) now fetches all patients instead of returning empty
+- `app/md-v3/components/PatientClinicalSheet.tsx` — `icd10_codes` and `cpt_codes` guarded with `Array.isArray()` before `.map()` calls (production data has non-array values)
+- `app/md-v3/components/SOAPWorkspace.tsx` — same `Array.isArray()` guards applied
 
-**Features:**
-- Header: Cosmos Medical branding, DashboardNav hamburger, physician name, date, today's appointment count
-- KPI cards: Today (appointments), Waiting (no note yet), Billing (flags + missing), Urgent (treatment window expiring/expired) — each card filters the work queue
-- TanStack Table work queue: Patient, Priority, Appt time, Last Visit, Carrier, Pain score, Note status, Results status, Billing status, Actions (Visit / Chart)
-- Global search, column visibility toggle, sort by all columns, 20-row pagination
-- Treatment window bar per patient (180-day DOA timer, color-coded: green/orange/red)
-- Left border color per row: treatment window urgency or biller flag
-- Supervised doctor support — shows supervised provider label on patient rows
+### MD Dashboard V3 — RESULTS Chip ✅
+- New column `md_viewed_at TIMESTAMPTZ NULL` added to `referral_appointments` (both production and cosmos-dev)
+- `app/md-v3/page.tsx` — `md_viewed_at` added to `referral_appointments` select
+- `app/md-v3/MDDashboardV3.tsx` — `hasNewResults` computed per patient (any completed appointment with `md_viewed_at IS NULL`); cyan RESULTS chip rendered on patient name cell; on row tap, all unviewed completed appointments for that patient updated to `md_viewed_at = now()` via client-side Supabase call
 
-**Patient Clinical Sheet** (right-side desktop, full-screen mobile):
-- Opens on row tap
-- Overview tab: demographics, accident/insurance, pain summary chips, document buttons (Intake/NF-2/AOB/Sig), latest visit ICD-10/CPT, open referrals
-- Visits tab: full visit history with ICD-10/CPT per visit, billing status, Open Visit button
-- Referrals tab: all referrals with status, appointments, Manage Referrals button
-- SOAP tab: Subjective (complaints, accident type, role, care, work status, aggravating factors, radiation, meds/allergies), Objective (vitals, pain scores by region, cervical ROM), Assessment (prognosis, functional limitations, active ICD-10), Plan (orders, referrals link), Diagnoses (ICD-10 live), Procedures (CPT live). Fields without backend columns show COMING SOON badge.
+### MD Dashboard V3 — Patient Sheet Improvements ✅
+- Documents section removed from Overview tab
+- `Documents` tab added (renders `FDDocumentsTab` from `app/dashboard-v2/components/FDPatientSheet.tsx`)
+- `FDDocumentsTab` exported from `FDPatientSheet.tsx`
+- Full Chart button replaced with Documents shortcut (`setTab('documents')`)
+- "Open Visit →" renamed to "Edit Visit →", links to `/md/[patientId]?visit_id=`
+- Documents button in header correctly calls `setTab('documents')`
+- Start Visit green solid badge in APPT column navigates to `/md/[patientId]`
 
-**Files added:**
-- `app/md-v3/page.tsx` — server component, data fetcher (matches dashboard-v2 pattern exactly)
-- `app/md-v3/MDDashboardV3.tsx` — main client component
-- `app/md-v3/components/PatientClinicalSheet.tsx` — right-side/full-screen patient sheet
-- `app/md-v3/components/SOAPWorkspace.tsx` — SOAP documentation tabs
-- `app/md-v3/error.tsx` — error boundary (debug artifact, can be removed)
-
-**Dashboard picker:** MD V3 tile added to `SUPERADMIN_DASHBOARDS` in `app/page.tsx` (line 25, between MD/Doctor and Billing).
-
-**Architectural decision (Session 52, locked):** Cross-role visual consistency adopted as platform standard — MD, FD, and future Billing dashboards share the same layout, nav, cards, table, and side-sheet interaction pattern. Data and actions differ by role; UX pattern is identical.
-
-**Deferred to Session 53:**
-- Sidebar nav (evaluated and deferred — separate session)
-- SOAP structured pain/exam fields (requires new schema — migration needed)
-- ICD-10 / CPT favorite/recent codes
-- Signature center
-- Task center
-- Clinical timeline
+### MD Dashboard V3 — Work Queue UI Overhaul ✅
+- Billing KPI card removed; 3-col KPI grid fills full width
+- Billing column removed from TanStack table and toggleable columns list
+- Appointment time formatted 12-hour (e.g. `5:00 PM`)
+- DOB shown in cyan below patient name (replaced patient ID)
+- Patient name `whiteSpace: nowrap` with ellipsis overflow
+- Last Visit, Carrier, DOA, APPT cells in cyan (`#00cfff`)
+- `policy_num` toggleable column added (off by default), rendered cyan `nowrap`
+- Patient column widened 160 → 200px
 
 ---
 
 ## Open Items, Priority Order
 
-1. **Render Standard plan upgrade.** Still on Starter (512MB). Visit Packet Merge blocked for production use. One click, $25/mo.
+1. **Render Standard plan upgrade.** Still on Starter (512MB). Visit Packet Merge blocked for production use. Cold start causes "Failed to fetch" on referral saves. One click, $25/mo. **Pre-go-live blocker.**
 
 2. **Twilio SMS activation.** All code live. Three steps:
    - Buy `+17185695200`
@@ -90,7 +89,7 @@ Full enterprise MD dashboard replacing the legacy `/md` patient list. Deployed a
 
 7. **Appointment confirmation SMS trigger.** Wire `/notify/sms` into calendar booking save path.
 
-8. **`/md` route retirement.** Four files reference `/md`: `app/page.tsx` (lines 14, 18, 19, 24, 334), `app/md/[patientId]/PatientChart.tsx` (back button), `app/components/DashboardNav.tsx` (nav link), `app/md-v2/page.tsx` (redirect). When ready to promote `/md-v3`, update these four files. Do not retire `/md` until then.
+8. **`/md` and `/md-v2` route retirement.** Routes still in codebase. Safe to delete once MD V3 confirmed stable. Files to remove: `app/md-v2/` (entire directory). Keep `app/md/[patientId]/PatientChart.tsx` and all referral/visit editor files — still used by V3 Edit Visit and Start Visit buttons.
 
 9. **`/md-v3` error boundary cleanup.** `app/md-v3/error.tsx` is a debug artifact. Remove when `/md-v3` is stable.
 
@@ -99,6 +98,8 @@ Full enterprise MD dashboard replacing the legacy `/md` patient list. Deployed a
 11. **Duplicate visit records investigation.** Some patients have multiple `patient_visits` rows for the same date.
 
 12. **`000_initial_schema.sql` superseded.** Stale on disk — use pg_dump approach.
+
+13. **MD V3 column color verification.** Confirm cyan colors on Carrier, Last Visit, DOA, APPT in production after session-end patch. Open `cosmosmt.com/md-v3` at next session start.
 
 ---
 
@@ -257,15 +258,16 @@ Three separate focused forms in `app/md/[patientId]/mri/`:
 - [ ] Realtime — referrals and appointments tables
 
 ### Stage 4 — MD Dashboard
-- [x] MDClient patient list (`/md`) — legacy, to be retired
-- [x] MD V2 patient chart (`/md-v2/[patientId]`) — full chart, retained
+- [x] MDClient patient list (`/md`) — legacy, retained for visit editor
+- [x] MD V2 patient chart (`/md-v2/[patientId]`) — legacy, retained
 - [x] MD Dashboard V3 (`/md-v3`) — enterprise workspace (Session 52)
+- [x] MD Dashboard V3 — promoted as default MD dashboard (Session 53)
+- [x] MD Dashboard V3 — RESULTS chip + md_viewed_at (Session 53)
+- [x] MD Dashboard V3 — Documents tab (Session 53)
+- [x] MD Dashboard V3 — cosmosmt.com DNS live (Session 53)
 - [ ] MD Dashboard V3 — SOAP structured pain/exam fields (new schema required)
-- [ ] MD Dashboard V3 — signature center
-- [ ] MD Dashboard V3 — task center
 - [ ] MD Dashboard V3 — clinical timeline
-- [ ] MD Dashboard V3 — sidebar nav
-- [ ] `/md` route retirement (promote `/md-v3`)
+- [ ] `/md` and `/md-v2` route retirement (code cleanup)
 
 ### Stage 5 — Admin
 - [x] Admin Users — login email edit for superadmin (Session 51)
