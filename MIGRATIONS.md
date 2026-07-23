@@ -1,3 +1,121 @@
+## Session 55 — Schema & Data Changes (July 22, 2026)
+
+### Migration 033 — cosmos_documents table
+
+Unified document registry replacing scattered url columns and `patient_forms` as the single source of truth for all generated PDFs.
+
+```sql
+CREATE TABLE public.cosmos_documents (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  patient_id      TEXT REFERENCES public.patients(patient_id) ON DELETE CASCADE,
+  visit_id        UUID REFERENCES public.patient_visits(id)   ON DELETE CASCADE,
+  doctor_id       UUID REFERENCES public.doctors(doctor_id)   ON DELETE CASCADE,
+  document_scope  TEXT NOT NULL CHECK (document_scope IN ('patient', 'visit', 'doctor')),
+  form_type       TEXT NOT NULL,
+  filename        TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'generated'
+                    CHECK (status IN ('generated', 'pending', 'error')),
+  generated_by    UUID REFERENCES auth.users(id),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT unique_patient_doc UNIQUE (patient_id, form_type),
+  CONSTRAINT unique_visit_doc   UNIQUE (visit_id,   form_type),
+  CONSTRAINT unique_doctor_doc  UNIQUE (doctor_id,  form_type),
+  CONSTRAINT exactly_one_scope CHECK (
+    (CASE WHEN patient_id IS NOT NULL THEN 1 ELSE 0 END +
+     CASE WHEN visit_id   IS NOT NULL THEN 1 ELSE 0 END +
+     CASE WHEN doctor_id  IS NOT NULL THEN 1 ELSE 0 END) = 1
+  )
+);
+
+ALTER TABLE public.cosmos_documents ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "service_role_all_cosmos_documents"
+  ON public.cosmos_documents FOR ALL TO service_role
+  USING (true) WITH CHECK (true);
+
+CREATE POLICY "authenticated_all_cosmos_documents"
+  ON public.cosmos_documents FOR ALL TO authenticated
+  USING (true) WITH CHECK (true);
+
+CREATE INDEX idx_cosmos_documents_patient ON public.cosmos_documents (patient_id, form_type);
+CREATE INDEX idx_cosmos_documents_visit   ON public.cosmos_documents (visit_id,   form_type);
+CREATE INDEX idx_cosmos_documents_doctor  ON public.cosmos_documents (doctor_id,  form_type);
+
+NOTIFY pgrst, 'reload schema';
+```
+
+Applied to: production (`ttudxnzmybcwrtqlbtta`) and cosmos-dev (`tpwbgqfdznqtjqimxric`).
+
+### Backfill — cosmos_documents from existing data
+
+All existing documents backfilled from `patient_forms`, `patients` url columns, and `doctors.w9_url`:
+
+```sql
+-- visit-scoped rows from patient_forms
+INSERT INTO public.cosmos_documents (visit_id, document_scope, form_type, filename, status, created_at)
+SELECT visit_id, 'visit', form_type, filename, COALESCE(status, 'generated'), COALESCE(created_at, now())
+FROM public.patient_forms WHERE visit_id IS NOT NULL AND filename IS NOT NULL
+ON CONFLICT DO NOTHING;
+
+-- patient-scoped rows from patient_forms (no visit_id)
+INSERT INTO public.cosmos_documents (patient_id, document_scope, form_type, filename, status, created_at)
+SELECT patient_id, 'patient', form_type, filename, COALESCE(status, 'generated'), COALESCE(created_at, now())
+FROM public.patient_forms WHERE visit_id IS NULL AND filename IS NOT NULL
+ON CONFLICT DO NOTHING;
+
+-- NF-2, AOB, INTAKE from patients table
+INSERT INTO public.cosmos_documents (patient_id, document_scope, form_type, filename, status, created_at)
+SELECT patient_id, 'patient', 'NF-2', nf2_url, 'generated', now()
+FROM public.patients WHERE nf2_url IS NOT NULL AND nf2_url != ''
+ON CONFLICT (patient_id, form_type) DO NOTHING;
+
+INSERT INTO public.cosmos_documents (patient_id, document_scope, form_type, filename, status, created_at)
+SELECT patient_id, 'patient', 'AOB', aob_url, 'generated', now()
+FROM public.patients WHERE aob_url IS NOT NULL AND aob_url != ''
+ON CONFLICT (patient_id, form_type) DO NOTHING;
+
+INSERT INTO public.cosmos_documents (patient_id, document_scope, form_type, filename, status, created_at)
+SELECT patient_id, 'patient', 'INTAKE', intake_url, 'generated', now()
+FROM public.patients WHERE intake_url IS NOT NULL AND intake_url != ''
+ON CONFLICT (patient_id, form_type) DO NOTHING;
+
+-- W9 from doctors (billing entities only — no supervisor)
+INSERT INTO public.cosmos_documents (doctor_id, document_scope, form_type, filename, status, created_at)
+SELECT doctor_id, 'doctor', 'W9', w9_url, 'generated', now()
+FROM public.doctors WHERE w9_url IS NOT NULL AND w9_url != '' AND supervising_provider_id IS NULL
+ON CONFLICT (doctor_id, form_type) DO NOTHING;
+```
+
+Applied to: production and cosmos-dev.
+
+**Backfill result (production):** 3 W9s, 9 AOBs, 9 INTAKEs, 9 NF-2s, plus all visit-scoped docs (ANS, DME, EMG, FC, ICD10, MRI, NF-3, ORTHO, PCE, PSY, PT, RX, SONO, VISIT_PACKET, VNG).
+
+### doctors — W9 backfill for all supervised providers
+
+HANDOVER open item #4 completed. All 4 supervised providers now have `cosmos_documents` rows pointing to supervisor's W9:
+
+```sql
+-- Step 1: sync doctors.w9_url
+UPDATE doctors d
+SET w9_url = sup.w9_url
+FROM doctors sup
+WHERE d.supervising_provider_id = sup.doctor_id
+AND sup.w9_url IS NOT NULL
+AND (d.w9_url IS NULL OR d.w9_url != sup.w9_url);
+
+-- Step 2: insert into cosmos_documents registry
+INSERT INTO cosmos_documents (doctor_id, document_scope, form_type, filename, status, created_at)
+SELECT d.doctor_id, 'doctor', 'W9', sup.w9_url, 'generated', now()
+FROM doctors d
+JOIN doctors sup ON sup.doctor_id = d.supervising_provider_id
+WHERE sup.w9_url IS NOT NULL
+ON CONFLICT (doctor_id, form_type) DO UPDATE SET filename = EXCLUDED.filename;
+```
+
+Applied to: production. All 7 providers (3 billing-entity MDs + 4 supervised) confirmed in registry.
+
+---
+
 ## Session 54 — Data Changes (July 22, 2026)
 
 ### No schema DDL this session.
@@ -28,26 +146,8 @@ AND (d.w9_url IS NULL OR d.w9_url != sup.w9_url);
 # MIGRATIONS.md
 ## Cosmos Medical Technologies — Database Migration & Environment Reference
 **Created:** Session 47 — July 17, 2026
-**Maintained by:** Godskitchen / cosmos-ai repo
 
 ---
-## Session 53 — Schema Changes (July 22, 2026)
-
-### referral_appointments — md_viewed_at column
-
-MD results notification system. When a referral result is uploaded (`outcome = 'completed'`), MD is notified via a cyan RESULTS chip on the work queue row. Tapping the row sets `md_viewed_at = now()` to clear the chip. Flag reactivates on each new completed result.
-
-```sql
-ALTER TABLE public.referral_appointments
-  ADD COLUMN IF NOT EXISTS md_viewed_at TIMESTAMPTZ NULL;
-NOTIFY pgrst, 'reload schema';
-```
-
-Applied to: production (`ttudxnzmybcwrtqlbtta`) and cosmos-dev (`tpwbgqfdznqtjqimxric`).
-
----
-
-
 ## Environment Map
 
 | Environment | URL | Supabase Project | Branch |
@@ -173,60 +273,6 @@ Any result with `fk_count > 1` where both point to the same column is a duplicat
 
 ---
 
-## Session 47 Schema Changes Applied to cosmos-dev
-
-Run these after `000_initial_schema.sql` on any new environment until migration is regenerated.
-
-```sql
--- Primary keys
-ALTER TABLE public.insurance_carriers ADD PRIMARY KEY (id);
-ALTER TABLE public.lawyers ADD PRIMARY KEY (id);
-ALTER TABLE public.doctors ADD PRIMARY KEY (doctor_id);
-ALTER TABLE public.referral_types ADD PRIMARY KEY (id);
-ALTER TABLE public.referrals ADD PRIMARY KEY (id);
-ALTER TABLE public.referral_appointments ADD PRIMARY KEY (id);
-ALTER TABLE public.referral_documents ADD PRIMARY KEY (id);
-ALTER TABLE public.referral_timeline ADD PRIMARY KEY (id);
-ALTER TABLE public.referral_notes ADD PRIMARY KEY (id);
-ALTER TABLE public.patients ADD PRIMARY KEY (patient_id);
-
--- Column type fix
-ALTER TABLE public.doctors
-  ALTER COLUMN available_days TYPE JSONB
-  USING available_days::text::jsonb;
-
--- FK constraints
-ALTER TABLE public.referrals ADD CONSTRAINT fk_referrals_referral_type FOREIGN KEY (referral_type_id) REFERENCES public.referral_types(id);
-ALTER TABLE public.referrals ADD CONSTRAINT fk_referrals_patient FOREIGN KEY (patient_id) REFERENCES public.patients(patient_id);
-ALTER TABLE public.referral_appointments ADD CONSTRAINT fk_ref_appointments_referral FOREIGN KEY (referral_id) REFERENCES public.referrals(id);
-ALTER TABLE public.referral_documents ADD CONSTRAINT fk_ref_documents_referral FOREIGN KEY (referral_id) REFERENCES public.referrals(id);
-ALTER TABLE public.referral_timeline ADD CONSTRAINT fk_ref_timeline_referral FOREIGN KEY (referral_id) REFERENCES public.referrals(id);
-ALTER TABLE public.referral_notes ADD CONSTRAINT fk_ref_notes_referral FOREIGN KEY (referral_id) REFERENCES public.referrals(id);
-ALTER TABLE public.patient_visits ADD CONSTRAINT fk_patient_visits_patient FOREIGN KEY (patient_id) REFERENCES public.patients(patient_id);
-ALTER TABLE public.appointments ADD CONSTRAINT fk_appointments_patient FOREIGN KEY (patient_id) REFERENCES public.patients(patient_id);
-
--- RLS policies
-CREATE POLICY "authenticated_read_own_profile" ON public.user_profiles FOR SELECT TO authenticated USING (auth.uid() = id);
-CREATE POLICY "authenticated_all_lawyers" ON public.lawyers FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated_all_carriers" ON public.insurance_carriers FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated_all_doctors" ON public.doctors FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated_all_referral_providers" ON public.referral_providers FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated_all_office_locations" ON public.office_locations FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated_all_patients" ON public.patients FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated_all_appointments" ON public.appointments FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated_all_referrals" ON public.referrals FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated_all_referral_appointments" ON public.referral_appointments FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated_all_referral_documents" ON public.referral_documents FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated_all_referral_types" ON public.referral_types FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated_all_patient_visits" ON public.patient_visits FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated_all_patient_forms" ON public.patient_forms FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
--- PostgREST schema cache reload
-NOTIFY pgrst, 'reload schema';
-```
-
----
-
 ## Session 49 — Schema Changes (July 18, 2026)
 
 ### Migration 032 — Drop needs_review and reviewed_at from referral_appointments
@@ -271,12 +317,13 @@ Applied to: production and cosmos-dev.
 
 ---
 
-## Known Technical Debt (updated Session 49)
+## Known Technical Debt (updated Session 55)
 
 - `000_initial_schema.sql` on disk is stale — superseded by pg_dump method (Session 48). Should be removed or replaced with a pointer to the pg_dump approach.
 - `patients.intake_url` column exists in production via manual SQL — not captured in any migration file. Schema drift risk on rebuild (pg_dump will capture it going forward).
 - PostgREST on free-tier Supabase does not reliably pick up FK constraints — use flat selects + client-side joins (Cosmos standard pattern; `app/reports/referrals/page.tsx` is the reference implementation).
 - Production DB password was reset Session 48 (removed `@` for pg_dump compatibility). No app code uses this password — only direct DB connections.
+- `patient_forms` table and scattered url columns (`patients.nf2_url`, `patients.aob_url`, `patients.intake_url`, `doctors.w9_url`, `patient_visits.pce_url`) are kept as fallback during `cosmos_documents` transition. Scheduled for retirement in a future session once all reads confirmed working from registry.
 
 ---
 

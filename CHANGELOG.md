@@ -1,3 +1,45 @@
+## 2026-07-22 — Session 55
+
+### cosmos_documents — Unified Document Registry ✅
+
+New `cosmos_documents` table replaces scattered document storage across `patients.nf2_url`, `patients.aob_url`, `patients.intake_url`, `doctors.w9_url`, `patient_visits.pce_url`, and `patient_forms`. Single table tracks every generated PDF with `document_scope` (`patient` | `visit` | `doctor`), `form_type`, `filename`, `status`, and `generated_by`. Unique constraints enforce one active document per type per scope. Replace-on-regenerate deletes old storage file automatically via `registry_upsert()`.
+
+Backfilled all existing documents from `patient_forms`, `patients` url columns, and `doctors.w9_url` into `cosmos_documents` on both production and cosmos-dev.
+
+**Schema:** See MIGRATIONS.md Session 55.
+
+### cosmos-api main.py — Full Rebuild ✅
+
+- `verify_jwt` now returns caller's auth user UUID (extracted from JWT server-side, not passed from frontend)
+- `registry_upsert()` — new shared helper called by all generation routes: looks up existing row, deletes old storage file, upserts registry row
+- All 16 generation routes updated to write to `cosmos_documents`: NF-2, NF-3, AOB, INTAKE, PCE, W9, MRI, VNG, RX, DME, ANS, ICD10, PT, ORTHO, PAIN-MGMT, SONO, FC, PSY, EMG, VISIT_PACKET
+- `generate-zip` reads from `cosmos_documents` first, falls back to `patient_forms`
+- Fallback columns kept in sync during transition period
+
+**File:** `cosmos-api/main.py`
+
+### FD Dashboard — Phase 3: cosmos_documents reads ✅
+
+`dv2_page.tsx`: removed `patient_forms` PCE fetch and `doctors.w9_url` select; added `cosmos_documents` query returning all patient, visit, and doctor-scoped docs in one call.
+
+`FDDashboardV2.tsx`: replaced `doctorW9Map` and `patientForms` with five derived sets from `cosmos_documents` — `patientNF2Set`, `patientAOBSet`, `patientIntakeSet`, `visitPCESet`, `doctorW9Map`. All KPI filters (Documents Missing, NF-2 Pending Mail, Submit Bills, Needs Scheduling), `getWorkflowStage()`, and `getDocStatus()` now read exclusively from the registry.
+
+`FDPatientSheet.tsx` — `FDDocumentsTab`: two-step `load()` — visits fetched first, then `cosmos_documents` queried by patient ID + visit IDs + doctor ID. Supervisor W9 chain resolution — if patient's doctor is supervised, automatically includes supervisor's `doctor_id` in query. `patientDocMap` state (`form_type → filename`) drives `staticDocs` and W9 card. Action bar changed from `position: sticky` (broken inside overflow container) to `position: fixed` at viewport bottom.
+
+**Files:** `app/dashboard-v2/page.tsx`, `app/dashboard-v2/FDDashboardV2.tsx`, `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### W9 — Supervised Provider Registry Backfill ✅
+
+All 4 supervised providers (Reza NPian, John Orthobot, Brad PAian, Ron Pearlman) now have `cosmos_documents` rows pointing to Yury Gottesman's W9. FD Documents tab W9 card correctly resolves for patients assigned to supervised providers via supervisor chain lookup. HANDOVER open item #4 closed.
+
+### Documents Tab — Button Order ✅
+
+View/Regen swap applied consistently across all cards: secondary action (Regen / Re-sign / Rebuild) on left, View (primary, cyan) on right. Applied to: Intake, NF-2, AOB (DocCard + custom cards), Signature card (Re-sign left, View right), Visit Packet (Rebuild left, View Packet right).
+
+**File:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+---
+
 ## 2026-07-22 — Session 54
 
 ### Phone Number Formatting ✅
