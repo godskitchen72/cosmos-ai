@@ -1,4 +1,4 @@
-# Cosmos Medical Technologies — HANDOVER (July 22, 2026, Session 55 — Close)
+# Cosmos Medical Technologies — HANDOVER (July 23, 2026, Session 56 — Close)
 
 Session-specific status only. Permanent rules live in `SYSTEM_PROMPT.md`,
 technical facts in `ARCHITECTURE.md`, product/business rules in
@@ -13,50 +13,54 @@ self-contained.
 
 ## Current Status
 
-All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed and live as of Session 55 close.
+All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed and live as of Session 56 close.
 
-**Production status:** `cosmosmt.com` fully live. MD Dashboard V3 is the default MD dashboard. FD Dashboard V2 is the default FD dashboard. `cosmos_documents` unified registry is live and driving all document lookups on FD and MD dashboards.
+**Production status:** `cosmosmt.com` fully live. MD Dashboard V3 is the default MD dashboard. FD Dashboard V2 is the default FD dashboard. `cosmos_documents` is the sole source of truth for all generated PDFs — Phase 4 complete. `patient_forms` table and all legacy url columns dropped from production DB.
 
-**Dev environment status:** `cosmos-dev` Supabase project fully operational. `cosmos_documents` table applied to dev.
+**Dev environment status:** `cosmos-dev` Supabase project fully operational. Phase 4 schema drop should also be applied to cosmos-dev (not yet done — see open items).
 
 **Root cause learned (Session 52):** Server component `page.tsx` files must NOT call `supabase.auth.getUser()` + `redirect()` — this causes the page to 404 in production. Auth is handled by middleware only. `page.tsx` files must use `supabaseServer` for data fetches directly, same pattern as `dashboard-v2/page.tsx`. This applies to all future server page components.
 
 ---
 
-## Completed This Session (Session 55 — Full)
+## Completed This Session (Session 56)
 
-### cosmos_documents — Unified Document Registry ✅
-- New table replacing scattered url columns and `patient_forms` as source of truth for all generated PDFs
-- `document_scope` enum: `patient` | `visit` | `doctor`
-- Unique constraints enforce one active doc per type per scope — replace-on-regenerate is DB-enforced
-- `generated_by` UUID from JWT (extracted server-side via updated `verify_jwt`)
-- Backfilled all existing docs from `patient_forms`, `patients` url columns, `doctors.w9_url`
-- Applied to production and cosmos-dev — verified clean
+### MIGRATIONS.md — `patients.intake_url` debt entry expanded ✅
+The one-liner in Known Technical Debt was expanded to include column type, failure mode, verification query, and remediation `ALTER TABLE` statement.
 
-**Schema:** Migration 033 — see `MIGRATIONS.md`
+**File:** `MIGRATIONS.md`
 
-### cosmos-api main.py — Full Rebuild ✅
-- `verify_jwt` now returns caller's auth user UUID
-- `registry_upsert()` shared helper: deletes old storage file, upserts registry row
-- All 16 generation routes write to `cosmos_documents`
-- `generate-zip` reads from `cosmos_documents` first, falls back to `patient_forms`
-- Fallback columns kept in sync during transition period
+### cosmos_documents Phase 4 — Legacy retirement complete ✅
 
-**File:** `cosmos-api/main.py`
+**cosmos-dashboard** (`a202451` — 6 files, 643 deletions):
+- `FDDashboardV2.tsx` — `hasAOB` prop added to `<FDPatientSheet>` render; `nf2_url`, `aob_url`, `intake_url` removed from `Patient` interface
+- `FDPatientSheet.tsx` — full Phase 4 rewrite: `hasAOB: boolean` prop added; all `patient.aob_url` / `patient?.aob_url` presence checks replaced with `hasAOB`; `handleGenerate` / `handleRegenerate` key type changed from `'nf2_url' | 'aob_url' | 'intake_url'` to `'nf2' | 'aob' | 'intake'`; `FDVisitsTab.load()` PCE query replaced with `cosmos_documents`; `FDVisitsTab.isReady()` AOB check uses `hasAOB`; `docIssues`, Document Status, Timeline tab all use `hasAOB`; `nf2_url`, `aob_url`, `intake_url` removed from `FullPatient` interface
+- `dv2_page.tsx` — `nf2_url`, `aob_url`, `intake_url` removed from patients select
+- `mdv3_page.tsx` — `nf2_url`, `aob_url`, `intake_url` removed from patients select; `patient_forms` PCE query replaced with `cosmos_documents`
+- `PatientClinicalSheet.tsx` — `nf2_url`, `aob_url`, `intake_url` removed from `Patient` interface
+- `MDDashboardV3.tsx` — `nf2_url`, `aob_url`, `intake_url` removed from `Patient` interface
 
-### FD Dashboard — Phase 3: cosmos_documents reads ✅
-- `dv2_page.tsx`: single `cosmos_documents` query replaces `patient_forms` PCE fetch + `doctors.w9_url` select
-- `FDDashboardV2.tsx`: five derived sets from registry drive all KPI filters, workflow stage, doc status, W9 resolution
-- `FDPatientSheet.tsx` `FDDocumentsTab`: two-step load, supervisor W9 chain resolution, `patientDocMap` state, action bar fixed to viewport bottom
+**cosmos-api** (`main.py`):
+- `update_patient_url()` and `update_doctor_url()` helper functions deleted
+- `url_field` assignments (`nf2_url`, `aob_url`, `intake_url`) removed from `/generate` route
+- `update_patient_url()` call removed from `/generate` route
+- NF-3 `patient_forms` fallback write block removed
+- PCE `patient_visits.pce_url` update and `patient_forms` fallback write block removed
+- Referral dispatch `patient_forms` fallback write block removed
+- W9 `update_doctor_url()` call removed
+- `generate-zip` `patient_forms` fallback read block removed; `nf2_url`, `aob_url` removed from patients select
+- `generate-visit-packet` `patient_forms` fallback read and write blocks removed
+- Module docstring updated to reflect Phase 4 completion
 
-**Files:** `app/dashboard-v2/page.tsx`, `app/dashboard-v2/FDDashboardV2.tsx`, `app/dashboard-v2/components/FDPatientSheet.tsx`
+**Production DB (Migration 034):**
+- `patients.nf2_url` dropped
+- `patients.aob_url` dropped
+- `patients.intake_url` dropped
+- `patient_visits.pce_url` dropped
+- `patient_forms` table dropped
+- `NOTIFY pgrst, 'reload schema'` sent
 
-### W9 Registry — All Providers Complete ✅
-- All 4 supervised providers (Reza NPian, John Orthobot, Brad PAian, Ron Pearlman) backfilled into `cosmos_documents` pointing to Yury Gottesman's W9
-- HANDOVER open item #4 closed
-
-### Documents Tab — Button Order ✅
-- View (primary, cyan) right, secondary action left — applied to all cards: Intake, NF-2, AOB, Signature, Visit Packet
+**Verified:** Documents tab, AOB gate on Visits tab, Visit Packet rebuild, and new document generation all confirmed working exclusively from `cosmos_documents`.
 
 ---
 
@@ -84,33 +88,32 @@ All `cosmos-dashboard` and `cosmos-api` commits confirmed deployed and live as o
 
 8. **Appointment confirmation SMS trigger.** Wire `/notify/sms` into calendar booking save path.
 
-9. **`/md` and `/md-v2` route retirement.** Routes still in codebase. Safe to delete once MD V3 confirmed stable. Files to remove: `app/md-v2/` (entire directory). Keep `app/md/[patientId]/PatientChart.tsx` and all referral/visit editor files — still used by V3 Edit Visit and Start Visit buttons.
+9. **Phase 4 schema drop — cosmos-dev.** `patient_forms` table and url columns not yet dropped from `cosmos-dev`. Apply Migration 034 SQL to `tpwbgqfdznqtjqimxric` when convenient.
 
-10. **`/md-v3` error boundary cleanup.** `app/md-v3/error.tsx` is a debug artifact. Remove when `/md-v3` is stable.
+10. **`/md` and `/md-v2` route retirement.** Routes still in codebase. Safe to delete once MD V3 confirmed stable. Files to remove: `app/md-v2/` (entire directory). Keep `app/md/[patientId]/PatientChart.tsx` and all referral/visit editor files — still used by V3 Edit Visit and Start Visit buttons.
 
-11. **`page.tsx` userRole hardcoded.** `/referrals/page.tsx` passes `userRole="md"` — role is resolved client-side from sessionStorage. Not a bug but should be cleaned up.
+11. **`/md-v3` error boundary cleanup.** `app/md-v3/error.tsx` is a debug artifact. Remove when `/md-v3` is stable.
 
-12. **Duplicate visit records investigation.** Some patients have multiple `patient_visits` rows for the same date.
+12. **`page.tsx` userRole hardcoded.** `/referrals/page.tsx` passes `userRole="md"` — role is resolved client-side from sessionStorage. Not a bug but should be cleaned up.
 
-13. **`000_initial_schema.sql` superseded.** Stale on disk — use pg_dump approach.
+13. **Duplicate visit records investigation.** Some patients have multiple `patient_visits` rows for the same date.
 
-14. **Phase 4 — Retire fallback columns.** Once `cosmos_documents` reads confirmed stable across all surfaces, retire: `patients.nf2_url`, `patients.aob_url`, `patients.intake_url`, `doctors.w9_url`, `patient_visits.pce_url`, and `patient_forms` table. Requires coordinated removal from `main.py`, all dashboard queries, and TypeScript interfaces.
+14. **`000_initial_schema.sql` superseded.** Stale on disk — use pg_dump approach.
 
 ---
 
 ## Known Architecture Gaps (carried forward)
 
-- `patients.intake_url` exists only via manual SQL — not in any migration file.
 - No FK between `referral_timeline.actor_user_id` and `user_profiles.id`.
 - Ghost session timeout is 0 — impersonation sessions never expire.
 - `/referrals/page.tsx` `userRole` hardcoded to `"md"`.
 - `app/md-v3/error.tsx` debug artifact in production.
-- `doctors.w9_url` for supervised providers is a copied value (not a FK) — if supervisor regenerates W9, supervised providers' `cosmos_documents` rows auto-update via `registry_upsert` (new), but `doctors.w9_url` still requires manual re-save or SQL backfill.
-- `patient_forms` table and scattered url columns kept as fallback during `cosmos_documents` transition — not yet retired.
+- `doctors.w9_url` for supervised providers is a copied value (not a FK) — if supervisor regenerates W9, supervised providers' `cosmos_documents` rows auto-update via `registry_upsert`, but `doctors.w9_url` still requires manual re-save or SQL backfill.
+- Phase 4 schema drop not yet applied to cosmos-dev (open item #9).
 
 ---
 
-## cosmos_documents Architecture (Session 55, locked)
+## cosmos_documents Architecture (Session 55–56, locked)
 
 Unified document registry for all generated PDFs. Three scopes:
 
@@ -124,9 +127,7 @@ Unified document registry for all generated PDFs. Three scopes:
 - `UNIQUE (patient_id, form_type)`, `UNIQUE (visit_id, form_type)`, `UNIQUE (doctor_id, form_type)` — one active doc per type per scope
 - `registry_upsert()` in `main.py` handles delete-old-file + upsert atomically
 - Supervisor W9 resolution: `FDDocumentsTab.load()` checks `doctors.supervising_provider_id` and includes supervisor's `doctor_id` in cosmos_documents query
-- Fallback pattern: all generation routes still write to `patient_forms` + url columns; all reads prefer `cosmos_documents` with fallback to legacy
-
-**Transition state:** `patient_forms` and url columns are read+written in parallel. Phase 4 (next dedicated session) retires the legacy tables/columns.
+- **Phase 4 complete:** No fallback reads or writes anywhere. `patient_forms` and all url columns retired from DB, code, and TypeScript interfaces.
 
 ---
 
@@ -308,6 +309,7 @@ Three separate focused forms in `app/md/[patientId]/mri/`:
 - [x] cosmos_documents registry — all doc lookups, KPIs, W9 resolution (Session 55)
 - [x] Action bar fixed to viewport bottom (Session 55)
 - [x] View/Regen button order — View primary right (Session 55)
+- [x] Phase 4 — legacy url columns and patient_forms retired (Session 56)
 - [ ] Appointment confirmation SMS — auto-trigger on booking
 - [ ] Patient phone required at intake
 - [ ] Notes tab persistence
@@ -323,6 +325,7 @@ Three separate focused forms in `app/md/[patientId]/mri/`:
 - [x] MD Dashboard V3 — cosmosmt.com DNS live (Session 53)
 - [x] MD Dashboard V3 — phone formatting in patient sheet (Session 54)
 - [x] MD Dashboard V3 — cosmos_documents W9 + doc resolution (Session 55)
+- [x] MD Dashboard V3 — Phase 4 legacy columns retired (Session 56)
 - [ ] MD Dashboard V3 — SOAP structured pain/exam fields (new schema required)
 - [ ] MD Dashboard V3 — clinical timeline
 - [ ] `/md` and `/md-v2` route retirement (code cleanup)
@@ -337,7 +340,7 @@ Three separate focused forms in `app/md/[patientId]/mri/`:
 - [ ] Render upgrade to Standard plan — pre-go-live blocker
 - [ ] Twilio SMS activation
 - [ ] 000_initial_schema.sql removal/replacement
-- [ ] Phase 4 — retire patient_forms + url columns (cosmos_documents transition complete)
+- [x] Phase 4 — retire patient_forms + url columns (Session 56) ✅
 
 ### Stage 7 — Compliance
 - [ ] HIPAA compliance review

@@ -1,3 +1,29 @@
+## Session 56 — Schema Changes (July 23, 2026)
+
+### Migration 034 — Phase 4: Retire legacy url columns and patient_forms table
+
+All document reads and writes now flow exclusively through `cosmos_documents`. Legacy columns and table dropped from production after confirming all surfaces work from the registry.
+
+```sql
+-- Drop scattered url columns from patients
+ALTER TABLE public.patients DROP COLUMN IF EXISTS nf2_url;
+ALTER TABLE public.patients DROP COLUMN IF EXISTS aob_url;
+ALTER TABLE public.patients DROP COLUMN IF EXISTS intake_url;
+
+-- Drop pce_url from patient_visits
+ALTER TABLE public.patient_visits DROP COLUMN IF EXISTS pce_url;
+
+-- Drop patient_forms table (all rows backfilled to cosmos_documents in Session 55)
+DROP TABLE IF EXISTS public.patient_forms;
+
+NOTIFY pgrst, 'reload schema';
+```
+
+Applied to: production (`ttudxnzmybcwrtqlbtta`).
+**Pending:** cosmos-dev (`tpwbgqfdznqtjqimxric`) — apply when convenient.
+
+---
+
 ## Session 55 — Schema & Data Changes (July 22, 2026)
 
 ### Migration 033 — cosmos_documents table
@@ -317,13 +343,20 @@ Applied to: production and cosmos-dev.
 
 ---
 
-## Known Technical Debt (updated Session 55)
+## Known Technical Debt (updated Session 56)
 
 - `000_initial_schema.sql` on disk is stale — superseded by pg_dump method (Session 48). Should be removed or replaced with a pointer to the pg_dump approach.
-- `patients.intake_url` column exists in production via manual SQL — not captured in any migration file. Schema drift risk on rebuild (pg_dump will capture it going forward).
 - PostgREST on free-tier Supabase does not reliably pick up FK constraints — use flat selects + client-side joins (Cosmos standard pattern; `app/reports/referrals/page.tsx` is the reference implementation).
 - Production DB password was reset Session 48 (removed `@` for pg_dump compatibility). No app code uses this password — only direct DB connections.
-- `patient_forms` table and scattered url columns (`patients.nf2_url`, `patients.aob_url`, `patients.intake_url`, `doctors.w9_url`, `patient_visits.pce_url`) are kept as fallback during `cosmos_documents` transition. Scheduled for retirement in a future session once all reads confirmed working from registry.
+- Migration 034 (Phase 4 schema drop) applied to production only. Apply to cosmos-dev when convenient:
+  ```sql
+  ALTER TABLE public.patients DROP COLUMN IF EXISTS nf2_url;
+  ALTER TABLE public.patients DROP COLUMN IF EXISTS aob_url;
+  ALTER TABLE public.patients DROP COLUMN IF EXISTS intake_url;
+  ALTER TABLE public.patient_visits DROP COLUMN IF EXISTS pce_url;
+  DROP TABLE IF EXISTS public.patient_forms;
+  NOTIFY pgrst, 'reload schema';
+  ```
 
 ---
 

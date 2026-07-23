@@ -1,3 +1,33 @@
+## 2026-07-23 — Session 56
+
+### MIGRATIONS.md — `patients.intake_url` debt entry expanded ✅
+
+Expanded the one-liner in Known Technical Debt to include column type (TEXT, nullable), failure mode on environment rebuild, verification query, and remediation `ALTER TABLE` statement. Documentation-only change.
+
+### cosmos_documents Phase 4 — Full Legacy Retirement ✅
+
+`cosmos_documents` is now the sole source of truth for all generated PDFs. All fallback writes, fallback reads, legacy url columns, and `patient_forms` table retired from code and production database.
+
+**cosmos-dashboard** (`a202451` — 6 files, 643 deletions):
+
+`FDDashboardV2.tsx`: `hasAOB` prop added to `<FDPatientSheet>` render; `nf2_url`, `aob_url`, `intake_url` removed from `Patient` interface.
+
+`FDPatientSheet.tsx`: `hasAOB: boolean` prop added; all `patient.aob_url` presence checks replaced with `hasAOB` throughout (docIssues, Document Status, Timeline, Visits tab `isReady()`); `handleGenerate`/`handleRegenerate` key type changed from url-column names to form type strings; `FDVisitsTab.load()` PCE query reads exclusively from `cosmos_documents`; `nf2_url`, `aob_url`, `intake_url` removed from `FullPatient` interface.
+
+`dv2_page.tsx`: `nf2_url`, `aob_url`, `intake_url` removed from patients select.
+
+`mdv3_page.tsx`: `nf2_url`, `aob_url`, `intake_url` removed from patients select; `patient_forms` PCE query replaced with `cosmos_documents`.
+
+`PatientClinicalSheet.tsx`, `MDDashboardV3.tsx`: `nf2_url`, `aob_url`, `intake_url` removed from `Patient` interface.
+
+**cosmos-api** (`main.py`): `update_patient_url()` and `update_doctor_url()` helpers deleted; all `url_field` assignments removed; NF-3, PCE, referral, and visit-packet `patient_forms` fallback writes removed; `pce_url` column update removed; W9 `update_doctor_url()` call removed; `generate-zip` and `generate-visit-packet` `patient_forms` fallback reads removed; `nf2_url`/`aob_url` removed from `generate-zip` patients select.
+
+**Production DB — Migration 034:** `patients.nf2_url`, `patients.aob_url`, `patients.intake_url`, `patient_visits.pce_url` columns dropped; `patient_forms` table dropped; PostgREST schema reloaded.
+
+**Verified:** Documents tab, AOB gate, Visits tab `isReady()`, Visit Packet rebuild, and new document generation all confirmed working exclusively from `cosmos_documents`.
+
+---
+
 ## 2026-07-22 — Session 55
 
 ### cosmos_documents — Unified Document Registry ✅
