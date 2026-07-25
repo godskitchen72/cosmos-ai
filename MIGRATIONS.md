@@ -1,3 +1,33 @@
+## Session 57 — Schema Changes (July 23, 2026)
+
+### Migration 035 — doctors.is_default column
+
+Adds `is_default` boolean to `doctors` table. One doctor marked as default for new patient intake pre-population. Applied to production only.
+
+```sql
+ALTER TABLE doctors ADD COLUMN IF NOT EXISTS is_default boolean DEFAULT false;
+UPDATE doctors SET is_default = true WHERE doctor_id = 'ccfeb4b0-e61e-48f0-b4fa-bd15c155f6d0';
+```
+
+Applied to: production (`ttudxnzmybcwrtqlbtta`).
+**Pending:** cosmos-dev (`tpwbgqfdznqtjqimxric`) — apply when convenient.
+
+### Data Backfill — W9 rows into cosmos_documents
+
+All existing W9 files from `doctors.w9_url` backfilled into `cosmos_documents` for all 7 doctors. No schema change — data migration only.
+
+```sql
+INSERT INTO cosmos_documents (patient_id, visit_id, doctor_id, document_scope, form_type, filename, status)
+SELECT NULL, NULL, doctor_id, 'doctor', 'W9', w9_url, 'generated'
+FROM doctors
+WHERE w9_url IS NOT NULL
+ON CONFLICT DO NOTHING;
+```
+
+Applied to: production (`ttudxnzmybcwrtqlbtta`).
+
+---
+
 ## Session 56 — Schema Changes (July 23, 2026)
 
 ### Migration 034 — Phase 4: Retire legacy url columns and patient_forms table

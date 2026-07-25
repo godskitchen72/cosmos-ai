@@ -1,3 +1,97 @@
+## 2026-07-23 — Session 57
+
+### MD Dashboard V3 — V3 Visit Page at /md-v3/visit/[patientId] ✅
+
+New V3-styled visit page replacing old `/md/[patientId]` for New Visit and Edit Visit flows. `VisitPageV3.tsx` renders `VisitTab`, `VisitHistoryTab`, and `PatientInfoTab` with V3 dark palette header, treatment window bar, and tab bar. Back button uses `router.back()`. On return, dashboard reads `?patient=` URL param and auto-reopens patient sheet. `MDDashboardV3` seeds `selectedPatient` from `initialPatient` prop passed from `page.tsx` searchParams.
+
+**Files:** `app/md-v3/visit/[patientId]/page.tsx` (new), `app/md-v3/visit/[patientId]/VisitPageV3.tsx` (new), `app/md-v3/page.tsx`, `app/md-v3/MDDashboardV3.tsx`, `app/md-v3/components/PatientClinicalSheet.tsx`
+
+### MD Dashboard V3 — Referral Workspace Overlay + Visit Picker ✅
+
+`ReferralWorkspace` now renders as a full-screen overlay on `/md-v3` — no page navigation. Android back button closes overlay cleanly. Visit picker bottom sheet appears first when patient has multiple visits, allowing MD to select which visit to attach referrals to. Single-visit patients skip the picker. `ReferralWorkspace` gains optional `onDone` prop — closes overlay when provided, falls back to `router.push` in standalone route mode.
+
+**Files:** `app/md-v3/MDDashboardV3.tsx`, `app/md-v3/components/PatientClinicalSheet.tsx`, `app/md/[patientId]/referrals/ReferralWorkspace.tsx`
+
+### MD Dashboard V3 — Workflow Badges + 6 KPI Cards ✅
+
+New `Status` column in MD patient table with computed multi-badge display per patient. Badges: `Appt Today` (cyan), `Note Missing` (red), `Referrals Pending` (purple), `Results Ready` (green), `Biller Flag` (orange), `Discharge Pending` (amber), `No Visit Yet` (grey). KPI card grid expanded from 3 to 6: Today, Waiting, Urgent, Referrals, Discharge, All. All tappable and filter the patient table. `workflowBadges` array computed in `enriched` useMemo from existing patient/visit/referral/flag data — no new DB queries.
+
+**Files:** `app/md-v3/MDDashboardV3.tsx`
+
+### FD Dashboard — Discharge Pending Workflow Stage ✅
+
+New `Discharge Pending` stage added to `getWorkflowStage()`. Triggers when latest `patient_visits.work_status === 'Discharge Pending'`. Displayed as amber badge. MD→FD workflow sync: when MD saves a visit with Discharge Pending work status, FD stage updates automatically on next page load. `Visit` interface updated with `work_status?: string | null`.
+
+**Files:** `app/dashboard-v2/FDDashboardV2.tsx`
+
+### FD Dashboard — todayStr() Eastern Timezone Fix ✅
+
+`todayStr()` previously used `new Date().toISOString().split('T')[0]` which returns UTC date. Vercel server runs UTC — after ~8pm Eastern, this returned tomorrow's date causing appointment stages to show incorrectly. Fixed to use `America/New_York` timezone via `toLocaleString`. Appointment comparison changed from `> today` to `>= today` to include same-day appointments in `Upcoming` stage.
+
+**Files:** `app/dashboard-v2/FDDashboardV2.tsx`
+
+### FD Dashboard — KPI Cards 3-Column Grid ✅
+
+KPI card grid changed from single-column (`repeat(auto-fill, minmax(200px, 1fr))`) to 3-column (`repeat(3, 1fr)`). Card padding, icon size, count font, label font, and description font tightened for mobile readability.
+
+**Files:** `app/dashboard-v2/FDDashboardV2.tsx`
+
+### MD/Doctor Dashboard Selector Routes to V3 ✅
+
+`app/page.tsx` dashboard selector — both `path` entries for "MD / Doctor" changed from `/md` to `/md-v3`. Old `/md` route no longer reachable from the selector.
+
+**File:** `app/page.tsx`
+
+### PatientClinicalSheet — UI Overhaul ✅
+
+- Overview tab: Open Referrals section removed. Field labels, values, pain chips, section headers, accident description all ~2x larger font. Latest Visit date cyan. ICD-10/CPT codes fixed — were blank due to string/array type mismatch; now correctly split comma-delimited string from DB.
+- Visits tab: Compact single-line cards (label · date · BILLED · Edit Visit →). Oldest-first order (Initial Visit at top, Follow-up 1, 2, 3 ascending). Date text cyan. Edit Visit routes to `/md-v3/visit/[patientId]?visit_id=`.
+
+**File:** `app/md-v3/components/PatientClinicalSheet.tsx`
+
+### FD Dashboard — Re-sign Button Fixed ✅
+
+Re-sign button previously called `supabase.storage.createSignedUrl()` to view existing signature (same as View button). Fixed to call `setShowSigPad(true)` to open the signature capture modal. Button now styled in amber to distinguish from View (cyan).
+
+**File:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### FD Dashboard — router.refresh() After Document Regen ✅
+
+`handleGenerate` and `handleRegenerate` success paths now call `router.refresh()` after `await load()`. Forces Next.js server component re-run, updating `cosmosDocuments` prop including freshly written rows. AOB/NF-2 warnings in patient sheet header clear automatically without manual page reload.
+
+**File:** `app/dashboard-v2/components/FDPatientSheet.tsx`
+
+### Patient Intake — Doctor Required + Default (Migration 035) ✅
+
+Doctor field made required at intake. Validation added to personal tab. `doctors.is_default` boolean column added to doctors table (Migration 035). Yury Gottesman set as default (`is_default = true`). `PatientFormV2.tsx` fetches `is_default` on load and pre-populates doctor field for new patients only (edit mode unaffected).
+
+**Files:** `app/components/PatientFormV2.tsx`
+**DB:** Migration 035
+
+### API — W9 Billing Entity Check Fixed ✅
+
+`/generate-w9` endpoint `is_billing_entity` check was incorrectly blocking PC corp doctors. Logic changed from `not supervising_id and (bool(pc_corp_name) or tax_class == "individual")` to `bool(pc_corp_name) or (not supervising_id and tax_class == "individual")`. PC corp presence now sufficient to qualify as billing entity regardless of supervision status.
+
+**File:** `cosmos-api/main.py`
+
+### W9 cosmos_documents Backfill + Wipe Route Cleanup ✅
+
+W9 rows backfilled from `doctors.w9_url` into `cosmos_documents` via SQL INSERT SELECT for all 7 doctors. `app/api/wipe-patients/route.ts` updated to truncate `cosmos_documents` instead of dropped `patient_forms` table. `app/dev/page.tsx` `patient_forms` insert block removed.
+
+**Files:** `app/api/wipe-patients/route.ts`, `app/dev/page.tsx`
+
+### DEV Artifacts — PCE Fill Button Removed ✅
+
+DEV fill-all PCE fields button removed from `VisitTab.tsx`. Dev Tools card in Admin retained (superadmin-only tool, intentional).
+
+**File:** `app/md/[patientId]/components/VisitTab.tsx`
+
+### Back Button Policy Enforced Platform-Wide ✅
+
+All back/← buttons on sub-pages and modals now use `router.back()` or `onDone`/`onBack` callbacks. `ReferralWorkspace` back buttons fixed. Dashboard selector back button (`router.push('/md-v3?patient=...')`) uses forward push to restore sheet state — not backward navigation.
+
+---
+
 ## 2026-07-23 — Session 56
 
 ### MIGRATIONS.md — `patients.intake_url` debt entry expanded ✅
